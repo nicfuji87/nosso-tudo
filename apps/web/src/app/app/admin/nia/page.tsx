@@ -1,7 +1,12 @@
 import type { Metadata } from "next";
 import { ShieldAlert } from "lucide-react";
 import { isPlatformAdmin } from "@/lib/auth";
-import { getNiaConfigCompleta, getOpcoesAgente, getUsoNia } from "@/lib/nia/admin";
+import {
+  getInsightsNia,
+  getNiaConfigCompleta,
+  getOpcoesAgente,
+  getUsoNia,
+} from "@/lib/nia/admin";
 import { NiaConsoleForm } from "@/components/admin/nia-console";
 import { formatNumber } from "@/lib/format";
 
@@ -21,8 +26,9 @@ export default async function AdminNiaPage() {
     );
   }
 
-  const [uso, config, opcoes] = await Promise.all([
+  const [uso, insights, config, opcoes] = await Promise.all([
     getUsoNia(30),
+    getInsightsNia(30),
     getNiaConfigCompleta(),
     getOpcoesAgente(),
   ]);
@@ -77,6 +83,30 @@ export default async function AdminNiaPage() {
           Custos em USD a partir de <code className="font-mono">nia_precos</code> (ajuste os preços
           conforme o provedor).
         </p>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-h4 font-semibold">Análise conversacional (30d)</h2>
+        <div className="grid grid-cols-3 gap-3">
+          <Metric label="Conversas" value={formatNumber(insights.conversas)} />
+          <Metric label="👍 úteis" value={formatNumber(insights.feedbackPositivo)} />
+          <Metric label="👎 ruins" value={formatNumber(insights.feedbackNegativo)} />
+        </div>
+        {insights.topFerramentas.length > 0 && (
+          <div className="rounded-2xl border border-border bg-card p-4">
+            <p className="mb-3 text-caption uppercase tracking-wide text-muted-foreground">
+              Ferramentas mais usadas
+            </p>
+            <div className="space-y-2">
+              {insights.topFerramentas.map((f) => (
+                <div key={f.nome} className="flex items-center justify-between text-body-sm">
+                  <code className="font-mono">{f.nome}</code>
+                  <span className="font-mono tabular-nums text-muted-foreground">{f.usos}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       <NiaConsoleForm initial={config} opcoes={opcoes} canEdit={admin} />

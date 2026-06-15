@@ -165,6 +165,56 @@ export async function getOpcoesAgente(): Promise<OpcoesAgente> {
   return { provedores: provedoresDisponiveis(), modelosPorProvedor };
 }
 
+export interface InsightsNia {
+  conversas: number;
+  feedbackPositivo: number;
+  feedbackNegativo: number;
+  topFerramentas: { nome: string; usos: number }[];
+}
+
+/** Painel de qualidade: volume, feedback 👍/👎 e ferramentas mais usadas. */
+export async function getInsightsNia(periodoDias = 30): Promise<InsightsNia> {
+  const admin = createAdminClient();
+  const desde = new Date(Date.now() - periodoDias * 86_400_000).toISOString();
+
+  const { count: conversas } = await admin
+    .from("conversas_ia")
+    .select("*", { count: "exact", head: true })
+    .gte("created_at", desde);
+
+  const { data: fb } = await admin.from("nia_feedback").select("voto").gte("criado_em", desde);
+  let pos = 0;
+  let neg = 0;
+  for (const r of (fb as { voto: string }[] | null) ?? []) {
+    if (r.voto === "positivo") pos++;
+    else neg++;
+  }
+
+  const { data: msgs } = await admin
+    .from("mensagens_ia")
+    .select("ferramentas_usadas")
+    .eq("papel", "assistant")
+    .gte("created_at", desde);
+  const cont: Record<string, number> = {};
+  for (const m of (msgs as { ferramentas_usadas: unknown }[] | null) ?? []) {
+    const arr = Array.isArray(m.ferramentas_usadas) ? m.ferramentas_usadas : [];
+    for (const f of arr) {
+      if (typeof f === "string") cont[f] = (cont[f] ?? 0) + 1;
+    }
+  }
+  const topFerramentas = Object.entries(cont)
+    .map(([nome, usos]) => ({ nome, usos }))
+    .sort((a, b) => b.usos - a.usos)
+    .slice(0, 8);
+
+  return {
+    conversas: conversas ?? 0,
+    feedbackPositivo: pos,
+    feedbackNegativo: neg,
+    topFerramentas,
+  };
+}
+
 /** Salva uma NOVA versão da config global (versionado; rollback futuro). */
 export async function saveNiaConfig(
   input: { systemPrompt: string; provedor: string; modelo: string; temperature: number; maxTokens: number },

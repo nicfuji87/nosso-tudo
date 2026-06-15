@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Loader2, Send, Sparkles, X } from "lucide-react";
+import { Check, Loader2, Send, Sparkles, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatBRL } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { confirmarTransacao, rejeitarAcao } from "@/app/app/nia/actions";
+import { confirmarTransacao, rejeitarAcao, votarMensagem } from "@/app/app/nia/actions";
 import {
   LABEL_TIPO_TRANSACAO,
   type TipoTransacao,
@@ -22,6 +22,7 @@ interface Msg {
   autor: "user" | "nia";
   texto: string;
   widgets: NiaWidget[];
+  mensagemId?: string | null;
 }
 
 function novoId(): string {
@@ -75,6 +76,7 @@ export function NiaChat({ nome }: { nome: string }) {
             autor: "nia",
             texto: data.texto || "Pronto.",
             widgets: data.widgets ?? [],
+            mensagemId: data.mensagemId ?? null,
           },
         ]);
       }
@@ -115,6 +117,7 @@ export function NiaChat({ nome }: { nome: string }) {
               {m.widgets.map((w, i) => (
                 <WidgetView key={i} widget={w} />
               ))}
+              {m.autor === "nia" && m.mensagemId && <Feedback mensagemId={m.mensagemId} />}
             </div>
           </div>
         ))}
@@ -144,6 +147,40 @@ export function NiaChat({ nome }: { nome: string }) {
           <Send className="size-4" />
         </Button>
       </div>
+    </div>
+  );
+}
+
+function Feedback({ mensagemId }: { mensagemId: string }) {
+  const [voto, setVoto] = useState<"positivo" | "negativo" | null>(null);
+  async function vote(v: "positivo" | "negativo") {
+    setVoto(v);
+    await votarMensagem(mensagemId, v);
+  }
+  return (
+    <div className="flex items-center gap-1 pt-0.5">
+      <button
+        type="button"
+        onClick={() => vote("positivo")}
+        aria-label="Resposta útil"
+        className={cn(
+          "rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary",
+          voto === "positivo" && "text-accent",
+        )}
+      >
+        <ThumbsUp className="size-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={() => vote("negativo")}
+        aria-label="Resposta ruim"
+        className={cn(
+          "rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary",
+          voto === "negativo" && "text-destructive",
+        )}
+      >
+        <ThumbsDown className="size-3.5" />
+      </button>
     </div>
   );
 }

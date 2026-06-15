@@ -23,6 +23,7 @@ export interface NiaProviderInput {
 export interface NiaProviderResult {
   texto: string;
   widgets: NiaWidget[];
+  ferramentas: string[];
   tokensInput: number;
   tokensOutput: number;
 }
@@ -57,6 +58,7 @@ interface AnthropicMessage {
 const anthropicProvider: NiaProvider = async (input) => {
   const messages: AnthropicMessage[] = [{ role: "user", content: input.userMessage }];
   const widgets: NiaWidget[] = [];
+  const ferramentas: string[] = [];
   let tokensInput = 0;
   let tokensOutput = 0;
   let textoFinal = "";
@@ -107,6 +109,7 @@ const anthropicProvider: NiaProvider = async (input) => {
     const toolResults: unknown[] = [];
     for (const call of toolBlocks) {
       const tool = getTool(call.name);
+      ferramentas.push(call.name);
       let conteudo: string;
       if (!tool) {
         conteudo = `Ferramenta desconhecida: ${call.name}`;
@@ -124,7 +127,7 @@ const anthropicProvider: NiaProvider = async (input) => {
     messages.push({ role: "user", content: toolResults });
   }
 
-  return { texto: textoFinal, widgets, tokensInput, tokensOutput };
+  return { texto: textoFinal, widgets, ferramentas, tokensInput, tokensOutput };
 };
 
 /* ------------------------------ Registro ------------------------------ */

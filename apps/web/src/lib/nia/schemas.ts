@@ -75,6 +75,7 @@ export type NiaWidget = WidgetResumoPeriodo | WidgetConfirmarTransacao;
 /** Mensagem da Nia devolvida ao cliente. */
 export interface NiaResposta {
   conversaId: string;
+  mensagemId: string | null;
   texto: string;
   widgets: NiaWidget[];
 }

@@ -117,3 +117,19 @@ export async function atualizarAcao(acaoId: string, input: AtualizarAcaoInput): 
     })
     .eq("id", acaoId);
 }
+
+/** Registra/atualiza o voto 👍/👎 de uma mensagem da Nia (1 por usuário). */
+export async function votar(
+  mensagemId: string,
+  workspaceId: string,
+  profileId: string,
+  voto: "positivo" | "negativo",
+): Promise<void> {
+  const supabase = createClient();
+  await supabase
+    .from("nia_feedback")
+    .upsert(
+      { mensagem_id: mensagemId, workspace_id: workspaceId, profile_id: profileId, voto },
+      { onConflict: "mensagem_id,profile_id" },
+    );
+}

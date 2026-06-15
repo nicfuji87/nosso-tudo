@@ -1,10 +1,11 @@
 "use server";
 
+import { resolveWorkspaceId } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { criarTransacao } from "@/app/app/transacoes/actions";
 import { listCategorias } from "@/lib/db/queries";
 import { lancarTransacaoArgs } from "@/lib/nia/schemas";
-import { atualizarAcao } from "@/lib/nia/store";
+import { atualizarAcao, votar } from "@/lib/nia/store";
 import { normalizarTexto } from "@/lib/normalize";
 
 interface AcaoRow {
@@ -59,5 +60,17 @@ export async function confirmarTransacao(acaoId: string): Promise<{ error?: stri
 /** Descarta uma proposta da Nia. */
 export async function rejeitarAcao(acaoId: string): Promise<{ ok: boolean }> {
   await atualizarAcao(acaoId, { status: "rejeitada" });
+  return { ok: true };
+}
+
+/** Voto 👍/👎 numa mensagem da Nia (alimenta a análise conversacional). */
+export async function votarMensagem(
+  mensagemId: string,
+  voto: "positivo" | "negativo",
+): Promise<{ ok: boolean }> {
+  if (voto !== "positivo" && voto !== "negativo") return { ok: false };
+  const wk = await resolveWorkspaceId();
+  if ("error" in wk) return { ok: false };
+  await votar(mensagemId, wk.workspaceId, wk.userId, voto);
   return { ok: true };
 }
