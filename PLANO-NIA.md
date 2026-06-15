@@ -177,7 +177,7 @@ Fatia vertical que exercita toda a arquitetura (RLS, ferramenta tipada, widget, 
 **Backend**
 - `supabase/migrations/0007_nia_core.sql` — estende `mensagens_ia`; cria `nia_acoes`, `nia_contexto`, `nia_config`, `nia_precos`; views `v_nia_uso_usuario` / `v_nia_uso_workspace`; seeds (config global + preços placeholder). **Ainda não aplicada ao banco** (revisar antes).
 - `lib/nia/schemas.ts` — Zod das ferramentas + catálogo de widgets (compartilhado com o cliente).
-- `lib/nia/tools.ts` — `consultar_gastos` (`auto`), `lancar_transacao`, `criar_pessoa` (`confirmar_estrutural`), `criar_compromisso` (caso Bruna).
+- `lib/nia/tools.ts` — `consultar_gastos` (`auto`), `lancar_transacao`, `criar_pessoa` (`confirmar_estrutural`), `criar_compromisso` (caso Bruna), `lembrar_fato` (memória da família).
 - `lib/nia/admin.ts` — leituras do console (uso por usuário, insights, config) + `saveNiaConfig` versionado.
 - `lib/nia/store.ts` — persistência sob RLS (conversa/mensagem/`nia_acoes`).
 - `lib/nia/config.ts` — lê `nia_config`/secret/preço via service_role; calcula custo.
@@ -198,7 +198,7 @@ Fatia vertical que exercita toda a arquitetura (RLS, ferramenta tipada, widget, 
 
 **Para ligar (quando quiser testar):** em `/app/admin/integracoes` → aba Nia → colar a Anthropic API key → acessar `/app/nia` (o fundador, como platform admin, acessa mesmo no Free).
 
-**Ainda não feito (próximas fatias):** streaming token-a-token; widget `resolver_match` (zona cinza inline, hoje só no WhatsApp/Inbox); a Nia popular o `nia_contexto` sozinha (hoje só lê).
+**Ainda não feito (próximas fatias):** streaming token-a-token (reescreve o transporte — melhor verificar com chave ao vivo); widget `resolver_match` (zona cinza inline — hoje a resolução fina de estabelecimento só roda no WhatsApp/Inbox).
 
 ## 9. Faseamento (encaixa após a Fase 3 do plano principal)
 

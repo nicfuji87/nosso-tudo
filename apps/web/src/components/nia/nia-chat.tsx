@@ -7,6 +7,7 @@ import { formatBRL } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
   confirmarCompromisso,
+  confirmarFato,
   confirmarPessoa,
   confirmarTransacao,
   desfazerTransacao,
@@ -229,6 +230,16 @@ function WidgetView({ widget }: { widget: NiaWidget }) {
           confirmar={() => confirmarCompromisso(widget.acaoId)}
           descartar={() => rejeitarAcao(widget.acaoId)}
           labelFeito="Compromisso criado"
+        />
+      );
+    case "lembrar_fato":
+      return (
+        <AcaoCard
+          titulo="Guardar na memória da família?"
+          subtitulo={widget.fato}
+          confirmar={() => confirmarFato(widget.acaoId)}
+          descartar={() => rejeitarAcao(widget.acaoId)}
+          labelFeito="Guardado"
         />
       );
     default:

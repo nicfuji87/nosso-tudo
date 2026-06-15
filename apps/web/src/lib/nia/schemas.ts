@@ -56,6 +56,11 @@ export const criarCompromissoArgs = z.object({
 });
 export type CriarCompromissoArgs = z.infer<typeof criarCompromissoArgs>;
 
+export const lembrarFatoArgs = z.object({
+  fato: z.string().trim().min(1).max(300),
+});
+export type LembrarFatoArgs = z.infer<typeof lembrarFatoArgs>;
+
 /* ------------------------------------------------------------------ */
 /* Catálogo de widgets — o que o cliente renderiza (P4: catálogo fixo) */
 /* ------------------------------------------------------------------ */
@@ -96,11 +101,18 @@ export interface WidgetCriarCompromisso {
   dataEstimada: string | null;
 }
 
+export interface WidgetLembrarFato {
+  tipo: "lembrar_fato";
+  acaoId: string;
+  fato: string;
+}
+
 export type NiaWidget =
   | WidgetResumoPeriodo
   | WidgetConfirmarTransacao
   | WidgetCriarPessoa
-  | WidgetCriarCompromisso;
+  | WidgetCriarCompromisso
+  | WidgetLembrarFato;
 
 /* ------------------------------------------------------------------ */
 /* Envelopes de transporte                                            */

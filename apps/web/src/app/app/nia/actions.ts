@@ -5,7 +5,12 @@ import { createClient } from "@/lib/supabase/server";
 import { criarTransacao, excluirTransacao } from "@/app/app/transacoes/actions";
 import { criarEntidade } from "@/app/app/cadastros/actions";
 import { listCategorias } from "@/lib/db/queries";
-import { criarCompromissoArgs, criarPessoaArgs, lancarTransacaoArgs } from "@/lib/nia/schemas";
+import {
+  criarCompromissoArgs,
+  criarPessoaArgs,
+  lancarTransacaoArgs,
+  lembrarFatoArgs,
+} from "@/lib/nia/schemas";
 import { atualizarAcao, votar } from "@/lib/nia/store";
 import { normalizarTexto } from "@/lib/normalize";
 
@@ -155,6 +160,39 @@ export async function desfazerTransacao(acaoId: string): Promise<{ error?: strin
   if (res.error) return { error: res.error };
 
   await atualizarAcao(acaoId, { status: "desfeita" });
+  return { ok: true };
+}
+
+/** Guarda um fato na memória da família (nia_contexto.fatos). */
+export async function confirmarFato(acaoId: string): Promise<{ error?: string; ok?: boolean }> {
+  const acao = await carregarAcao(acaoId);
+  if (!acao) return { error: "Ação não encontrada." };
+  if (acao.status !== "proposta") return { error: "Essa ação já foi processada." };
+  if (acao.ferramenta !== "lembrar_fato") return { error: "Ação não suportada." };
+
+  const parsed = lembrarFatoArgs.safeParse(acao.payload_proposto);
+  if (!parsed.success) return { error: "Dados da proposta inválidos." };
+
+  const supabase = createClient();
+  const { data: ctxRow } = await supabase
+    .from("nia_contexto")
+    .select("fatos")
+    .eq("workspace_id", acao.workspace_id)
+    .maybeSingle();
+  const atuais = Array.isArray((ctxRow as { fatos: unknown } | null)?.fatos)
+    ? ((ctxRow as { fatos: string[] }).fatos as string[])
+    : [];
+  const fatos = [...atuais, parsed.data.fato].slice(-50);
+
+  const { error } = await supabase
+    .from("nia_contexto")
+    .upsert(
+      { workspace_id: acao.workspace_id, fatos, atualizado_em: new Date().toISOString() },
+      { onConflict: "workspace_id" },
+    );
+  if (error) return { error: "Não foi possível salvar na memória." };
+
+  await atualizarAcao(acaoId, { status: "executada", resultado: { ok: true } });
   return { ok: true };
 }
 

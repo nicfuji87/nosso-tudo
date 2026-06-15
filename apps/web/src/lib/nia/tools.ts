@@ -7,6 +7,7 @@ import {
   criarCompromissoArgs,
   criarPessoaArgs,
   lancarTransacaoArgs,
+  lembrarFatoArgs,
   type NiaWidget,
   type NivelConfirmacao,
 } from "@/lib/nia/schemas";
@@ -208,11 +209,40 @@ const criarCompromisso: NiaTool = {
   },
 };
 
+const lembrarFato: NiaTool = {
+  nome: "lembrar_fato",
+  descricao:
+    "Propõe guardar um fato durável sobre a rotina/preferências da família na memória da Nia (ex.: 'a Bruna compra roupas em grupos de compra coletiva'). NÃO use para transações pontuais. Gera um cartão de confirmação.",
+  nivel: "confirmar",
+  inputSchema: {
+    type: "object",
+    properties: {
+      fato: { type: "string", description: "O fato a lembrar, curto e específico." },
+    },
+    required: ["fato"],
+  },
+  async executar(args, ctx) {
+    const d = valida(lembrarFatoArgs, args);
+    const acaoId = await registrarAcao({
+      workspaceId: ctx.workspaceId,
+      profileId: ctx.profileId,
+      conversaId: ctx.conversaId,
+      ferramenta: "lembrar_fato",
+      nivel: "confirmar",
+      payloadProposto: d,
+    });
+    if (!acaoId) throw new Error("Não consegui preparar a memória.");
+    const widget: NiaWidget = { tipo: "lembrar_fato", acaoId, fato: d.fato };
+    return { texto: `Quer que eu lembre: "${d.fato}"?`, widget };
+  },
+};
+
 export const NIA_TOOLS: NiaTool[] = [
   consultarGastos,
   lancarTransacao,
   criarPessoa,
   criarCompromisso,
+  lembrarFato,
 ];
 
 export function getTool(nome: string): NiaTool | undefined {
