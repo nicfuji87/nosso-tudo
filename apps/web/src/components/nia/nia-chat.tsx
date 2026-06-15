@@ -6,7 +6,10 @@ import { Button } from "@/components/ui/button";
 import { formatBRL } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
+  confirmarCartao,
+  confirmarCategoria,
   confirmarCompromisso,
+  confirmarConta,
   confirmarFato,
   confirmarPessoa,
   confirmarTransacao,
@@ -14,7 +17,7 @@ import {
   rejeitarAcao,
   votarMensagem,
 } from "@/app/app/nia/actions";
-import { LABEL_TIPO_ENTIDADE, LABEL_TIPO_TRANSACAO } from "@/lib/types/db";
+import { LABEL_COMPORTAMENTO, LABEL_TIPO_ENTIDADE, LABEL_TIPO_TRANSACAO } from "@/lib/types/db";
 import type { NiaResposta, NiaWidget, WidgetResumoPeriodo } from "@/lib/nia/schemas";
 
 interface Msg {
@@ -240,6 +243,38 @@ function WidgetView({ widget }: { widget: NiaWidget }) {
           confirmar={() => confirmarFato(widget.acaoId)}
           descartar={() => rejeitarAcao(widget.acaoId)}
           labelFeito="Guardado"
+        />
+      );
+    case "criar_categoria":
+      return (
+        <AcaoCard
+          titulo={widget.nome}
+          subtitulo={`Categoria ${LABEL_COMPORTAMENTO[widget.comportamento].toLowerCase()}`}
+          confirmar={() => confirmarCategoria(widget.acaoId)}
+          descartar={() => rejeitarAcao(widget.acaoId)}
+          labelFeito="Categoria criada"
+        />
+      );
+    case "criar_conta":
+      return (
+        <AcaoCard
+          titulo={widget.apelido}
+          subtitulo={`Conta · ${widget.banco} · titular ${widget.titular}`}
+          confirmar={() => confirmarConta(widget.acaoId)}
+          descartar={() => rejeitarAcao(widget.acaoId)}
+          labelFeito="Conta criada"
+        />
+      );
+    case "criar_cartao":
+      return (
+        <AcaoCard
+          titulo={widget.apelido}
+          subtitulo={`Cartão · ${widget.banco}${
+            widget.ultimosDigitos ? ` · final ${widget.ultimosDigitos}` : ""
+          } · titular ${widget.titular}`}
+          confirmar={() => confirmarCartao(widget.acaoId)}
+          descartar={() => rejeitarAcao(widget.acaoId)}
+          labelFeito="Cartão criado"
         />
       );
     default:

@@ -5,9 +5,12 @@
  */
 import { z } from "zod";
 import {
+  COMPORTAMENTOS_CATEGORIA,
   MEIOS_PAGAMENTO,
+  TIPOS_CONTA_BANCARIA,
   TIPOS_ENTIDADE,
   TIPOS_TRANSACAO,
+  type ComportamentoCategoria,
   type TipoEntidade,
   type TipoTransacao,
 } from "@/lib/types/db";
@@ -72,6 +75,32 @@ export const lembrarFatoArgs = z.object({
 });
 export type LembrarFatoArgs = z.infer<typeof lembrarFatoArgs>;
 
+export const criarCategoriaArgs = z.object({
+  nome: z.string().trim().min(1).max(60),
+  comportamento: z.enum(COMPORTAMENTOS_CATEGORIA).default("basico"),
+  icone: z.string().trim().max(8).optional(),
+});
+export type CriarCategoriaArgs = z.infer<typeof criarCategoriaArgs>;
+
+export const criarContaArgs = z.object({
+  apelido: z.string().trim().min(1).max(60),
+  banco: z.string().trim().min(1).max(60),
+  tipo: z.enum(TIPOS_CONTA_BANCARIA).default("corrente"),
+  titular: z.string().trim().min(1).max(80),
+});
+export type CriarContaArgs = z.infer<typeof criarContaArgs>;
+
+export const criarCartaoArgs = z.object({
+  apelido: z.string().trim().min(1).max(60),
+  banco: z.string().trim().min(1).max(60),
+  titular: z.string().trim().min(1).max(80),
+  ultimos_digitos: z
+    .string()
+    .regex(/^\d{4}$/)
+    .optional(),
+});
+export type CriarCartaoArgs = z.infer<typeof criarCartaoArgs>;
+
 /* ------------------------------------------------------------------ */
 /* Catálogo de widgets — o que o cliente renderiza (P4: catálogo fixo) */
 /* ------------------------------------------------------------------ */
@@ -118,12 +147,39 @@ export interface WidgetLembrarFato {
   fato: string;
 }
 
+export interface WidgetCriarCategoria {
+  tipo: "criar_categoria";
+  acaoId: string;
+  nome: string;
+  comportamento: ComportamentoCategoria;
+}
+
+export interface WidgetCriarConta {
+  tipo: "criar_conta";
+  acaoId: string;
+  apelido: string;
+  banco: string;
+  titular: string;
+}
+
+export interface WidgetCriarCartao {
+  tipo: "criar_cartao";
+  acaoId: string;
+  apelido: string;
+  banco: string;
+  titular: string;
+  ultimosDigitos: string | null;
+}
+
 export type NiaWidget =
   | WidgetResumoPeriodo
   | WidgetConfirmarTransacao
   | WidgetCriarPessoa
   | WidgetCriarCompromisso
-  | WidgetLembrarFato;
+  | WidgetLembrarFato
+  | WidgetCriarCategoria
+  | WidgetCriarConta
+  | WidgetCriarCartao;
 
 /* ------------------------------------------------------------------ */
 /* Envelopes de transporte                                            */

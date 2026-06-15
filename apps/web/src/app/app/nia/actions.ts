@@ -3,10 +3,13 @@
 import { resolveWorkspaceId } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { criarTransacao, excluirTransacao } from "@/app/app/transacoes/actions";
-import { criarEntidade } from "@/app/app/cadastros/actions";
-import { listCategorias } from "@/lib/db/queries";
+import { criarCartao, criarConta, criarCategoria, criarEntidade } from "@/app/app/cadastros/actions";
+import { listCategorias, listEntidades } from "@/lib/db/queries";
 import {
+  criarCartaoArgs,
+  criarCategoriaArgs,
   criarCompromissoArgs,
+  criarContaArgs,
   criarPessoaArgs,
   lancarTransacaoArgs,
   lembrarFatoArgs,
@@ -160,6 +163,86 @@ export async function desfazerTransacao(acaoId: string): Promise<{ error?: strin
   if (res.error) return { error: res.error };
 
   await atualizarAcao(acaoId, { status: "desfeita" });
+  return { ok: true };
+}
+
+async function resolverEntidade(workspaceId: string, nome: string): Promise<string | undefined> {
+  const alvo = normalizarTexto(nome);
+  const list = await listEntidades(workspaceId);
+  return list.find((e) => normalizarTexto(e.nome) === alvo)?.id;
+}
+
+/** Cadastra a categoria proposta pela Nia. */
+export async function confirmarCategoria(acaoId: string): Promise<{ error?: string; ok?: boolean }> {
+  const acao = await carregarAcao(acaoId);
+  if (!acao) return { error: "Ação não encontrada." };
+  if (acao.status !== "proposta") return { error: "Essa ação já foi processada." };
+  if (acao.ferramenta !== "criar_categoria") return { error: "Ação não suportada." };
+
+  const parsed = criarCategoriaArgs.safeParse(acao.payload_proposto);
+  if (!parsed.success) return { error: "Dados da proposta inválidos." };
+
+  const res = await criarCategoria({
+    nome: parsed.data.nome,
+    comportamento: parsed.data.comportamento,
+    icone: parsed.data.icone,
+  });
+  if (res.error) return { error: res.error };
+
+  await atualizarAcao(acaoId, { status: "executada", resultado: { ok: true } });
+  return { ok: true };
+}
+
+/** Cadastra a conta bancária proposta pela Nia (resolve o titular por nome). */
+export async function confirmarConta(acaoId: string): Promise<{ error?: string; ok?: boolean }> {
+  const acao = await carregarAcao(acaoId);
+  if (!acao) return { error: "Ação não encontrada." };
+  if (acao.status !== "proposta") return { error: "Essa ação já foi processada." };
+  if (acao.ferramenta !== "criar_conta") return { error: "Ação não suportada." };
+
+  const parsed = criarContaArgs.safeParse(acao.payload_proposto);
+  if (!parsed.success) return { error: "Dados da proposta inválidos." };
+  const d = parsed.data;
+
+  const titularId = await resolverEntidade(acao.workspace_id, d.titular);
+  if (!titularId) return { error: `A pessoa "${d.titular}" não está cadastrada. Cadastre-a primeiro.` };
+
+  const res = await criarConta({
+    banco: d.banco,
+    apelido: d.apelido,
+    tipo: d.tipo,
+    titular_id: titularId,
+    eh_conta_compartilhada: false,
+  });
+  if (res.error) return { error: res.error };
+
+  await atualizarAcao(acaoId, { status: "executada", resultado: { ok: true } });
+  return { ok: true };
+}
+
+/** Cadastra o cartão proposto pela Nia (resolve o titular por nome). */
+export async function confirmarCartao(acaoId: string): Promise<{ error?: string; ok?: boolean }> {
+  const acao = await carregarAcao(acaoId);
+  if (!acao) return { error: "Ação não encontrada." };
+  if (acao.status !== "proposta") return { error: "Essa ação já foi processada." };
+  if (acao.ferramenta !== "criar_cartao") return { error: "Ação não suportada." };
+
+  const parsed = criarCartaoArgs.safeParse(acao.payload_proposto);
+  if (!parsed.success) return { error: "Dados da proposta inválidos." };
+  const d = parsed.data;
+
+  const titularId = await resolverEntidade(acao.workspace_id, d.titular);
+  if (!titularId) return { error: `A pessoa "${d.titular}" não está cadastrada. Cadastre-a primeiro.` };
+
+  const res = await criarCartao({
+    banco: d.banco,
+    apelido: d.apelido,
+    titular_id: titularId,
+    ultimos_digitos: d.ultimos_digitos,
+  });
+  if (res.error) return { error: res.error };
+
+  await atualizarAcao(acaoId, { status: "executada", resultado: { ok: true } });
   return { ok: true };
 }
 
