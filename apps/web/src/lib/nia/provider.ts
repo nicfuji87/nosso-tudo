@@ -50,7 +50,12 @@ type AnthropicBlock = AnthropicTextBlock | AnthropicToolUseBlock | { type: strin
 interface AnthropicResponse {
   content: AnthropicBlock[];
   stop_reason: string;
-  usage: { input_tokens: number; output_tokens: number };
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
 }
 interface AnthropicMessage {
   role: "user" | "assistant";
@@ -63,7 +68,19 @@ const anthropicProvider: NiaProvider = async (input) => {
   const ferramentas: string[] = [];
   let tokensInput = 0;
   let tokensOutput = 0;
+  let tokensCache = 0;
   let textoFinal = "";
+
+  // Prompt caching: marca tools (último bloco) e system como cacheáveis — eles são
+  // a parte estática e pesada de toda chamada (RF: custo). Cache read = 0.1x.
+  const cacheCtrl = { type: "ephemeral" as const };
+  const toolsPayload = input.tools.map((t, i) => ({
+    name: t.nome,
+    description: t.descricao,
+    input_schema: t.inputSchema,
+    ...(i === input.tools.length - 1 ? { cache_control: cacheCtrl } : {}),
+  }));
+  const systemPayload = [{ type: "text", text: input.systemPrompt, cache_control: cacheCtrl }];
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -77,12 +94,8 @@ const anthropicProvider: NiaProvider = async (input) => {
         model: input.modelo,
         max_tokens: input.maxTokens,
         temperature: input.temperature,
-        system: input.systemPrompt,
-        tools: input.tools.map((t) => ({
-          name: t.nome,
-          description: t.descricao,
-          input_schema: t.inputSchema,
-        })),
+        system: systemPayload,
+        tools: toolsPayload,
         messages,
       }),
     });
@@ -93,8 +106,12 @@ const anthropicProvider: NiaProvider = async (input) => {
     }
 
     const data = (await res.json()) as AnthropicResponse;
-    tokensInput += data.usage?.input_tokens ?? 0;
+    tokensInput +=
+      (data.usage?.input_tokens ?? 0) +
+      (data.usage?.cache_creation_input_tokens ?? 0) +
+      (data.usage?.cache_read_input_tokens ?? 0);
     tokensOutput += data.usage?.output_tokens ?? 0;
+    tokensCache += data.usage?.cache_read_input_tokens ?? 0;
 
     const textBlocks = data.content.filter(
       (b): b is AnthropicTextBlock => b.type === "text",
@@ -129,7 +146,7 @@ const anthropicProvider: NiaProvider = async (input) => {
     messages.push({ role: "user", content: toolResults });
   }
 
-  return { texto: textoFinal, widgets, ferramentas, tokensInput, tokensOutput, tokensCache: 0 };
+  return { texto: textoFinal, widgets, ferramentas, tokensInput, tokensOutput, tokensCache };
 };
 
 /* ------------------------------ OpenAI ------------------------------ */

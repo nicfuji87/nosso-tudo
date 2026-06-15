@@ -1,13 +1,24 @@
 import "server-only";
 import type { z } from "zod";
-import { getGastosPorCategoria, getResumoMes } from "@/lib/db/queries";
-import { formatBRL } from "@/lib/format";
 import {
+  getGastosPorCategoria,
+  getResumoMes,
+  listCartoes,
+  listCategorias,
+  listColecoes,
+  listContas,
+  listEntidades,
+  listTransacoes,
+} from "@/lib/db/queries";
+import { formatBRL, formatDate } from "@/lib/format";
+import {
+  consultarCadastrosArgs,
   consultarGastosArgs,
   criarCompromissoArgs,
   criarPessoaArgs,
   lancarTransacaoArgs,
   lembrarFatoArgs,
+  listarTransacoesArgs,
   type NiaWidget,
   type NivelConfirmacao,
 } from "@/lib/nia/schemas";
@@ -77,6 +88,80 @@ const consultarGastos: NiaTool = {
       resumo.receitas,
     )}, despesas ${formatBRL(resumo.despesas)}).`;
     return { texto, widget };
+  },
+};
+
+const consultarCadastros: NiaTool = {
+  nome: "consultar_cadastros",
+  descricao:
+    "Lê os cadastros da família: pessoas/grupos, contas bancárias, cartões, categorias ou compromissos (compras coletivas). Use sempre que o usuário perguntar o que ele já tem cadastrado ('quantas pessoas tenho?', 'quais meus cartões?', 'minhas categorias').",
+  nivel: "auto",
+  inputSchema: {
+    type: "object",
+    properties: {
+      tipo: {
+        type: "string",
+        enum: ["pessoas", "contas", "cartoes", "categorias", "compromissos"],
+        description: "O que listar.",
+      },
+    },
+    required: ["tipo"],
+  },
+  async executar(args, ctx) {
+    const { tipo } = valida(consultarCadastrosArgs, args);
+    if (tipo === "pessoas") {
+      const list = await listEntidades(ctx.workspaceId);
+      const nomes = list.map((e) => `${e.nome} (${e.tipo})`).join(", ") || "nenhuma";
+      return { texto: `${list.length} pessoa(s)/grupo(s): ${nomes}.` };
+    }
+    if (tipo === "contas") {
+      const list = await listContas(ctx.workspaceId);
+      const nomes = list.map((c) => `${c.apelido} (${c.banco})`).join(", ") || "nenhuma";
+      return { texto: `${list.length} conta(s): ${nomes}.` };
+    }
+    if (tipo === "cartoes") {
+      const list = await listCartoes(ctx.workspaceId);
+      const nomes =
+        list.map((c) => `${c.apelido}${c.ultimos_digitos ? ` final ${c.ultimos_digitos}` : ""}`).join(", ") ||
+        "nenhum";
+      return { texto: `${list.length} cartão(ões): ${nomes}.` };
+    }
+    if (tipo === "categorias") {
+      const list = await listCategorias(ctx.workspaceId);
+      const nomes = list.map((c) => c.nome).join(", ") || "nenhuma";
+      return { texto: `${list.length} categoria(s): ${nomes}.` };
+    }
+    const list = (await listColecoes(ctx.workspaceId)).filter((c) => c.tipo === "compromisso");
+    const linhas =
+      list.map((c) => `${c.nome} — ${c.status ?? "aberto"}${c.valor ? ` (${formatBRL(c.valor)})` : ""}`).join("; ") ||
+      "nenhum";
+    return { texto: `${list.length} compromisso(s): ${linhas}.` };
+  },
+};
+
+const listarTransacoes: NiaTool = {
+  nome: "listar_transacoes",
+  descricao:
+    "Lista as transações recentes da família (opcionalmente filtrando por um termo na descrição). Use quando o usuário quiser ver lançamentos, conferir um gasto específico ou revisar o histórico.",
+  nivel: "auto",
+  inputSchema: {
+    type: "object",
+    properties: {
+      busca: { type: "string", description: "Filtra pela descrição (opcional)." },
+      limite: { type: "number", description: "Quantas trazer (1–30, default 10)." },
+    },
+  },
+  async executar(args, ctx) {
+    const d = valida(listarTransacoesArgs, args);
+    const list = await listTransacoes(ctx.workspaceId, { busca: d.busca, limit: d.limite });
+    if (list.length === 0) return { texto: "Nenhuma transação encontrada." };
+    const linhas = list.map(
+      (t) =>
+        `${formatDate(t.data_transacao)} · ${t.descricao} · ${formatBRL(t.valor)}${
+          t.categoria ? ` · ${t.categoria.nome}` : ""
+        }`,
+    );
+    return { texto: `Transações:\n${linhas.join("\n")}` };
   },
 };
 
@@ -239,6 +324,8 @@ const lembrarFato: NiaTool = {
 
 export const NIA_TOOLS: NiaTool[] = [
   consultarGastos,
+  consultarCadastros,
+  listarTransacoes,
   lancarTransacao,
   criarPessoa,
   criarCompromisso,

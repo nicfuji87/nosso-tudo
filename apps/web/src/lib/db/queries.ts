@@ -112,3 +112,46 @@ export async function listCartoes(workspaceId: string): Promise<Cartao[]> {
     .order("apelido", { ascending: true });
   return (data as Cartao[] | null) ?? [];
 }
+
+export interface ColecaoResumo {
+  id: string;
+  nome: string;
+  tipo: string | null;
+  status: string | null;
+  valor: number | null;
+}
+
+export async function listColecoes(workspaceId: string): Promise<ColecaoResumo[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("colecoes")
+    .select(
+      "id, nome, valor_estimado, valor_final, orcamento_previsto, status_compromisso, status_projeto, categoria:categorias(comportamento)",
+    )
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  const rows =
+    (data as
+      | {
+          id: string;
+          nome: string;
+          valor_estimado: number | null;
+          valor_final: number | null;
+          orcamento_previsto: number | null;
+          status_compromisso: string | null;
+          status_projeto: string | null;
+          categoria: { comportamento: string } | null;
+        }[]
+      | null) ?? [];
+  return rows.map((r) => {
+    const tipo = r.categoria?.comportamento ?? null;
+    return {
+      id: r.id,
+      nome: r.nome,
+      tipo,
+      status: tipo === "projeto" ? r.status_projeto : r.status_compromisso,
+      valor: r.valor_final ?? r.valor_estimado ?? r.orcamento_previsto ?? null,
+    };
+  });
+}

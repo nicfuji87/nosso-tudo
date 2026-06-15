@@ -32,6 +32,17 @@ export const consultarGastosArgs = z.object({
 });
 export type ConsultarGastosArgs = z.infer<typeof consultarGastosArgs>;
 
+export const consultarCadastrosArgs = z.object({
+  tipo: z.enum(["pessoas", "contas", "cartoes", "categorias", "compromissos"]),
+});
+export type ConsultarCadastrosArgs = z.infer<typeof consultarCadastrosArgs>;
+
+export const listarTransacoesArgs = z.object({
+  busca: z.string().trim().max(100).optional(),
+  limite: z.number().int().min(1).max(30).default(10),
+});
+export type ListarTransacoesArgs = z.infer<typeof listarTransacoesArgs>;
+
 export const lancarTransacaoArgs = z.object({
   tipo: z.enum(TIPOS_TRANSACAO).default("despesa"),
   descricao: z.string().trim().min(1).max(255),
