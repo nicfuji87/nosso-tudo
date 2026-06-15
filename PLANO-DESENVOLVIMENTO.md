@@ -161,9 +161,10 @@ Mapeia o roadmap do PRD §12 para entregáveis concretos. Estimativas = do PRD (
 
 **DoD:** foto/áudio no WhatsApp vira transação; fatura PDF concilia; Inbox unifica pendências; taxa de auto-match medida.
 
-### Fase 4 — IA chat, modo detalhado e relatórios (3 semanas) · gating Pro
+### Fase 4 — IA chat (Nia), modo detalhado e relatórios (3 semanas) · gating Pro
 **Objetivo:** assistente conversacional e rastreamento granular.
-- Edge Function `ia-chat`: Claude (haiku) + **tools = RPCs read-only pré-aprovadas** (SR-021), cota mensal (RF-080+), `conversas_ia`/`mensagens_ia`.
+- **Nia** — assistente de IA com UI generativa, ferramentas tipadas sob RLS, e console de super admin (uso de tokens, análise conversacional, prompt + LLM configuráveis, provider-agnóstico). Detalhamento completo em [PLANO-NIA.md](PLANO-NIA.md).
+- Runtime da Nia (Route Handler + provedor-agnóstico) + **tools = ações tipadas pré-aprovadas** (SR-021), cota mensal (RF-080+), reusa `conversas_ia`/`mensagens_ia` (estendidas).
 - **Modo detalhado** (RF-125): extrai itens individuais de NF → `produtos` + `itens_transacao`.
 - **Aprendizado por aliases** (RF-122): `confirmar_match()` adiciona alias, reaponta e remove duplicado.
 - Relatórios avançados (incl. "preço médio do produto X entre estabelecimentos").

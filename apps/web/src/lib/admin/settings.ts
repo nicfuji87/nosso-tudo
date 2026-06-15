@@ -162,3 +162,30 @@ export async function saveWhatsapp(
     updatedBy,
   );
 }
+
+// ---- Nia (assistente de IA) -------------------------------------------------
+// As keys ficam em secrets["<provedor>_api_key"] — o mesmo nome que lib/nia/config lê.
+
+export interface NiaPublic {
+  provider: string;
+  anthropicKeyHint: string | null;
+  hasAnthropicKey: boolean;
+  updatedAt: string | null;
+}
+
+export async function getNiaPublic(): Promise<NiaPublic> {
+  const row = await readSettings("nia");
+  return {
+    provider: (row?.valor?.provider_default as string) ?? "anthropic",
+    anthropicKeyHint: maskSecret(row?.secrets?.anthropic_api_key),
+    hasAnthropicKey: Boolean(row?.secrets?.anthropic_api_key),
+    updatedAt: row?.updated_at ?? null,
+  };
+}
+
+export async function saveNia(
+  input: { anthropicApiKey?: string },
+  updatedBy: string,
+): Promise<void> {
+  await saveSettings("nia", {}, { anthropic_api_key: input.anthropicApiKey }, updatedBy);
+}
