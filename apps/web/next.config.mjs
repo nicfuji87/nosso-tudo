@@ -18,8 +18,11 @@ const nextConfig = {
     config.resolve.symlinks = false;
     return config;
   },
-  // O rastreamento de arquivos (nft) também usa readlink — desabilitado por incompatibilidade do exFAT.
-  outputFileTracing: false,
+  // O rastreamento de arquivos (nft) usa readlink, incompatível com exFAT no build local
+  // (Windows). Na Vercel (Linux) o tracing é ESSENCIAL: é o que inclui os
+  // client-reference-manifest na função serverless — sem ele, /app quebra em runtime com
+  // "Cannot read properties of undefined (reading 'clientModules')". Por isso só desliga local.
+  outputFileTracing: process.env.VERCEL ? true : false,
 };
 
 export default nextConfig;
