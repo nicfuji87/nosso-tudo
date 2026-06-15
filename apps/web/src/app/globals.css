@@ -1,0 +1,183 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Nosso Tudo — design tokens
+ * Source of truth: identidade-visual.md (paleta oficial) + design-system.md (estrutura).
+ * Cores expressas como canais RGB ("R G B") para suportar modificadores de opacidade
+ * do Tailwind, ex.: bg-primary/80, border-border/60.
+ * Regra: NUNCA usar cor hardcoded em componentes — sempre via token.
+ */
+
+@layer base {
+  :root {
+    /* Paleta oficial da marca (identidade-visual.md) */
+    --brand-graphite: 17 19 21; /* #111315 */
+    --brand-offwhite: 247 246 242; /* #F7F6F2 */
+    --brand-sage: 143 169 147; /* #8FA993 */
+    --brand-petroleum: 61 109 132; /* #3D6D84 */
+    --brand-dark-blue: 30 42 59; /* #1E2A3B */
+
+    /* Tons de superfície e atmosfera */
+    --background: 247 246 242; /* off-white */
+    --background-warm: 242 240 234; /* haze de transição */
+    --foreground: 17 19 21; /* graphite */
+
+    --card: 255 255 255;
+    --card-foreground: 17 19 21;
+    --popover: 255 255 255;
+    --popover-foreground: 17 19 21;
+
+    /* Ação primária: grafite profundo (CTA), texto off-white */
+    --primary: 17 19 21;
+    --primary-foreground: 247 246 242;
+
+    /* Superfície secundária neutra */
+    --secondary: 240 238 232;
+    --secondary-foreground: 17 19 21;
+
+    --muted: 240 238 232;
+    --muted-foreground: 90 96 102; /* ink secundário */
+
+    /* Acento da marca: verde sálvia */
+    --accent: 143 169 147;
+    --accent-foreground: 17 19 21;
+
+    /* Acento tecnológico / IA: azul petróleo */
+    --tech: 61 109 132;
+    --tech-foreground: 247 246 242;
+
+    /* Feedback */
+    --success: 47 142 111;
+    --success-foreground: 255 255 255;
+    --warning: 200 130 30;
+    --warning-foreground: 255 255 255;
+    --destructive: 200 60 56;
+    --destructive-foreground: 255 255 255;
+    --info: 61 109 132;
+
+    /* Linhas, inputs, foco */
+    --border: 222 219 211;
+    --input: 222 219 211;
+    --ring: 143 169 147;
+
+    /* Raio base (design-system: cards 16px) */
+    --radius: 1rem;
+  }
+
+  /* Dark mode — preparado para V2 (identidade-visual.md §7) */
+  .dark {
+    --brand-offwhite: 247 246 242;
+    --background: 11 15 20; /* #0B0F14 */
+    --background-warm: 18 24 32;
+    --foreground: 247 246 242;
+
+    --card: 22 28 36;
+    --card-foreground: 247 246 242;
+    --popover: 22 28 36;
+    --popover-foreground: 247 246 242;
+
+    --primary: 247 246 242;
+    --primary-foreground: 17 19 21;
+
+    --secondary: 30 42 59;
+    --secondary-foreground: 247 246 242;
+
+    --muted: 30 38 48;
+    --muted-foreground: 160 168 176;
+
+    --accent: 143 169 147;
+    --accent-foreground: 17 19 21;
+
+    --tech: 61 109 132;
+    --tech-foreground: 247 246 242;
+
+    --border: 38 48 60;
+    --input: 38 48 60;
+    --ring: 143 169 147;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "ss01", "cv01", "cv11";
+  }
+
+  /* Números financeiros: tabular para alinhamento de dígitos */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-family: var(--font-geist-mono), ui-monospace, monospace;
+  }
+
+  ::selection {
+    background-color: rgb(var(--brand-sage) / 0.35);
+  }
+
+  /* Scrollbar discreta */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: rgb(var(--foreground) / 0.12);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(var(--foreground) / 0.22);
+  }
+}
+
+@layer components {
+  /*
+   * Atmosfera orgânica e serena (sem o "capim-rosa" do design-system;
+   * usamos haze de sálvia/petróleo para honrar a marca — ver ADR-0001).
+   */
+  .atmosphere {
+    background-color: rgb(var(--background));
+    background-image:
+      radial-gradient(60% 50% at 12% 0%, rgb(var(--brand-sage) / 0.18), transparent 70%),
+      radial-gradient(55% 45% at 98% 8%, rgb(var(--brand-petroleum) / 0.12), transparent 70%),
+      radial-gradient(45% 40% at 50% 100%, rgb(var(--background-warm) / 0.9), transparent 70%);
+  }
+
+  .atmosphere-soft {
+    background-image:
+      radial-gradient(50% 60% at 100% 0%, rgb(var(--brand-sage) / 0.14), transparent 65%),
+      radial-gradient(40% 50% at 0% 100%, rgb(var(--brand-petroleum) / 0.08), transparent 65%);
+  }
+
+  /* Grão sutil para profundidade (design-system §8) */
+  .grain {
+    position: relative;
+  }
+  .grain::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.4;
+    mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.06'/%3E%3C/svg%3E");
+  }
+
+  /* Realce "ghost text" do hero (design-system §3.3) */
+  .text-ghost {
+    color: rgb(var(--foreground) / 0.06);
+  }
+}
