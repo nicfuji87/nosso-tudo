@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Plus, Inbox } from "lucide-react";
+import { Plus, Inbox, Sparkles } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -32,6 +32,8 @@ export function AppShell({
 }) {
   const pathname = usePathname();
   const inboxActive = pathname.startsWith("/app/inbox");
+  const niaActive = pathname.startsWith("/app/nia");
+  const niaLiberado = isAdmin || plan.slug === "pro";
 
   return (
     <div className="min-h-dvh">
@@ -81,6 +83,21 @@ export function AppShell({
               </span>
             )}
           </Link>
+
+          {niaLiberado && (
+            <Link
+              href="/app/nia"
+              className={cn(
+                "flex items-center gap-3 rounded-xl px-3 py-2.5 text-body-sm font-medium transition-colors",
+                niaActive
+                  ? "bg-secondary text-foreground"
+                  : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
+              )}
+            >
+              <Sparkles className={cn("size-[18px]", niaActive && "text-accent")} />
+              Nia
+            </Link>
+          )}
         </nav>
         <div className="px-3 pb-3">
           <NovaTransacaoDialog
@@ -108,6 +125,15 @@ export function AppShell({
           <Logo />
         </Link>
         <div className="flex items-center gap-1">
+          {niaLiberado && (
+            <Link
+              href="/app/nia"
+              aria-label="Nia"
+              className="flex size-9 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground"
+            >
+              <Sparkles className="size-5" />
+            </Link>
+          )}
           <Link
             href="/app/inbox"
             aria-label="Pré-conferência"

@@ -5,8 +5,14 @@ import { revalidatePath } from "next/cache";
 import { getUser, isPlatformAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getAsaasConfig, saveAsaas, saveWhatsapp } from "@/lib/admin/settings";
-import { asaasConfigSchema, whatsappConfigSchema, planoSchema, anuncioSchema } from "@/lib/schemas/admin";
+import { getAsaasConfig, saveAsaas, saveNia, saveWhatsapp } from "@/lib/admin/settings";
+import {
+  asaasConfigSchema,
+  whatsappConfigSchema,
+  niaConfigSchema,
+  planoSchema,
+  anuncioSchema,
+} from "@/lib/schemas/admin";
 import { ASAAS_BASE_URL } from "@/lib/asaas/constants";
 
 type ActionResult<T = unknown> = { error?: string } & T;
@@ -122,6 +128,24 @@ export async function gerarIngestSecret(): Promise<ActionResult<{ secret?: strin
   }
   revalidatePath("/app/admin/integracoes");
   return { secret };
+}
+
+// ---- Nia (assistente de IA) ------------------------------------------------
+
+export async function salvarNia(input: unknown): Promise<{ error?: string }> {
+  const gate = await requirePlatformAdmin();
+  if ("error" in gate) return { error: gate.error };
+
+  const parsed = niaConfigSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+
+  try {
+    await saveNia({ anthropicApiKey: parsed.data.anthropicApiKey || undefined }, gate.userId);
+  } catch {
+    return { error: "Não foi possível salvar a configuração da Nia." };
+  }
+  revalidatePath("/app/admin/integracoes");
+  return {};
 }
 
 // ---- Planos ----------------------------------------------------------------
