@@ -32,6 +32,16 @@ export const niaConfigSchema = z.object({
 });
 export type NiaConfigInput = z.infer<typeof niaConfigSchema>;
 
+/** Nia — config do agente (prompt/provedor/modelo/parâmetros); cada save cria uma versão. */
+export const niaAgentConfigSchema = z.object({
+  systemPrompt: z.string().trim().min(10, "Prompt muito curto"),
+  provedor: z.string().trim().min(1, "Escolha o provedor"),
+  modelo: z.string().trim().min(1, "Informe o modelo"),
+  temperature: z.coerce.number().min(0).max(2),
+  maxTokens: z.coerce.number().int().min(1).max(8192),
+});
+export type NiaAgentConfigInput = z.infer<typeof niaAgentConfigSchema>;
+
 /** Edição de plano (admin de planos). */
 export const planoSchema = z.object({
   id: z.string().uuid(),

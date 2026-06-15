@@ -6,10 +6,12 @@ import { getUser, isPlatformAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAsaasConfig, saveAsaas, saveNia, saveWhatsapp } from "@/lib/admin/settings";
+import { saveNiaConfig } from "@/lib/nia/admin";
 import {
   asaasConfigSchema,
   whatsappConfigSchema,
   niaConfigSchema,
+  niaAgentConfigSchema,
   planoSchema,
   anuncioSchema,
 } from "@/lib/schemas/admin";
@@ -145,6 +147,23 @@ export async function salvarNia(input: unknown): Promise<{ error?: string }> {
     return { error: "Não foi possível salvar a configuração da Nia." };
   }
   revalidatePath("/app/admin/integracoes");
+  return {};
+}
+
+/** Salva uma nova versão da config do agente Nia (prompt/provedor/modelo). */
+export async function salvarNiaConfig(input: unknown): Promise<{ error?: string }> {
+  const gate = await requirePlatformAdmin();
+  if ("error" in gate) return { error: gate.error };
+
+  const parsed = niaAgentConfigSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+
+  try {
+    await saveNiaConfig(parsed.data, gate.userId);
+  } catch {
+    return { error: "Não foi possível salvar a configuração do agente." };
+  }
+  revalidatePath("/app/admin/nia");
   return {};
 }
 

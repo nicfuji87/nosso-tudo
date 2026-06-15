@@ -189,9 +189,13 @@ Fatia vertical que exercita toda a arquitetura (RLS, ferramenta tipada, widget, 
 - `app/app/nia/page.tsx` — gated; upsell para não-Pro.
 - Link "Nia" no menu (sidebar + topbar), visível só para Pro/admin.
 
-**Para ligar (quando quiser testar):** aplicar a migration 0007 → gravar a API key em `integration_settings` key `nia`, secret `anthropic_api_key` → acessar `/app/nia` (o fundador, como platform admin, acessa mesmo no Free).
+**Super admin** (`/app/admin/nia`, só platform admin)
+- Aba "Nia (IA)" em Integrações — grava a API key do provedor.
+- Console: **uso de tokens/custo por usuário** (views `v_nia_uso_*`) + **editor de prompt/provedor/modelo versionado** (`nia_config`, cada save = nova versão, rollback-friendly) — `lib/nia/admin.ts`, `components/admin/nia-console.tsx`.
 
-**Ainda não feito (próximas fatias):** streaming; widgets de match/pessoa/compromisso; undo; `nia_contexto` alimentado; console super admin (§6); cotas; análise conversacional.
+**Para ligar (quando quiser testar):** migration 0007 aplicada ✓ → em `/app/admin/integracoes` → aba Nia → colar a Anthropic API key → acessar `/app/nia` (o fundador, como platform admin, acessa mesmo no Free).
+
+**Ainda não feito (próximas fatias):** streaming; widgets de match/pessoa/compromisso; undo; `nia_contexto` alimentado; **análise conversacional + feedback 👍/👎**; cotas.
 
 ## 9. Faseamento (encaixa após a Fase 3 do plano principal)
 
