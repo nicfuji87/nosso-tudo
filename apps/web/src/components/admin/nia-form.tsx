@@ -27,17 +27,22 @@ export function NiaForm({
 }) {
   const router = useRouter();
   const [apiKey, setApiKey] = useState("");
+  const [openaiKey, setOpenaiKey] = useState("");
   const [saving, startSave] = useTransition();
 
   function salvar() {
     startSave(async () => {
-      const res = await salvarNia({ anthropicApiKey: apiKey || undefined });
+      const res = await salvarNia({
+        anthropicApiKey: apiKey || undefined,
+        openaiApiKey: openaiKey || undefined,
+      });
       if (res.error) {
         toast.error("Erro", { description: res.error });
         return;
       }
       toast.success("Configuração da Nia salva");
       setApiKey("");
+      setOpenaiKey("");
       router.refresh();
     });
   }
@@ -76,6 +81,22 @@ export function NiaForm({
           <p className="text-caption text-muted-foreground">
             Deixe em branco para manter a atual. Guardada em <code className="font-mono">secrets</code>{" "}
             (deny-all; nunca enviada ao navegador).
+          </p>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="nia-openai-key">OpenAI API key</Label>
+          <Input
+            id="nia-openai-key"
+            type="password"
+            autoComplete="off"
+            placeholder={initial.openaiKeyHint ? `Salvo: ${initial.openaiKeyHint}` : "sk-..."}
+            value={openaiKey}
+            onChange={(e) => setOpenaiKey(e.target.value)}
+            disabled={!canEditSecrets}
+          />
+          <p className="text-caption text-muted-foreground">
+            Para usar OpenAI, cole a chave aqui e selecione o provedor/modelo no console da Nia.
           </p>
         </div>
 

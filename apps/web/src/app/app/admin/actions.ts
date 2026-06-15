@@ -142,7 +142,13 @@ export async function salvarNia(input: unknown): Promise<{ error?: string }> {
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
 
   try {
-    await saveNia({ anthropicApiKey: parsed.data.anthropicApiKey || undefined }, gate.userId);
+    await saveNia(
+      {
+        anthropicApiKey: parsed.data.anthropicApiKey || undefined,
+        openaiApiKey: parsed.data.openaiApiKey || undefined,
+      },
+      gate.userId,
+    );
   } catch {
     return { error: "Não foi possível salvar a configuração da Nia." };
   }

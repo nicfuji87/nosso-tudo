@@ -26,9 +26,10 @@ export const whatsappConfigSchema = z.object({
 });
 export type WhatsappConfigInput = z.infer<typeof whatsappConfigSchema>;
 
-/** Nia — chave de API do provedor de LLM (vazio = manter a atual). */
+/** Nia — chaves de API dos provedores de LLM (vazio = manter a atual). */
 export const niaConfigSchema = z.object({
   anthropicApiKey: z.string().trim().optional(),
+  openaiApiKey: z.string().trim().optional(),
 });
 export type NiaConfigInput = z.infer<typeof niaConfigSchema>;
 

@@ -170,6 +170,8 @@ export interface NiaPublic {
   provider: string;
   anthropicKeyHint: string | null;
   hasAnthropicKey: boolean;
+  openaiKeyHint: string | null;
+  hasOpenaiKey: boolean;
   updatedAt: string | null;
 }
 
@@ -179,13 +181,20 @@ export async function getNiaPublic(): Promise<NiaPublic> {
     provider: (row?.valor?.provider_default as string) ?? "anthropic",
     anthropicKeyHint: maskSecret(row?.secrets?.anthropic_api_key),
     hasAnthropicKey: Boolean(row?.secrets?.anthropic_api_key),
+    openaiKeyHint: maskSecret(row?.secrets?.openai_api_key),
+    hasOpenaiKey: Boolean(row?.secrets?.openai_api_key),
     updatedAt: row?.updated_at ?? null,
   };
 }
 
 export async function saveNia(
-  input: { anthropicApiKey?: string },
+  input: { anthropicApiKey?: string; openaiApiKey?: string },
   updatedBy: string,
 ): Promise<void> {
-  await saveSettings("nia", {}, { anthropic_api_key: input.anthropicApiKey }, updatedBy);
+  await saveSettings(
+    "nia",
+    {},
+    { anthropic_api_key: input.anthropicApiKey, openai_api_key: input.openaiApiKey },
+    updatedBy,
+  );
 }

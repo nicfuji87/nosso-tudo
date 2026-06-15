@@ -130,12 +130,105 @@ const anthropicProvider: NiaProvider = async (input) => {
   return { texto: textoFinal, widgets, ferramentas, tokensInput, tokensOutput };
 };
 
+/* ------------------------------ OpenAI ------------------------------ */
+
+interface OpenAIToolCall {
+  id: string;
+  type: string;
+  function: { name: string; arguments: string };
+}
+interface OpenAIMsg {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | null;
+  tool_calls?: OpenAIToolCall[];
+  tool_call_id?: string;
+}
+interface OpenAIResponse {
+  choices: { message: { content: string | null; tool_calls?: OpenAIToolCall[] }; finish_reason: string }[];
+  usage?: { prompt_tokens: number; completion_tokens: number };
+}
+
+const openaiProvider: NiaProvider = async (input) => {
+  const messages: OpenAIMsg[] = [
+    { role: "system", content: input.systemPrompt },
+    { role: "user", content: input.userMessage },
+  ];
+  const widgets: NiaWidget[] = [];
+  const ferramentas: string[] = [];
+  let tokensInput = 0;
+  let tokensOutput = 0;
+  let textoFinal = "";
+
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${input.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: input.modelo,
+        temperature: input.temperature,
+        max_tokens: input.maxTokens,
+        messages,
+        tools: input.tools.map((t) => ({
+          type: "function",
+          function: { name: t.nome, description: t.descricao, parameters: t.inputSchema },
+        })),
+      }),
+    });
+
+    if (!res.ok) {
+      const detalhe = await res.text().catch(() => "");
+      throw new Error(`Provedor openai retornou ${res.status}: ${detalhe.slice(0, 200)}`);
+    }
+
+    const data = (await res.json()) as OpenAIResponse;
+    tokensInput += data.usage?.prompt_tokens ?? 0;
+    tokensOutput += data.usage?.completion_tokens ?? 0;
+
+    const choice = data.choices[0];
+    if (!choice) break;
+    if (choice.message.content) textoFinal = choice.message.content.trim();
+
+    const toolCalls = choice.message.tool_calls ?? [];
+    if (choice.finish_reason !== "tool_calls" || toolCalls.length === 0) break;
+
+    messages.push({ role: "assistant", content: choice.message.content ?? null, tool_calls: toolCalls });
+    for (const call of toolCalls) {
+      ferramentas.push(call.function.name);
+      const tool = getTool(call.function.name);
+      let conteudo: string;
+      if (!tool) {
+        conteudo = `Ferramenta desconhecida: ${call.function.name}`;
+      } else {
+        try {
+          let args: unknown = {};
+          try {
+            args = JSON.parse(call.function.arguments || "{}");
+          } catch {
+            args = {};
+          }
+          const r = await tool.executar(args, input.ctx);
+          conteudo = r.texto;
+          if (r.widget) widgets.push(r.widget);
+        } catch (e) {
+          conteudo = `Erro ao executar ${call.function.name}: ${(e as Error).message}`;
+        }
+      }
+      messages.push({ role: "tool", tool_call_id: call.id, content: conteudo });
+    }
+  }
+
+  return { texto: textoFinal, widgets, ferramentas, tokensInput, tokensOutput };
+};
+
 /* ------------------------------ Registro ------------------------------ */
 
 const PROVIDERS: Record<string, NiaProvider> = {
   anthropic: anthropicProvider,
-  // openai: openaiProvider,   // próximo adaptador — mesma interface
-  // google: googleProvider,
+  openai: openaiProvider,
+  // google: googleProvider,   // próximo adaptador — mesma interface
 };
 
 export function getProvider(slug: string): NiaProvider | undefined {
