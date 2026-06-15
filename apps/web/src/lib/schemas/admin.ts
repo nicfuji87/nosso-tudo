@@ -39,9 +39,19 @@ export const niaAgentConfigSchema = z.object({
   provedor: z.string().trim().min(1, "Escolha o provedor"),
   modelo: z.string().trim().min(1, "Informe o modelo"),
   temperature: z.coerce.number().min(0).max(2),
-  maxTokens: z.coerce.number().int().min(1).max(8192),
+  maxTokens: z.coerce.number().int().min(1).max(32768),
 });
 export type NiaAgentConfigInput = z.infer<typeof niaAgentConfigSchema>;
+
+/** Nia — preço de um modelo (USD por 1M tokens). */
+export const niaPrecoSchema = z.object({
+  provedor: z.string().trim().min(1, "Informe o provedor").max(40),
+  modelo: z.string().trim().min(1, "Informe o modelo").max(80),
+  precoEntrada: z.coerce.number().min(0),
+  precoSaida: z.coerce.number().min(0),
+  precoEntradaCache: z.coerce.number().min(0).optional().or(z.literal("").transform(() => undefined)),
+});
+export type NiaPrecoInput = z.infer<typeof niaPrecoSchema>;
 
 /** Edição de plano (admin de planos). */
 export const planoSchema = z.object({

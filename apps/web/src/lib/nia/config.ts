@@ -64,24 +64,36 @@ export async function getApiKey(provedor: string): Promise<string | null> {
   return secrets[`${provedor}_api_key`] ?? null;
 }
 
-/** Custo estimado em USD a partir de nia_precos. Retorna null se não houver tabela de preço. */
+/**
+ * Custo estimado em USD a partir de nia_precos. `tokensCache` é o subconjunto de
+ * `tokensInput` que veio do cache (preço reduzido, se houver). Null se sem preço.
+ */
 export async function calcularCusto(
   provedor: string,
   modelo: string,
   tokensInput: number,
   tokensOutput: number,
+  tokensCache = 0,
 ): Promise<number | null> {
   const admin = createAdminClient();
   const { data } = await admin
     .from("nia_precos")
-    .select("preco_entrada_por_milhao, preco_saida_por_milhao")
+    .select("preco_entrada_por_milhao, preco_saida_por_milhao, preco_entrada_cache_por_milhao")
     .eq("provedor", provedor)
     .eq("modelo", modelo)
     .maybeSingle();
   if (!data) return null;
-  const p = data as { preco_entrada_por_milhao: number; preco_saida_por_milhao: number };
+  const p = data as {
+    preco_entrada_por_milhao: number;
+    preco_saida_por_milhao: number;
+    preco_entrada_cache_por_milhao: number | null;
+  };
+  const entrada = Number(p.preco_entrada_por_milhao);
+  const precoCache = p.preco_entrada_cache_por_milhao != null ? Number(p.preco_entrada_cache_por_milhao) : entrada;
+  const naoCache = Math.max(0, tokensInput - tokensCache);
   const custo =
-    (tokensInput / 1_000_000) * Number(p.preco_entrada_por_milhao) +
+    (naoCache / 1_000_000) * entrada +
+    (tokensCache / 1_000_000) * precoCache +
     (tokensOutput / 1_000_000) * Number(p.preco_saida_por_milhao);
   return Number(custo.toFixed(6));
 }

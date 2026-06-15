@@ -26,6 +26,8 @@ export interface NiaProviderResult {
   ferramentas: string[];
   tokensInput: number;
   tokensOutput: number;
+  /** Tokens de entrada que vieram do cache (subconjunto de tokensInput). */
+  tokensCache: number;
 }
 
 export type NiaProvider = (input: NiaProviderInput) => Promise<NiaProviderResult>;
@@ -127,7 +129,7 @@ const anthropicProvider: NiaProvider = async (input) => {
     messages.push({ role: "user", content: toolResults });
   }
 
-  return { texto: textoFinal, widgets, ferramentas, tokensInput, tokensOutput };
+  return { texto: textoFinal, widgets, ferramentas, tokensInput, tokensOutput, tokensCache: 0 };
 };
 
 /* ------------------------------ OpenAI ------------------------------ */
@@ -145,7 +147,16 @@ interface OpenAIMsg {
 }
 interface OpenAIResponse {
   choices: { message: { content: string | null; tool_calls?: OpenAIToolCall[] }; finish_reason: string }[];
-  usage?: { prompt_tokens: number; completion_tokens: number };
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    prompt_tokens_details?: { cached_tokens?: number };
+  };
+}
+
+/** Modelos de raciocínio (GPT-5.x, o-series) não aceitam temperature e usam max_completion_tokens. */
+function ehRaciocinio(modelo: string): boolean {
+  return /^(gpt-5|o[134])/.test(modelo);
 }
 
 const openaiProvider: NiaProvider = async (input) => {
@@ -157,25 +168,28 @@ const openaiProvider: NiaProvider = async (input) => {
   const ferramentas: string[] = [];
   let tokensInput = 0;
   let tokensOutput = 0;
+  let tokensCache = 0;
   let textoFinal = "";
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    const body: Record<string, unknown> = {
+      model: input.modelo,
+      max_completion_tokens: input.maxTokens,
+      messages,
+      tools: input.tools.map((t) => ({
+        type: "function",
+        function: { name: t.nome, description: t.descricao, parameters: t.inputSchema },
+      })),
+    };
+    if (!ehRaciocinio(input.modelo)) body.temperature = input.temperature;
+
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${input.apiKey}`,
       },
-      body: JSON.stringify({
-        model: input.modelo,
-        temperature: input.temperature,
-        max_tokens: input.maxTokens,
-        messages,
-        tools: input.tools.map((t) => ({
-          type: "function",
-          function: { name: t.nome, description: t.descricao, parameters: t.inputSchema },
-        })),
-      }),
+      body: JSON.stringify(body),
     });
 
     if (!res.ok) {
@@ -186,6 +200,7 @@ const openaiProvider: NiaProvider = async (input) => {
     const data = (await res.json()) as OpenAIResponse;
     tokensInput += data.usage?.prompt_tokens ?? 0;
     tokensOutput += data.usage?.completion_tokens ?? 0;
+    tokensCache += data.usage?.prompt_tokens_details?.cached_tokens ?? 0;
 
     const choice = data.choices[0];
     if (!choice) break;
@@ -220,7 +235,7 @@ const openaiProvider: NiaProvider = async (input) => {
     }
   }
 
-  return { texto: textoFinal, widgets, ferramentas, tokensInput, tokensOutput };
+  return { texto: textoFinal, widgets, ferramentas, tokensInput, tokensOutput, tokensCache };
 };
 
 /* ------------------------------ Registro ------------------------------ */

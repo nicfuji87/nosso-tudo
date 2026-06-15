@@ -170,9 +170,10 @@ export interface InsightsNia {
   feedbackPositivo: number;
   feedbackNegativo: number;
   topFerramentas: { nome: string; usos: number }[];
+  modelosUsados: { modelo: string; mensagens: number }[];
 }
 
-/** Painel de qualidade: volume, feedback 👍/👎 e ferramentas mais usadas. */
+/** Painel de qualidade: volume, feedback 👍/👎, ferramentas e modelos usados. */
 export async function getInsightsNia(periodoDias = 30): Promise<InsightsNia> {
   const admin = createAdminClient();
   const desde = new Date(Date.now() - periodoDias * 86_400_000).toISOString();
@@ -192,27 +193,88 @@ export async function getInsightsNia(periodoDias = 30): Promise<InsightsNia> {
 
   const { data: msgs } = await admin
     .from("mensagens_ia")
-    .select("ferramentas_usadas")
+    .select("ferramentas_usadas, modelo")
     .eq("papel", "assistant")
     .gte("created_at", desde);
-  const cont: Record<string, number> = {};
-  for (const m of (msgs as { ferramentas_usadas: unknown }[] | null) ?? []) {
+  const contFerr: Record<string, number> = {};
+  const contMod: Record<string, number> = {};
+  for (const m of (msgs as { ferramentas_usadas: unknown; modelo: string | null }[] | null) ?? []) {
     const arr = Array.isArray(m.ferramentas_usadas) ? m.ferramentas_usadas : [];
     for (const f of arr) {
-      if (typeof f === "string") cont[f] = (cont[f] ?? 0) + 1;
+      if (typeof f === "string") contFerr[f] = (contFerr[f] ?? 0) + 1;
     }
+    if (m.modelo) contMod[m.modelo] = (contMod[m.modelo] ?? 0) + 1;
   }
-  const topFerramentas = Object.entries(cont)
-    .map(([nome, usos]) => ({ nome, usos }))
-    .sort((a, b) => b.usos - a.usos)
-    .slice(0, 8);
 
   return {
     conversas: conversas ?? 0,
     feedbackPositivo: pos,
     feedbackNegativo: neg,
-    topFerramentas,
+    topFerramentas: Object.entries(contFerr)
+      .map(([nome, usos]) => ({ nome, usos }))
+      .sort((a, b) => b.usos - a.usos)
+      .slice(0, 8),
+    modelosUsados: Object.entries(contMod)
+      .map(([modelo, mensagens]) => ({ modelo, mensagens }))
+      .sort((a, b) => b.mensagens - a.mensagens),
   };
+}
+
+export interface PrecoModelo {
+  provedor: string;
+  modelo: string;
+  precoEntrada: number;
+  precoSaida: number;
+  precoEntradaCache: number | null;
+}
+
+export async function listPrecos(): Promise<PrecoModelo[]> {
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("nia_precos")
+    .select("provedor, modelo, preco_entrada_por_milhao, preco_saida_por_milhao, preco_entrada_cache_por_milhao")
+    .order("provedor", { ascending: true })
+    .order("modelo", { ascending: true });
+  return ((data as
+    | {
+        provedor: string;
+        modelo: string;
+        preco_entrada_por_milhao: number;
+        preco_saida_por_milhao: number;
+        preco_entrada_cache_por_milhao: number | null;
+      }[]
+    | null) ?? []).map((r) => ({
+    provedor: r.provedor,
+    modelo: r.modelo,
+    precoEntrada: Number(r.preco_entrada_por_milhao),
+    precoSaida: Number(r.preco_saida_por_milhao),
+    precoEntradaCache: r.preco_entrada_cache_por_milhao != null ? Number(r.preco_entrada_cache_por_milhao) : null,
+  }));
+}
+
+export async function savePreco(input: {
+  provedor: string;
+  modelo: string;
+  precoEntrada: number;
+  precoSaida: number;
+  precoEntradaCache?: number | null;
+}): Promise<void> {
+  const admin = createAdminClient();
+  await admin.from("nia_precos").upsert(
+    {
+      provedor: input.provedor,
+      modelo: input.modelo,
+      preco_entrada_por_milhao: input.precoEntrada,
+      preco_saida_por_milhao: input.precoSaida,
+      preco_entrada_cache_por_milhao: input.precoEntradaCache ?? null,
+    },
+    { onConflict: "provedor,modelo" },
+  );
+}
+
+export async function deletePreco(provedor: string, modelo: string): Promise<void> {
+  const admin = createAdminClient();
+  await admin.from("nia_precos").delete().eq("provedor", provedor).eq("modelo", modelo);
 }
 
 /** Salva uma NOVA versão da config global (versionado; rollback futuro). */

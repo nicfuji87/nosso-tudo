@@ -6,12 +6,13 @@ import { getUser, isPlatformAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAsaasConfig, saveAsaas, saveNia, saveWhatsapp } from "@/lib/admin/settings";
-import { saveNiaConfig } from "@/lib/nia/admin";
+import { deletePreco, savePreco, saveNiaConfig } from "@/lib/nia/admin";
 import {
   asaasConfigSchema,
   whatsappConfigSchema,
   niaConfigSchema,
   niaAgentConfigSchema,
+  niaPrecoSchema,
   planoSchema,
   anuncioSchema,
 } from "@/lib/schemas/admin";
@@ -168,6 +169,43 @@ export async function salvarNiaConfig(input: unknown): Promise<{ error?: string 
     await saveNiaConfig(parsed.data, gate.userId);
   } catch {
     return { error: "Não foi possível salvar a configuração do agente." };
+  }
+  revalidatePath("/app/admin/nia");
+  return {};
+}
+
+/** Cadastra/atualiza o preço de um modelo (USD por 1M tokens). */
+export async function salvarPreco(input: unknown): Promise<{ error?: string }> {
+  const gate = await requirePlatformAdmin();
+  if ("error" in gate) return { error: gate.error };
+
+  const parsed = niaPrecoSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+
+  try {
+    await savePreco({
+      provedor: parsed.data.provedor,
+      modelo: parsed.data.modelo,
+      precoEntrada: parsed.data.precoEntrada,
+      precoSaida: parsed.data.precoSaida,
+      precoEntradaCache: parsed.data.precoEntradaCache ?? null,
+    });
+  } catch {
+    return { error: "Não foi possível salvar o preço." };
+  }
+  revalidatePath("/app/admin/nia");
+  return {};
+}
+
+/** Remove o preço de um modelo. */
+export async function excluirPreco(provedor: string, modelo: string): Promise<{ error?: string }> {
+  const gate = await requirePlatformAdmin();
+  if ("error" in gate) return { error: gate.error };
+
+  try {
+    await deletePreco(provedor, modelo);
+  } catch {
+    return { error: "Não foi possível remover o preço." };
   }
   revalidatePath("/app/admin/nia");
   return {};

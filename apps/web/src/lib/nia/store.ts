@@ -40,6 +40,7 @@ export interface SalvarMensagemInput {
   widgets?: unknown[];
   tokensInput?: number | null;
   tokensOutput?: number | null;
+  tokensCache?: number | null;
   provedor?: string | null;
   modelo?: string | null;
   custo?: number | null;
@@ -59,6 +60,7 @@ export async function salvarMensagem(input: SalvarMensagemInput): Promise<string
       widgets: input.widgets ?? [],
       tokens_input: input.tokensInput ?? null,
       tokens_output: input.tokensOutput ?? null,
+      tokens_cache: input.tokensCache ?? null,
       provedor: input.provedor ?? null,
       modelo: input.modelo ?? null,
       custo_estimado: input.custo ?? null,

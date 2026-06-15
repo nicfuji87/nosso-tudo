@@ -6,8 +6,10 @@ import {
   getNiaConfigCompleta,
   getOpcoesAgente,
   getUsoNia,
+  listPrecos,
 } from "@/lib/nia/admin";
 import { NiaConsoleForm } from "@/components/admin/nia-console";
+import { NiaPrecos } from "@/components/admin/nia-precos";
 import { formatNumber } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Nia · Admin" };
@@ -26,11 +28,12 @@ export default async function AdminNiaPage() {
     );
   }
 
-  const [uso, insights, config, opcoes] = await Promise.all([
+  const [uso, insights, config, opcoes, precos] = await Promise.all([
     getUsoNia(30),
     getInsightsNia(30),
     getNiaConfigCompleta(),
     getOpcoesAgente(),
+    listPrecos(),
   ]);
 
   return (
@@ -92,22 +95,41 @@ export default async function AdminNiaPage() {
           <Metric label="👍 úteis" value={formatNumber(insights.feedbackPositivo)} />
           <Metric label="👎 ruins" value={formatNumber(insights.feedbackNegativo)} />
         </div>
-        {insights.topFerramentas.length > 0 && (
-          <div className="rounded-2xl border border-border bg-card p-4">
-            <p className="mb-3 text-caption uppercase tracking-wide text-muted-foreground">
-              Ferramentas mais usadas
-            </p>
-            <div className="space-y-2">
-              {insights.topFerramentas.map((f) => (
-                <div key={f.nome} className="flex items-center justify-between text-body-sm">
-                  <code className="font-mono">{f.nome}</code>
-                  <span className="font-mono tabular-nums text-muted-foreground">{f.usos}</span>
-                </div>
-              ))}
+        <div className="grid gap-4 sm:grid-cols-2">
+          {insights.modelosUsados.length > 0 && (
+            <div className="rounded-2xl border border-border bg-card p-4">
+              <p className="mb-3 text-caption uppercase tracking-wide text-muted-foreground">
+                Modelos usados
+              </p>
+              <div className="space-y-2">
+                {insights.modelosUsados.map((m) => (
+                  <div key={m.modelo} className="flex items-center justify-between text-body-sm">
+                    <code className="font-mono">{m.modelo}</code>
+                    <span className="font-mono tabular-nums text-muted-foreground">{m.mensagens}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+          {insights.topFerramentas.length > 0 && (
+            <div className="rounded-2xl border border-border bg-card p-4">
+              <p className="mb-3 text-caption uppercase tracking-wide text-muted-foreground">
+                Ferramentas mais usadas
+              </p>
+              <div className="space-y-2">
+                {insights.topFerramentas.map((f) => (
+                  <div key={f.nome} className="flex items-center justify-between text-body-sm">
+                    <code className="font-mono">{f.nome}</code>
+                    <span className="font-mono tabular-nums text-muted-foreground">{f.usos}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </section>
+
+      <NiaPrecos precos={precos} canEdit={admin} />
 
       <NiaConsoleForm initial={config} opcoes={opcoes} canEdit={admin} />
     </div>

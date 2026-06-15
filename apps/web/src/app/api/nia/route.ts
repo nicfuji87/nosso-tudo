@@ -138,6 +138,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       config.modelo,
       result.tokensInput,
       result.tokensOutput,
+      result.tokensCache,
     );
 
     const mensagemId = await salvarMensagem({
@@ -149,6 +150,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       ferramentas: result.ferramentas,
       tokensInput: result.tokensInput,
       tokensOutput: result.tokensOutput,
+      tokensCache: result.tokensCache,
       provedor: config.provedor,
       modelo: config.modelo,
       custo,
