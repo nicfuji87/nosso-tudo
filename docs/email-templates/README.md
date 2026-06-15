@@ -13,8 +13,10 @@ de cada arquivo na aba correspondente:
 |---|---|---|
 | `01-confirmacao-cadastro.html` | **Confirm signup** | Confirme seu e-mail — Nosso Tudo |
 | `02-redefinir-senha.html` | **Reset password** | Redefinir sua senha — Nosso Tudo |
-| `03-magic-link.html` | **Magic Link** | Seu link de acesso — Nosso Tudo |
+| `03-magic-link.html` | **Magic link or OTP** | Seu link de acesso — Nosso Tudo |
 | `04-convite.html` | **Invite user** | Você foi convidado — Nosso Tudo |
+| `05-alterar-email.html` | **Change email address** | Confirme seu novo e-mail — Nosso Tudo |
+| `06-reautenticacao.html` | **Reauthentication** | Código de verificação — Nosso Tudo |
 
 Para cada um: cole o HTML no campo do template, ajuste o **Subject** e salve.
 
