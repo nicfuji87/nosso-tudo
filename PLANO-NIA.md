@@ -177,7 +177,8 @@ Fatia vertical que exercita toda a arquitetura (RLS, ferramenta tipada, widget, 
 **Backend**
 - `supabase/migrations/0007_nia_core.sql` — estende `mensagens_ia`; cria `nia_acoes`, `nia_contexto`, `nia_config`, `nia_precos`; views `v_nia_uso_usuario` / `v_nia_uso_workspace`; seeds (config global + preços placeholder). **Ainda não aplicada ao banco** (revisar antes).
 - `lib/nia/schemas.ts` — Zod das ferramentas + catálogo de widgets (compartilhado com o cliente).
-- `lib/nia/tools.ts` — `consultar_gastos` (read, nível `auto`) e `lancar_transacao` (propõe, nível `confirmar`).
+- `lib/nia/tools.ts` — `consultar_gastos` (`auto`), `lancar_transacao`, `criar_pessoa` (`confirmar_estrutural`), `criar_compromisso` (caso Bruna).
+- `lib/nia/admin.ts` — leituras do console (uso por usuário, insights, config) + `saveNiaConfig` versionado.
 - `lib/nia/store.ts` — persistência sob RLS (conversa/mensagem/`nia_acoes`).
 - `lib/nia/config.ts` — lê `nia_config`/secret/preço via service_role; calcula custo.
 - `lib/nia/provider.ts` — interface agnóstica + adaptador **anthropic** (fetch, loop de tool-use). OpenAI/Google = novo entry no registro.
@@ -185,7 +186,7 @@ Fatia vertical que exercita toda a arquitetura (RLS, ferramenta tipada, widget, 
 - `app/app/nia/actions.ts` — confirma/rejeita a proposta (executa `criarTransacao` no confirm).
 
 **Frontend**
-- `components/nia/nia-chat.tsx` — chat com widgets `resumo_periodo` e `confirmar_transacao` (Confirmar/Descartar).
+- `components/nia/nia-chat.tsx` — chat com widgets `resumo_periodo`, `confirmar_transacao` (com **desfazer**), `criar_pessoa`, `criar_compromisso`; **feedback 👍/👎** por mensagem.
 - `app/app/nia/page.tsx` — gated; upsell para não-Pro.
 - Link "Nia" no menu (sidebar + topbar), visível só para Pro/admin.
 
@@ -193,9 +194,11 @@ Fatia vertical que exercita toda a arquitetura (RLS, ferramenta tipada, widget, 
 - Aba "Nia (IA)" em Integrações — grava a API key do provedor.
 - Console: **uso de tokens/custo por usuário** (views `v_nia_uso_*`) + **editor de prompt/provedor/modelo versionado** (`nia_config`, cada save = nova versão, rollback-friendly) — `lib/nia/admin.ts`, `components/admin/nia-console.tsx`.
 
-**Para ligar (quando quiser testar):** migration 0007 aplicada ✓ → em `/app/admin/integracoes` → aba Nia → colar a Anthropic API key → acessar `/app/nia` (o fundador, como platform admin, acessa mesmo no Free).
+**Já entregue além da fundação:** cota mensal (`plans.limites.nia_tokens_mes`, bypass admin); injeção de `nia_contexto` no prompt; feedback 👍/👎 + painel de análise conversacional (`getInsightsNia`); migrations 0007 e 0008 aplicadas ✓.
 
-**Ainda não feito (próximas fatias):** streaming; widgets de match/pessoa/compromisso; undo; `nia_contexto` alimentado; **análise conversacional + feedback 👍/👎**; cotas.
+**Para ligar (quando quiser testar):** em `/app/admin/integracoes` → aba Nia → colar a Anthropic API key → acessar `/app/nia` (o fundador, como platform admin, acessa mesmo no Free).
+
+**Ainda não feito (próximas fatias):** streaming token-a-token; widget `resolver_match` (zona cinza inline, hoje só no WhatsApp/Inbox); a Nia popular o `nia_contexto` sozinha (hoje só lê).
 
 ## 9. Faseamento (encaixa após a Fase 3 do plano principal)
 

@@ -6,7 +6,9 @@
 import { z } from "zod";
 import {
   MEIOS_PAGAMENTO,
+  TIPOS_ENTIDADE,
   TIPOS_TRANSACAO,
+  type TipoEntidade,
   type TipoTransacao,
 } from "@/lib/types/db";
 
@@ -41,6 +43,19 @@ export const lancarTransacaoArgs = z.object({
 });
 export type LancarTransacaoArgs = z.infer<typeof lancarTransacaoArgs>;
 
+export const criarPessoaArgs = z.object({
+  nome: z.string().trim().min(1).max(80),
+  tipo: z.enum(TIPOS_ENTIDADE).default("pessoa"),
+});
+export type CriarPessoaArgs = z.infer<typeof criarPessoaArgs>;
+
+export const criarCompromissoArgs = z.object({
+  nome: z.string().trim().min(1).max(120),
+  valor_estimado: z.number().positive().optional(),
+  data_estimada_entrega: z.string().optional(),
+});
+export type CriarCompromissoArgs = z.infer<typeof criarCompromissoArgs>;
+
 /* ------------------------------------------------------------------ */
 /* Catálogo de widgets — o que o cliente renderiza (P4: catálogo fixo) */
 /* ------------------------------------------------------------------ */
@@ -66,7 +81,26 @@ export interface WidgetConfirmarTransacao {
   data: string;
 }
 
-export type NiaWidget = WidgetResumoPeriodo | WidgetConfirmarTransacao;
+export interface WidgetCriarPessoa {
+  tipo: "criar_pessoa";
+  acaoId: string;
+  nome: string;
+  tipoEntidade: TipoEntidade;
+}
+
+export interface WidgetCriarCompromisso {
+  tipo: "criar_compromisso";
+  acaoId: string;
+  nome: string;
+  valorEstimado: number | null;
+  dataEstimada: string | null;
+}
+
+export type NiaWidget =
+  | WidgetResumoPeriodo
+  | WidgetConfirmarTransacao
+  | WidgetCriarPessoa
+  | WidgetCriarCompromisso;
 
 /* ------------------------------------------------------------------ */
 /* Envelopes de transporte                                            */

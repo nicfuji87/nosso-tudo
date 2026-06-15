@@ -52,7 +52,7 @@ async function resolverEstabelecimento(
   return (novo as { id: string } | null)?.id ?? null;
 }
 
-export async function criarTransacao(input: TransacaoInput): Promise<{ error?: string }> {
+export async function criarTransacao(input: TransacaoInput): Promise<{ error?: string; id?: string }> {
   const parsed = transacaoSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
   const d = parsed.data;
@@ -65,30 +65,34 @@ export async function criarTransacao(input: TransacaoInput): Promise<{ error?: s
     ? await resolverEstabelecimento(supabase, workspaceId, d.estabelecimento)
     : null;
 
-  const { error } = await supabase.from("transacoes").insert({
-    workspace_id: workspaceId,
-    tipo: d.tipo,
-    descricao: d.descricao,
-    valor: d.valor,
-    data_transacao: d.data_transacao,
-    categoria_id: d.categoria_id ?? null,
-    meio_pagamento: d.meio_pagamento ?? null,
-    cartao_id: d.cartao_id ?? null,
-    conta_id: d.conta_id ?? null,
-    pagador_id: d.pagador_id ?? null,
-    beneficiario_id: d.beneficiario_id ?? null,
-    estabelecimento_id: estabelecimentoId,
-    observacoes: d.observacoes ?? null,
-    tags: d.tags,
-    origem: "app",
-    criado_por: userId,
-    status_revisao: "confirmado",
-  });
+  const { data: nova, error } = await supabase
+    .from("transacoes")
+    .insert({
+      workspace_id: workspaceId,
+      tipo: d.tipo,
+      descricao: d.descricao,
+      valor: d.valor,
+      data_transacao: d.data_transacao,
+      categoria_id: d.categoria_id ?? null,
+      meio_pagamento: d.meio_pagamento ?? null,
+      cartao_id: d.cartao_id ?? null,
+      conta_id: d.conta_id ?? null,
+      pagador_id: d.pagador_id ?? null,
+      beneficiario_id: d.beneficiario_id ?? null,
+      estabelecimento_id: estabelecimentoId,
+      observacoes: d.observacoes ?? null,
+      tags: d.tags,
+      origem: "app",
+      criado_por: userId,
+      status_revisao: "confirmado",
+    })
+    .select("id")
+    .maybeSingle();
   if (error) return { error: "Não foi possível salvar a transação." };
 
   revalidatePath("/app");
   revalidatePath("/app/transacoes");
-  return {};
+  return { id: (nova as { id: string } | null)?.id };
 }
 
 export async function excluirTransacao(id: string): Promise<{ error?: string }> {

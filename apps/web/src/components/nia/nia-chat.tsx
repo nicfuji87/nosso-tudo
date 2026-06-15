@@ -5,17 +5,16 @@ import { Check, Loader2, Send, Sparkles, ThumbsDown, ThumbsUp, X } from "lucide-
 import { Button } from "@/components/ui/button";
 import { formatBRL } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { confirmarTransacao, rejeitarAcao, votarMensagem } from "@/app/app/nia/actions";
 import {
-  LABEL_TIPO_TRANSACAO,
-  type TipoTransacao,
-} from "@/lib/types/db";
-import type {
-  NiaResposta,
-  NiaWidget,
-  WidgetConfirmarTransacao,
-  WidgetResumoPeriodo,
-} from "@/lib/nia/schemas";
+  confirmarCompromisso,
+  confirmarPessoa,
+  confirmarTransacao,
+  desfazerTransacao,
+  rejeitarAcao,
+  votarMensagem,
+} from "@/app/app/nia/actions";
+import { LABEL_TIPO_ENTIDADE, LABEL_TIPO_TRANSACAO } from "@/lib/types/db";
+import type { NiaResposta, NiaWidget, WidgetResumoPeriodo } from "@/lib/nia/schemas";
 
 interface Msg {
   id: string;
@@ -186,9 +185,55 @@ function Feedback({ mensagemId }: { mensagemId: string }) {
 }
 
 function WidgetView({ widget }: { widget: NiaWidget }) {
-  if (widget.tipo === "resumo_periodo") return <ResumoPeriodoCard w={widget} />;
-  if (widget.tipo === "confirmar_transacao") return <ConfirmarTransacaoCard w={widget} />;
-  return null;
+  switch (widget.tipo) {
+    case "resumo_periodo":
+      return <ResumoPeriodoCard w={widget} />;
+    case "confirmar_transacao": {
+      const detalhes = [
+        LABEL_TIPO_TRANSACAO[widget.tipoTransacao],
+        widget.categoria,
+        widget.estabelecimento,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      return (
+        <AcaoCard
+          titulo={widget.descricao}
+          subtitulo={detalhes}
+          valor={widget.valor}
+          confirmar={() => confirmarTransacao(widget.acaoId)}
+          descartar={() => rejeitarAcao(widget.acaoId)}
+          onUndo={() => desfazerTransacao(widget.acaoId)}
+          labelFeito="Lançado"
+        />
+      );
+    }
+    case "criar_pessoa":
+      return (
+        <AcaoCard
+          titulo={widget.nome}
+          subtitulo={`Nova ${LABEL_TIPO_ENTIDADE[widget.tipoEntidade].toLowerCase()}`}
+          confirmar={() => confirmarPessoa(widget.acaoId)}
+          descartar={() => rejeitarAcao(widget.acaoId)}
+          labelFeito="Cadastrado"
+        />
+      );
+    case "criar_compromisso":
+      return (
+        <AcaoCard
+          titulo={widget.nome}
+          subtitulo={
+            widget.dataEstimada ? `Compra coletiva · entrega ~ ${widget.dataEstimada}` : "Compra coletiva · aberto"
+          }
+          valor={widget.valorEstimado}
+          confirmar={() => confirmarCompromisso(widget.acaoId)}
+          descartar={() => rejeitarAcao(widget.acaoId)}
+          labelFeito="Compromisso criado"
+        />
+      );
+    default:
+      return null;
+  }
 }
 
 function ResumoPeriodoCard({ w }: { w: WidgetResumoPeriodo }) {
@@ -226,58 +271,105 @@ function ResumoPeriodoCard({ w }: { w: WidgetResumoPeriodo }) {
   );
 }
 
-function ConfirmarTransacaoCard({ w }: { w: WidgetConfirmarTransacao }) {
-  const [estado, setEstado] = useState<"idle" | "salvando" | "feito" | "descartado" | "erro">("idle");
+type EstadoAcao =
+  | "idle"
+  | "salvando"
+  | "feito"
+  | "descartado"
+  | "desfazendo"
+  | "desfeito"
+  | "erro";
+
+function AcaoCard({
+  titulo,
+  subtitulo,
+  valor,
+  confirmar,
+  descartar,
+  onUndo,
+  labelFeito = "Feito",
+}: {
+  titulo: string;
+  subtitulo?: string | null;
+  valor?: number | null;
+  confirmar: () => Promise<{ error?: string; ok?: boolean }>;
+  descartar: () => Promise<{ ok: boolean }>;
+  onUndo?: () => Promise<{ error?: string; ok?: boolean }>;
+  labelFeito?: string;
+}) {
+  const [estado, setEstado] = useState<EstadoAcao>("idle");
   const [erro, setErro] = useState<string | null>(null);
 
-  async function confirmar() {
+  async function doConfirmar() {
     setEstado("salvando");
-    const res = await confirmarTransacao(w.acaoId);
-    if (res.error) {
-      setErro(res.error);
+    const r = await confirmar();
+    if (r.error) {
+      setErro(r.error);
       setEstado("erro");
     } else {
       setEstado("feito");
     }
   }
-  async function descartar() {
-    await rejeitarAcao(w.acaoId);
+  async function doDescartar() {
+    await descartar();
     setEstado("descartado");
   }
-
-  const detalhes = [
-    LABEL_TIPO_TRANSACAO[w.tipoTransacao as TipoTransacao],
-    w.categoria,
-    w.estabelecimento,
-  ].filter(Boolean);
+  async function doUndo() {
+    if (!onUndo) return;
+    setEstado("desfazendo");
+    const r = await onUndo();
+    if (r.error) {
+      setErro(r.error);
+      setEstado("erro");
+    } else {
+      setEstado("desfeito");
+    }
+  }
 
   return (
     <div className="rounded-2xl border border-border bg-card p-4 shadow-card">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-medium">{w.descricao}</p>
-          <p className="text-caption text-muted-foreground">{detalhes.join(" · ")}</p>
+          <p className="font-medium">{titulo}</p>
+          {subtitulo && <p className="text-caption text-muted-foreground">{subtitulo}</p>}
         </div>
-        <p className="shrink-0 font-mono text-body font-semibold tabular-nums">{formatBRL(w.valor)}</p>
+        {typeof valor === "number" && (
+          <p className="shrink-0 font-mono text-body font-semibold tabular-nums">{formatBRL(valor)}</p>
+        )}
       </div>
 
       {estado === "feito" && (
-        <p className="mt-3 flex items-center gap-1.5 text-body-sm text-accent">
-          <Check className="size-4" /> Lançado
+        <div className="mt-3 flex items-center justify-between">
+          <p className="flex items-center gap-1.5 text-body-sm text-accent">
+            <Check className="size-4" /> {labelFeito}
+          </p>
+          {onUndo && (
+            <button
+              type="button"
+              onClick={doUndo}
+              className="text-caption text-muted-foreground underline-offset-2 hover:underline"
+            >
+              desfazer
+            </button>
+          )}
+        </div>
+      )}
+      {estado === "desfazendo" && (
+        <p className="mt-3 flex items-center gap-1.5 text-body-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" /> desfazendo…
         </p>
       )}
-      {estado === "descartado" && (
-        <p className="mt-3 text-body-sm text-muted-foreground">Descartado.</p>
-      )}
+      {estado === "desfeito" && <p className="mt-3 text-body-sm text-muted-foreground">Desfeito.</p>}
+      {estado === "descartado" && <p className="mt-3 text-body-sm text-muted-foreground">Descartado.</p>}
       {estado === "erro" && <p className="mt-3 text-body-sm text-destructive">{erro}</p>}
 
-      {(estado === "idle" || estado === "salvando" || estado === "erro") && (
+      {(estado === "idle" || estado === "salvando") && (
         <div className="mt-3 flex gap-2">
-          <Button size="sm" onClick={confirmar} disabled={estado === "salvando"}>
+          <Button size="sm" onClick={doConfirmar} disabled={estado === "salvando"}>
             {estado === "salvando" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
             Confirmar
           </Button>
-          <Button size="sm" variant="ghost" onClick={descartar} disabled={estado === "salvando"}>
+          <Button size="sm" variant="ghost" onClick={doDescartar} disabled={estado === "salvando"}>
             <X className="size-4" /> Descartar
           </Button>
         </div>

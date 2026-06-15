@@ -4,6 +4,8 @@ import { getGastosPorCategoria, getResumoMes } from "@/lib/db/queries";
 import { formatBRL } from "@/lib/format";
 import {
   consultarGastosArgs,
+  criarCompromissoArgs,
+  criarPessoaArgs,
   lancarTransacaoArgs,
   type NiaWidget,
   type NivelConfirmacao,
@@ -141,7 +143,77 @@ const lancarTransacao: NiaTool = {
   },
 };
 
-export const NIA_TOOLS: NiaTool[] = [consultarGastos, lancarTransacao];
+const criarPessoa: NiaTool = {
+  nome: "criar_pessoa",
+  descricao:
+    "Propõe cadastrar uma nova pessoa ou grupo da família (entidade). NÃO grava direto: gera um cartão de confirmação. Use quando o usuário citar alguém ainda não cadastrado.",
+  nivel: "confirmar_estrutural",
+  inputSchema: {
+    type: "object",
+    properties: {
+      nome: { type: "string", description: "Nome da pessoa ou grupo." },
+      tipo: { type: "string", enum: ["pessoa", "grupo"], description: "Default: pessoa." },
+    },
+    required: ["nome"],
+  },
+  async executar(args, ctx) {
+    const d = valida(criarPessoaArgs, args);
+    const acaoId = await registrarAcao({
+      workspaceId: ctx.workspaceId,
+      profileId: ctx.profileId,
+      conversaId: ctx.conversaId,
+      ferramenta: "criar_pessoa",
+      nivel: "confirmar_estrutural",
+      payloadProposto: d,
+    });
+    if (!acaoId) throw new Error("Não consegui preparar o cadastro.");
+    const widget: NiaWidget = { tipo: "criar_pessoa", acaoId, nome: d.nome, tipoEntidade: d.tipo };
+    return { texto: `Preparei o cadastro de ${d.nome} para o usuário confirmar.`, widget };
+  },
+};
+
+const criarCompromisso: NiaTool = {
+  nome: "criar_compromisso",
+  descricao:
+    "Propõe criar um compromisso (compra coletiva/encomenda) que pode demorar a chegar e depende de outras pessoas para fechar. Use para pedidos em grupo. Registra valor estimado e entrega prevista; status inicial 'aberto'.",
+  nivel: "confirmar",
+  inputSchema: {
+    type: "object",
+    properties: {
+      nome: { type: "string", description: "Nome do pedido/compromisso." },
+      valor_estimado: { type: "number", description: "Valor estimado em reais." },
+      data_estimada_entrega: { type: "string", description: "Data ISO (YYYY-MM-DD) estimada." },
+    },
+    required: ["nome"],
+  },
+  async executar(args, ctx) {
+    const d = valida(criarCompromissoArgs, args);
+    const acaoId = await registrarAcao({
+      workspaceId: ctx.workspaceId,
+      profileId: ctx.profileId,
+      conversaId: ctx.conversaId,
+      ferramenta: "criar_compromisso",
+      nivel: "confirmar",
+      payloadProposto: d,
+    });
+    if (!acaoId) throw new Error("Não consegui preparar o compromisso.");
+    const widget: NiaWidget = {
+      tipo: "criar_compromisso",
+      acaoId,
+      nome: d.nome,
+      valorEstimado: d.valor_estimado ?? null,
+      dataEstimada: d.data_estimada_entrega ?? null,
+    };
+    return { texto: `Preparei o compromisso "${d.nome}" para o usuário confirmar.`, widget };
+  },
+};
+
+export const NIA_TOOLS: NiaTool[] = [
+  consultarGastos,
+  lancarTransacao,
+  criarPessoa,
+  criarCompromisso,
+];
 
 export function getTool(nome: string): NiaTool | undefined {
   return NIA_TOOLS.find((t) => t.nome === nome);
