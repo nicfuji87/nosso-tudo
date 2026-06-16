@@ -81,6 +81,28 @@ export type FrequenciaRecorrencia = (typeof FREQUENCIAS_RECORRENCIA)[number];
 export const STATUS_REVISAO = ["confirmado", "sugerido", "novo", "rejeitado"] as const;
 export type StatusRevisao = (typeof STATUS_REVISAO)[number];
 
+export const ESSENCIALIDADES = [
+  "essencial",
+  "necessario",
+  "superfluo",
+  "investimento",
+] as const;
+export type Essencialidade = (typeof ESSENCIALIDADES)[number];
+
+/** Tipos sugeridos de contexto/evento. `tipo` é texto livre; isto é só o padrão da UI. */
+export const TIPOS_CONTEXTO = [
+  "passeio",
+  "compra_mes",
+  "trabalho",
+  "viagem",
+  "festa",
+  "saude",
+  "escola",
+  "casa",
+  "outro",
+] as const;
+export type TipoContexto = (typeof TIPOS_CONTEXTO)[number];
+
 /* ------------------------------------------------------------------ */
 /* Rótulos pt-BR para UI                                               */
 /* ------------------------------------------------------------------ */
@@ -115,6 +137,25 @@ export const LABEL_COMPORTAMENTO: Record<ComportamentoCategoria, string> = {
   basico: "Básica",
   projeto: "Projeto",
   compromisso: "Compromisso",
+};
+
+export const LABEL_ESSENCIALIDADE: Record<Essencialidade, string> = {
+  essencial: "Essencial",
+  necessario: "Necessário",
+  superfluo: "Supérfluo",
+  investimento: "Investimento",
+};
+
+export const LABEL_TIPO_CONTEXTO: Record<TipoContexto, string> = {
+  passeio: "Passeio",
+  compra_mes: "Compra do mês",
+  trabalho: "Trabalho",
+  viagem: "Viagem",
+  festa: "Festa/aniversário",
+  saude: "Saúde",
+  escola: "Escola",
+  casa: "Casa",
+  outro: "Outro",
 };
 
 export const LABEL_TIPO_CONTA: Record<TipoContaBancaria, string> = {
@@ -215,8 +256,46 @@ export interface Categoria {
   cor: string | null;
   categoria_pai_id: string | null;
   comportamento: ComportamentoCategoria;
+  essencialidade_padrao: Essencialidade | null;
   ordem: number;
   ativa: boolean;
+  created_at: string;
+}
+
+/** Contexto/Evento — "por que esse gasto aconteceu?" (Passeio, Compra do mês). */
+export interface Contexto {
+  id: string;
+  workspace_id: string;
+  nome: string;
+  tipo: string | null;
+  data_referencia: string | null;
+  descricao: string | null;
+  cor: string | null;
+  icone: string | null;
+  arquivado: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Linha de uma nota fiscal (itemização). Só usada em modo detalhado. */
+export interface ItemTransacao {
+  id: string;
+  workspace_id: string;
+  transacao_id: string;
+  produto_id: string | null;
+  descricao_original: string;
+  quantidade: number;
+  unidade: string | null;
+  valor_unitario: number | null;
+  valor_total: number | null;
+  desconto: number;
+  categoria_id: string | null;
+  essencialidade: Essencialidade;
+  tipo_item: string | null;
+  contexto_id: string | null;
+  status_revisao: StatusRevisao;
+  score_confianca: number | null;
+  ordem_na_nota: number | null;
   created_at: string;
 }
 
@@ -266,6 +345,7 @@ export interface Transacao {
   conta_id: string | null;
   estabelecimento_id: string | null;
   colecao_id: string | null;
+  contexto_id: string | null;
   status_conciliacao: StatusConciliacao;
   status_revisao: StatusRevisao;
   score_confianca: number | null;
