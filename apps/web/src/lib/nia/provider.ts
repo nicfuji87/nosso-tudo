@@ -68,6 +68,21 @@ interface AnthropicResponse {
     cache_read_input_tokens?: number;
   };
 }
+interface AnthropicStreamEvent {
+  type: string;
+  index?: number;
+  message?: {
+    usage?: {
+      input_tokens?: number;
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
+    };
+  };
+  content_block?: { type?: string; id?: string; name?: string };
+  delta?: { type?: string; text?: string; partial_json?: string; stop_reason?: string };
+  usage?: { output_tokens?: number };
+  error?: unknown;
+}
 interface AnthropicMessage {
   role: "user" | "assistant";
   content: string | unknown[];
@@ -406,6 +421,148 @@ const openaiStream: NiaStreamProvider = async (input, cb) => {
   return { texto: textoFinal, ferramentas, tokensInput, tokensOutput, tokensCache };
 };
 
+/** Anthropic com streaming (SSE) token-a-token + loop de tool-use + prompt caching. */
+const anthropicStream: NiaStreamProvider = async (input, cb) => {
+  const messages: AnthropicMessage[] = [{ role: "user", content: input.userMessage }];
+  const ferramentas: string[] = [];
+  let tokensInput = 0;
+  let tokensOutput = 0;
+  let tokensCache = 0;
+  let textoFinal = "";
+
+  const cacheCtrl = { type: "ephemeral" as const };
+  const toolsPayload = input.tools.map((t, i) => ({
+    name: t.nome,
+    description: t.descricao,
+    input_schema: t.inputSchema,
+    ...(i === input.tools.length - 1 ? { cache_control: cacheCtrl } : {}),
+  }));
+  const systemPayload = [{ type: "text", text: input.systemPrompt, cache_control: cacheCtrl }];
+
+  const parseJson = (s?: string): unknown => {
+    if (!s) return {};
+    try {
+      return JSON.parse(s);
+    } catch {
+      return {};
+    }
+  };
+
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": input.apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: input.modelo,
+        max_tokens: input.maxTokens,
+        temperature: input.temperature,
+        system: systemPayload,
+        tools: toolsPayload,
+        messages,
+        stream: true,
+      }),
+    });
+    if (!res.ok || !res.body) {
+      const detalhe = await res.text().catch(() => "");
+      throw new Error(`Provedor anthropic retornou ${res.status}: ${detalhe.slice(0, 200)}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let stopReason = "";
+    const blocks = new Map<number, { type: string; text?: string; id?: string; name?: string; json?: string }>();
+
+    let parar = false;
+    while (!parar) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const raw of lines) {
+        const line = raw.trim();
+        if (!line.startsWith("data:")) continue;
+        const payload = line.slice(5).trim();
+        if (!payload) continue;
+        let ev: AnthropicStreamEvent;
+        try {
+          ev = JSON.parse(payload) as AnthropicStreamEvent;
+        } catch {
+          continue;
+        }
+        if (ev.type === "message_start") {
+          tokensInput +=
+            (ev.message?.usage?.input_tokens ?? 0) +
+            (ev.message?.usage?.cache_creation_input_tokens ?? 0) +
+            (ev.message?.usage?.cache_read_input_tokens ?? 0);
+          tokensCache += ev.message?.usage?.cache_read_input_tokens ?? 0;
+        } else if (ev.type === "content_block_start" && ev.index != null) {
+          if (ev.content_block?.type === "tool_use") {
+            blocks.set(ev.index, { type: "tool_use", id: ev.content_block.id, name: ev.content_block.name, json: "" });
+          } else if (ev.content_block?.type === "text") {
+            blocks.set(ev.index, { type: "text", text: "" });
+          }
+        } else if (ev.type === "content_block_delta" && ev.index != null) {
+          const b = blocks.get(ev.index);
+          if (ev.delta?.type === "text_delta" && ev.delta.text) {
+            if (b) b.text = (b.text ?? "") + ev.delta.text;
+            textoFinal += ev.delta.text;
+            cb.onText(ev.delta.text);
+          } else if (ev.delta?.type === "input_json_delta" && ev.delta.partial_json != null) {
+            if (b) b.json = (b.json ?? "") + ev.delta.partial_json;
+          }
+        } else if (ev.type === "message_delta") {
+          if (ev.delta?.stop_reason) stopReason = ev.delta.stop_reason;
+          tokensOutput += ev.usage?.output_tokens ?? 0;
+        } else if (ev.type === "message_stop") {
+          parar = true;
+          break;
+        } else if (ev.type === "error") {
+          throw new Error(`anthropic stream error: ${JSON.stringify(ev.error).slice(0, 200)}`);
+        }
+      }
+    }
+
+    if (stopReason !== "tool_use") break;
+
+    const ordered = [...blocks.entries()].sort((a, b) => a[0] - b[0]).map(([, b]) => b);
+    const assistantContent = ordered.map((b) =>
+      b.type === "text"
+        ? { type: "text", text: b.text ?? "" }
+        : { type: "tool_use", id: b.id, name: b.name, input: parseJson(b.json) },
+    );
+    messages.push({ role: "assistant", content: assistantContent });
+
+    const toolResults: unknown[] = [];
+    for (const b of ordered) {
+      if (b.type !== "tool_use") continue;
+      ferramentas.push(b.name ?? "");
+      const tool = getTool(b.name ?? "");
+      let conteudo: string;
+      if (!tool) {
+        conteudo = `Ferramenta desconhecida: ${b.name}`;
+      } else {
+        try {
+          const r = await tool.executar(parseJson(b.json), input.ctx);
+          conteudo = r.texto;
+          if (r.widget) cb.onWidget(r.widget);
+        } catch (e) {
+          conteudo = `Erro ao executar ${b.name}: ${(e as Error).message}`;
+        }
+      }
+      toolResults.push({ type: "tool_result", tool_use_id: b.id, content: conteudo });
+    }
+    messages.push({ role: "user", content: toolResults });
+  }
+
+  return { texto: textoFinal, ferramentas, tokensInput, tokensOutput, tokensCache };
+};
+
 /* ------------------------------ Registro ------------------------------ */
 
 const PROVIDERS: Record<string, NiaProvider> = {
@@ -416,7 +573,7 @@ const PROVIDERS: Record<string, NiaProvider> = {
 
 const STREAM_PROVIDERS: Record<string, NiaStreamProvider> = {
   openai: openaiStream,
-  // anthropic: anthropicStream,  // próximo: streaming nativo da Anthropic
+  anthropic: anthropicStream,
 };
 
 export function getProvider(slug: string): NiaProvider | undefined {
