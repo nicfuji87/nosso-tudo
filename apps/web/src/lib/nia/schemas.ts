@@ -70,6 +70,27 @@ export const lancarTransacaoArgs = z.object({
 });
 export type LancarTransacaoArgs = z.infer<typeof lancarTransacaoArgs>;
 
+export const lancarTransacaoDetalhadaArgs = z.object({
+  descricao: z.string().trim().min(1).max(255),
+  estabelecimento: z.string().trim().max(120).optional(),
+  categoria: z.string().trim().max(120).optional(),
+  data_transacao: z.string().optional(),
+  meio_pagamento: z.enum(MEIOS_PAGAMENTO).optional(),
+  itens: z
+    .array(
+      z.object({
+        nome: z.string().trim().min(1).max(200),
+        quantidade: z.number().optional(),
+        unidade: z.string().trim().max(20).optional(),
+        valor_unitario: z.number().optional(),
+        valor_total: z.number().optional(),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+export type LancarTransacaoDetalhadaArgs = z.infer<typeof lancarTransacaoDetalhadaArgs>;
+
 export const criarPessoaArgs = z.object({
   nome: z.string().trim().min(1).max(80),
   tipo: z.enum(TIPOS_ENTIDADE).default("pessoa"),
@@ -201,6 +222,14 @@ export interface WidgetCriarOrcamento {
   valorPlanejado: number;
 }
 
+export interface WidgetChecklistItens {
+  tipo: "checklist_itens";
+  acaoId: string;
+  descricao: string;
+  estabelecimento: string | null;
+  itens: { nome: string; quantidade: number | null; valorTotal: number | null }[];
+}
+
 export type NiaWidget =
   | WidgetResumoPeriodo
   | WidgetConfirmarTransacao
@@ -211,7 +240,8 @@ export type NiaWidget =
   | WidgetCriarConta
   | WidgetCriarCartao
   | WidgetCriarMeta
-  | WidgetCriarOrcamento;
+  | WidgetCriarOrcamento
+  | WidgetChecklistItens;
 
 /* ------------------------------------------------------------------ */
 /* Envelopes de transporte                                            */

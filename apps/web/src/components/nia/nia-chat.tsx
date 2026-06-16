@@ -30,12 +30,18 @@ import {
   confirmarOrcamento,
   confirmarPessoa,
   confirmarTransacao,
+  confirmarTransacaoDetalhada,
   desfazerTransacao,
   rejeitarAcao,
   votarMensagem,
 } from "@/app/app/nia/actions";
 import { LABEL_COMPORTAMENTO, LABEL_TIPO_ENTIDADE, LABEL_TIPO_TRANSACAO } from "@/lib/types/db";
-import type { NiaWidget, WidgetConfirmarTransacao, WidgetResumoPeriodo } from "@/lib/nia/schemas";
+import type {
+  NiaWidget,
+  WidgetChecklistItens,
+  WidgetConfirmarTransacao,
+  WidgetResumoPeriodo,
+} from "@/lib/nia/schemas";
 
 interface Msg {
   id: string;
@@ -452,6 +458,8 @@ function WidgetView({ widget }: { widget: NiaWidget }) {
       return <ResumoPeriodoCard w={widget} />;
     case "confirmar_transacao":
       return <ConfirmarTransacaoCard w={widget} />;
+    case "checklist_itens":
+      return <ChecklistItensCard w={widget} />;
     case "criar_pessoa":
       return (
         <AcaoCard
@@ -659,6 +667,104 @@ function ConfirmarTransacaoCard({ w }: { w: WidgetConfirmarTransacao }) {
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+function ChecklistItensCard({ w }: { w: WidgetChecklistItens }) {
+  const [incluidos, setIncluidos] = useState<boolean[]>(() => w.itens.map(() => true));
+  const [estado, setEstado] = useState<"idle" | "salvando" | "feito" | "descartado" | "erro">("idle");
+  const [erro, setErro] = useState<string | null>(null);
+
+  const total = w.itens.reduce((s, it, i) => s + (incluidos[i] && it.valorTotal ? it.valorTotal : 0), 0);
+  const qtd = incluidos.filter(Boolean).length;
+  const editavel = estado === "idle" || estado === "salvando" || estado === "erro";
+
+  function toggle(i: number) {
+    if (!editavel || estado === "salvando") return;
+    setIncluidos((prev) => prev.map((v, j) => (j === i ? !v : v)));
+  }
+  async function confirmar() {
+    const indices = incluidos.flatMap((v, i) => (v ? [i] : []));
+    setEstado("salvando");
+    const r = await confirmarTransacaoDetalhada(w.acaoId, indices);
+    if (r.error) {
+      setErro(r.error);
+      setEstado("erro");
+    } else {
+      setEstado("feito");
+    }
+  }
+  async function descartar() {
+    await rejeitarAcao(w.acaoId);
+    setEstado("descartado");
+  }
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
+      <div className="border-b border-border px-4 py-3">
+        <p className="font-medium">{w.descricao}</p>
+        {w.estabelecimento && <p className="text-caption text-muted-foreground">{w.estabelecimento}</p>}
+      </div>
+      <div className="divide-y divide-border">
+        {w.itens.map((it, i) => (
+          <button
+            key={i}
+            type="button"
+            onClick={() => toggle(i)}
+            disabled={!editavel || estado === "salvando"}
+            className="flex w-full items-center gap-3 px-4 py-2.5 text-left"
+          >
+            <span
+              className={cn(
+                "flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
+                incluidos[i] ? "border-accent bg-accent text-accent-foreground" : "border-border",
+              )}
+            >
+              {incluidos[i] && <Check className="size-3.5" />}
+            </span>
+            <span className={cn("flex-1 text-body-sm", !incluidos[i] && "text-muted-foreground line-through")}>
+              {it.nome}
+              {it.quantidade ? ` · ${it.quantidade}` : ""}
+            </span>
+            {it.valorTotal != null && (
+              <span
+                className={cn(
+                  "font-mono text-body-sm tabular-nums",
+                  !incluidos[i] && "text-muted-foreground line-through",
+                )}
+              >
+                {formatBRL(it.valorTotal)}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center justify-between gap-2 border-t border-border bg-secondary/40 px-4 py-3">
+        {estado === "feito" ? (
+          <p className="flex items-center gap-1.5 text-body-sm text-accent">
+            <Check className="size-4" /> Lançado · {qtd} itens
+          </p>
+        ) : estado === "descartado" ? (
+          <p className="text-body-sm text-muted-foreground">Descartado.</p>
+        ) : (
+          <>
+            <div className="text-body-sm text-muted-foreground">
+              {qtd} itens · <span className="font-mono tabular-nums text-foreground">{formatBRL(total)}</span>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={confirmar} disabled={estado === "salvando" || qtd === 0}>
+                {estado === "salvando" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+                Confirmar
+              </Button>
+              <Button size="sm" variant="ghost" onClick={descartar} disabled={estado === "salvando"} aria-label="Descartar">
+                <X className="size-4" />
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+      {estado === "erro" && <p className="px-4 pb-3 text-body-sm text-destructive">{erro}</p>}
     </div>
   );
 }

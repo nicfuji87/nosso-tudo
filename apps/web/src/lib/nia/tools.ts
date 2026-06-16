@@ -26,6 +26,7 @@ import {
   criarOrcamentoArgs,
   criarPessoaArgs,
   lancarTransacaoArgs,
+  lancarTransacaoDetalhadaArgs,
   lembrarFatoArgs,
   listarTransacoesArgs,
   type NiaWidget,
@@ -272,6 +273,79 @@ const lancarTransacao: NiaTool = {
     };
     const texto = `Preparei um lançamento de ${formatBRL(d.valor)} (${d.descricao}) para o usuário confirmar.`;
     return { texto, widget };
+  },
+};
+
+const lancarTransacaoDetalhada: NiaTool = {
+  nome: "lancar_transacao_detalhada",
+  descricao:
+    "Lança uma compra com os ITENS individuais (de uma nota fiscal/recibo). Use quando o usuário enviar a foto ou PDF de uma nota: leia cada item (nome, quantidade, valor) e proponha todos. NÃO grava direto — gera um checklist para o usuário confirmar item a item.",
+  nivel: "confirmar",
+  inputSchema: {
+    type: "object",
+    properties: {
+      descricao: { type: "string", description: "Resumo da compra (ex.: 'Compra no Pão de Açúcar')." },
+      estabelecimento: { type: "string" },
+      categoria: { type: "string" },
+      data_transacao: { type: "string", description: "Data ISO (YYYY-MM-DD)." },
+      meio_pagamento: {
+        type: "string",
+        enum: [
+          "cartao_credito",
+          "cartao_debito",
+          "pix",
+          "dinheiro",
+          "transferencia",
+          "boleto",
+          "vr",
+          "va",
+          "cartao_escola",
+          "outro",
+        ],
+      },
+      itens: {
+        type: "array",
+        description: "Itens da nota.",
+        items: {
+          type: "object",
+          properties: {
+            nome: { type: "string" },
+            quantidade: { type: "number" },
+            unidade: { type: "string" },
+            valor_unitario: { type: "number" },
+            valor_total: { type: "number" },
+          },
+          required: ["nome"],
+        },
+      },
+    },
+    required: ["descricao", "itens"],
+  },
+  async executar(args, ctx) {
+    const d = valida(lancarTransacaoDetalhadaArgs, args);
+    const data = d.data_transacao ?? new Date().toISOString().slice(0, 10);
+    const acaoId = await registrarAcao({
+      workspaceId: ctx.workspaceId,
+      profileId: ctx.profileId,
+      conversaId: ctx.conversaId,
+      ferramenta: "lancar_transacao_detalhada",
+      nivel: "confirmar",
+      payloadProposto: { ...d, data_transacao: data },
+    });
+    if (!acaoId) throw new Error("Não consegui preparar o lançamento detalhado.");
+    const widget: NiaWidget = {
+      tipo: "checklist_itens",
+      acaoId,
+      descricao: d.descricao,
+      estabelecimento: d.estabelecimento ?? null,
+      itens: d.itens.map((i) => ({
+        nome: i.nome,
+        quantidade: i.quantidade ?? null,
+        valorTotal:
+          i.valor_total ?? (i.valor_unitario != null && i.quantidade != null ? i.valor_unitario * i.quantidade : null),
+      })),
+    };
+    return { texto: `Li ${d.itens.length} itens da nota para o usuário conferir.`, widget };
   },
 };
 
@@ -572,6 +646,7 @@ export const NIA_TOOLS: NiaTool[] = [
   consultarCadastros,
   listarTransacoes,
   lancarTransacao,
+  lancarTransacaoDetalhada,
   criarPessoa,
   criarCategoria,
   criarConta,

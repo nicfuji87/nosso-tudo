@@ -14,6 +14,7 @@ import {
   criarOrcamentoArgs,
   criarPessoaArgs,
   lancarTransacaoArgs,
+  lancarTransacaoDetalhadaArgs,
   lembrarFatoArgs,
 } from "@/lib/nia/schemas";
 import { atualizarAcao, votar } from "@/lib/nia/store";
@@ -103,6 +104,72 @@ export async function confirmarTransacao(
   if (res.error) return { error: res.error };
 
   await atualizarAcao(acaoId, { status: "executada", resultado: { ok: true }, registroId: res.id });
+  return { ok: true };
+}
+
+/** Lança a compra detalhada (itens da nota) com os itens selecionados pelo usuário. */
+export async function confirmarTransacaoDetalhada(
+  acaoId: string,
+  indicesIncluidos: number[],
+): Promise<{ error?: string; ok?: boolean }> {
+  const acao = await carregarAcao(acaoId);
+  if (!acao) return { error: "Ação não encontrada." };
+  if (acao.status !== "proposta") return { error: "Essa ação já foi processada." };
+  if (acao.ferramenta !== "lancar_transacao_detalhada") return { error: "Ação não suportada." };
+
+  const parsed = lancarTransacaoDetalhadaArgs.safeParse(acao.payload_proposto);
+  if (!parsed.success) return { error: "Dados da proposta inválidos." };
+  const d = parsed.data;
+
+  const inclusos = d.itens.filter((_, i) => indicesIncluidos.includes(i));
+  if (inclusos.length === 0) return { error: "Selecione ao menos um item." };
+
+  const valorItem = (it: (typeof inclusos)[number]): number =>
+    it.valor_total ?? (it.valor_unitario != null && it.quantidade != null ? it.valor_unitario * it.quantidade : 0);
+  const valor = Number(inclusos.reduce((s, it) => s + valorItem(it), 0).toFixed(2));
+  if (valor <= 0) return { error: "Não consegui os valores dos itens. Tente informar o total." };
+
+  let categoriaId: string | undefined;
+  if (d.categoria) {
+    const alvo = normalizarTexto(d.categoria);
+    const cats = await listCategorias(acao.workspace_id);
+    categoriaId = cats.find((c) => normalizarTexto(c.nome) === alvo)?.id;
+  }
+
+  const res = await criarTransacao({
+    tipo: "despesa",
+    descricao: d.descricao,
+    valor,
+    data_transacao: d.data_transacao ?? new Date().toISOString().slice(0, 10),
+    categoria_id: categoriaId,
+    meio_pagamento: d.meio_pagamento,
+    estabelecimento: d.estabelecimento,
+    tags: [],
+  });
+  if (res.error) return { error: res.error };
+
+  if (res.id) {
+    const supabase = createClient();
+    await supabase.from("itens_transacao").insert(
+      inclusos.map((it, ordem) => ({
+        workspace_id: acao.workspace_id,
+        transacao_id: res.id,
+        descricao_original: it.nome,
+        quantidade: it.quantidade ?? 1,
+        unidade: it.unidade ?? null,
+        valor_unitario: it.valor_unitario ?? null,
+        valor_total: it.valor_total ?? null,
+        ordem_na_nota: ordem + 1,
+        status_revisao: "confirmado",
+      })),
+    );
+  }
+
+  await atualizarAcao(acaoId, {
+    status: "executada",
+    resultado: { ok: true, itens: inclusos.length },
+    registroId: res.id,
+  });
   return { ok: true };
 }
 
