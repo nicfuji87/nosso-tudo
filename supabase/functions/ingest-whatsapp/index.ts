@@ -205,6 +205,122 @@ async function resolverProduto(
   return { produtoId: novo?.id ?? null, status: "novo", score, sugestaoCriada: false };
 }
 
+const ESSENCIALIDADES = new Set(["essencial", "necessario", "superfluo", "investimento"]);
+
+/** Ancora um nome de categoria no padrão canônico (exato → fuzzy pg_trgm). */
+async function resolverCategoriaCanonica(
+  admin: SupabaseClient,
+  workspaceId: string,
+  nomeRaw: string | undefined | null,
+  minScore = 0.45,
+): Promise<{ id: string; nome: string } | null> {
+  if (!nomeRaw) return null;
+  const exato = await matchPorNome(admin, "categorias", "nome", workspaceId, nomeRaw);
+  if (exato) return exato;
+  const { data } = await admin.rpc("buscar_match_categoria", {
+    p_workspace_id: workspaceId,
+    p_nome: String(nomeRaw),
+  });
+  const top = (data as Array<{ id: string; nome: string; score: number }> | null)?.[0];
+  if (top && Number(top.score) >= minScore) return { id: top.id, nome: top.nome };
+  return null;
+}
+
+/** Resolve (ou cria) o contexto/evento da compra. Aceita string ou {nome,tipo,data}. */
+async function resolverContexto(
+  admin: SupabaseClient,
+  workspaceId: string,
+  ctxRaw: unknown,
+): Promise<string | null> {
+  if (!ctxRaw) return null;
+  const isObj = typeof ctxRaw === "object" && ctxRaw !== null;
+  const c = ctxRaw as Record<string, unknown>;
+  const nome = (isObj ? String(c.nome ?? "") : String(ctxRaw)).trim();
+  if (!nome) return null;
+  const tipo = isObj && c.tipo ? String(c.tipo) : null;
+  const data = isObj ? ((c.data ?? c.data_referencia) as string | null) ?? null : null;
+
+  const alvo = norm(nome);
+  const { data: existentes } = await admin
+    .from("contextos")
+    .select("id, nome")
+    .eq("workspace_id", workspaceId)
+    .eq("arquivado", false);
+  const achado = (existentes as Array<{ id: string; nome: string }> | null)?.find(
+    (x) => norm(x.nome) === alvo,
+  );
+  if (achado) return achado.id;
+
+  const { data: novo } = await admin
+    .from("contextos")
+    .insert({ workspace_id: workspaceId, nome, tipo, data_referencia: data })
+    .select("id")
+    .maybeSingle();
+  return (novo as { id: string } | null)?.id ?? null;
+}
+
+/**
+ * Classifica um item: categoria (memória do produto → hint ancorado → categoria
+ * da transação), essencialidade (produto → hint → default da categoria) e tipo.
+ * Aprende o que faltava de volta na memória do produto.
+ */
+async function classificarItem(
+  admin: SupabaseClient,
+  workspaceId: string,
+  produtoId: string | null,
+  hintCategoria: string | null,
+  hintEssencialidade: string | null,
+  hintTipo: string | null,
+  txCategoriaId: string | null,
+): Promise<{ categoriaId: string | null; essencialidade: string | null; tipo: string | null }> {
+  let produtoCat: string | null = null;
+  let produtoEss: string | null = null;
+  let produtoTipo: string | null = null;
+  if (produtoId) {
+    const { data: p } = await admin
+      .from("produtos")
+      .select("categoria_sugerida_id, essencialidade_padrao, tipo_padrao")
+      .eq("id", produtoId)
+      .maybeSingle();
+    produtoCat = (p?.categoria_sugerida_id as string | null) ?? null;
+    produtoEss = (p?.essencialidade_padrao as string | null) ?? null;
+    produtoTipo = (p?.tipo_padrao as string | null) ?? null;
+  }
+
+  // categoria
+  let categoriaId = produtoCat;
+  if (!categoriaId) {
+    const m = await resolverCategoriaCanonica(admin, workspaceId, hintCategoria);
+    categoriaId = m?.id ?? null;
+  }
+  if (!categoriaId) categoriaId = txCategoriaId;
+
+  // essencialidade
+  let essencialidade =
+    produtoEss ?? (hintEssencialidade && ESSENCIALIDADES.has(hintEssencialidade) ? hintEssencialidade : null);
+  if (!essencialidade && categoriaId) {
+    const { data: c } = await admin
+      .from("categorias")
+      .select("essencialidade_padrao")
+      .eq("id", categoriaId)
+      .maybeSingle();
+    essencialidade = (c?.essencialidade_padrao as string | null) ?? null;
+  }
+
+  const tipo = produtoTipo ?? (hintTipo ? String(hintTipo) : null);
+
+  // aprende na memória do produto (só o que ainda faltava)
+  if (produtoId) {
+    const patch: Record<string, unknown> = {};
+    if (!produtoCat && categoriaId) patch.categoria_sugerida_id = categoriaId;
+    if (!produtoEss && essencialidade) patch.essencialidade_padrao = essencialidade;
+    if (!produtoTipo && tipo) patch.tipo_padrao = tipo;
+    if (Object.keys(patch).length > 0) await admin.from("produtos").update(patch).eq("id", produtoId);
+  }
+
+  return { categoriaId, essencialidade, tipo };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405);
@@ -252,7 +368,7 @@ Deno.serve(async (req) => {
         ok: true,
         duplicado: true,
         transacao_id: prev.transacao_id,
-        confirmacao_whatsapp: "✅ Ja tinha anotado isso 🙂",
+        confirmacao_whatsapp: "OK Ja tinha anotado isso",
       });
     }
   }
@@ -264,7 +380,7 @@ Deno.serve(async (req) => {
     return json({
       ok: false,
       error: "telefone_nao_vinculado",
-      confirmacao_whatsapp: "Nao reconheci esse numero. Vincule seu WhatsApp no app primeiro 🙂",
+      confirmacao_whatsapp: "Nao reconheci esse numero. Vincule seu WhatsApp no app primeiro.",
     });
   }
   if (!r.verificado) {
@@ -286,9 +402,12 @@ Deno.serve(async (req) => {
       : { result: { id: null, nome: null, match: null, score: null } as MatchResult, sugestaoCriada: false };
     if (estab.sugestaoCriada) pendencias++;
 
-    const categoria = await matchPorNome(admin, "categorias", "nome", workspaceId, t.categoria);
+    const categoria = await resolverCategoriaCanonica(admin, workspaceId, t.categoria);
     const pagador = await matchPorNome(admin, "entidades", "nome", workspaceId, t.pagador);
     const beneficiario = await matchPorNome(admin, "entidades", "nome", workspaceId, t.beneficiario);
+
+    // contexto/evento da compra (ex.: "Passeio em família", "Compra do mês")
+    const contextoId = await resolverContexto(admin, workspaceId, t.contexto);
 
     // cartão: por apelido ou últimos dígitos
     let cartaoId: string | null = null;
@@ -359,6 +478,7 @@ Deno.serve(async (req) => {
         pagador_id: pagador?.id ?? null,
         beneficiario_id: beneficiario?.id ?? null,
         estabelecimento_id: estab.result.id,
+        contexto_id: contextoId,
         observacoes: t.observacoes ?? null,
         tags: Array.isArray(t.tags) ? t.tags : [],
         origem: "whatsapp",
@@ -374,8 +494,9 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: "falha_criar_transacao", detalhe: txErr?.message }, 500);
     }
 
-    // 7b. Itens da nota — produtos (com pré-conferência) + itens_transacao
+    // 7b. Itens da nota — produtos (pré-conferência) + classificação + itens_transacao
     let itensProcessados = 0;
+    const catTotais = new Map<string, number>(); // categoria_id → soma, p/ categoria dominante
     if (Array.isArray(body.itens) && body.itens.length > 0) {
       let ordem = 0;
       for (const it of body.itens) {
@@ -394,6 +515,21 @@ Deno.serve(async (req) => {
         const vTotal =
           it.valor_total != null ? Number(it.valor_total) : vUnit != null ? vUnit * qtd : null;
 
+        // Classifica: categoria (memória → hint → transação), essencialidade, tipo
+        const hintTipo = it.tipo ?? it.tipo_item ?? null;
+        const cls = await classificarItem(
+          admin,
+          workspaceId,
+          prod.produtoId,
+          it.categoria ? String(it.categoria) : null,
+          it.essencialidade ? String(it.essencialidade) : null,
+          hintTipo ? String(hintTipo) : null,
+          categoria?.id ?? null,
+        );
+        if (cls.categoriaId) {
+          catTotais.set(cls.categoriaId, (catTotais.get(cls.categoriaId) ?? 0) + (vTotal ?? 0));
+        }
+
         await admin.from("itens_transacao").insert({
           workspace_id: workspaceId,
           transacao_id: tx.id,
@@ -403,6 +539,9 @@ Deno.serve(async (req) => {
           unidade: it.unidade ?? null,
           valor_unitario: vUnit,
           valor_total: vTotal,
+          categoria_id: cls.categoriaId,
+          essencialidade: cls.essencialidade ?? undefined, // undefined → default 'necessario'
+          tipo_item: cls.tipo,
           status_revisao: prod.status,
           score_confianca: prod.score,
           ordem_na_nota: ordem,
@@ -423,6 +562,14 @@ Deno.serve(async (req) => {
       }
     }
 
+    // 7c. Se a transação não tinha categoria, herda a dominante dos itens
+    if (!categoria?.id && catTotais.size > 0) {
+      const dominante = [...catTotais.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+      if (dominante) {
+        await admin.from("transacoes").update({ categoria_id: dominante }).eq("id", tx.id);
+      }
+    }
+
     // 8. Registra idempotência
     if (idk) {
       await admin
@@ -436,9 +583,9 @@ Deno.serve(async (req) => {
     const itensTxt =
       itensProcessados > 0 ? ` (${itensProcessados} ${itensProcessados === 1 ? "item" : "itens"})` : "";
     let confirmacao =
-      `✅ Anotei: ${moeda(valor)} ${ondePartes.join(" ")}`.trim() + itensTxt + ". Detalhes no app.";
+      `OK Anotei: ${moeda(valor)} ${ondePartes.join(" ")}`.trim() + itensTxt + ". Detalhes no app.";
     if (pendencias > 0) {
-      confirmacao += `\nℹ️ ${pendencias} ${pendencias === 1 ? "item" : "itens"} para voce conferir no app quando puder.`;
+      confirmacao += `\n${pendencias} ${pendencias === 1 ? "item" : "itens"} para voce conferir no app quando puder.`;
     }
 
     return json({
