@@ -6,6 +6,7 @@
 import { z } from "zod";
 import {
   COMPORTAMENTOS_CATEGORIA,
+  ESSENCIALIDADES,
   MEIOS_PAGAMENTO,
   TIPOS_CONTA_BANCARIA,
   TIPOS_ENTIDADE,
@@ -66,6 +67,7 @@ export const lancarTransacaoArgs = z.object({
   data_transacao: z.string().optional(),
   categoria: z.string().trim().max(120).optional(),
   estabelecimento: z.string().trim().max(120).optional(),
+  contexto: z.string().trim().max(120).optional(),
   meio_pagamento: z.enum(MEIOS_PAGAMENTO).optional(),
 });
 export type LancarTransacaoArgs = z.infer<typeof lancarTransacaoArgs>;
@@ -74,6 +76,7 @@ export const lancarTransacaoDetalhadaArgs = z.object({
   descricao: z.string().trim().min(1).max(255),
   estabelecimento: z.string().trim().max(120).optional(),
   categoria: z.string().trim().max(120).optional(),
+  contexto: z.string().trim().max(120).optional(),
   data_transacao: z.string().optional(),
   meio_pagamento: z.enum(MEIOS_PAGAMENTO).optional(),
   itens: z
@@ -84,6 +87,9 @@ export const lancarTransacaoDetalhadaArgs = z.object({
         unidade: z.string().trim().max(20).optional(),
         valor_unitario: z.number().optional(),
         valor_total: z.number().optional(),
+        categoria: z.string().trim().max(120).optional(),
+        essencialidade: z.enum(ESSENCIALIDADES).optional(),
+        tipo: z.string().trim().max(60).optional(),
       }),
     )
     .min(1)
