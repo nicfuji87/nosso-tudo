@@ -99,6 +99,65 @@ export async function getGastosPorContexto(workspaceId: string): Promise<GastoCo
   }));
 }
 
+export interface ItemDeTransacao {
+  id: string;
+  transacaoId: string;
+  descricao: string;
+  quantidade: number;
+  valorTotal: number | null;
+  categoriaNome: string | null;
+  categoriaIcone: string | null;
+  categoriaCor: string | null;
+  essencialidade: Essencialidade;
+  tipoItem: string | null;
+}
+
+/** Itens (linhas de nota) das transações informadas, agrupados por transação. */
+export async function getItensPorTransacao(
+  workspaceId: string,
+  transacaoIds: string[],
+): Promise<Record<string, ItemDeTransacao[]>> {
+  const out: Record<string, ItemDeTransacao[]> = {};
+  if (transacaoIds.length === 0) return out;
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("itens_transacao")
+    .select(
+      "id, transacao_id, descricao_original, quantidade, valor_total, essencialidade, tipo_item, categoria:categorias(nome, icone, cor)",
+    )
+    .eq("workspace_id", workspaceId)
+    .in("transacao_id", transacaoIds)
+    .order("ordem_na_nota", { ascending: true });
+  const rows =
+    (data as
+      | {
+          id: string;
+          transacao_id: string;
+          descricao_original: string;
+          quantidade: number | null;
+          valor_total: number | null;
+          essencialidade: Essencialidade;
+          tipo_item: string | null;
+          categoria: { nome: string; icone: string | null; cor: string | null } | null;
+        }[]
+      | null) ?? [];
+  for (const r of rows) {
+    (out[r.transacao_id] ??= []).push({
+      id: r.id,
+      transacaoId: r.transacao_id,
+      descricao: r.descricao_original,
+      quantidade: Number(r.quantidade ?? 1),
+      valorTotal: r.valor_total != null ? Number(r.valor_total) : null,
+      categoriaNome: r.categoria?.nome ?? null,
+      categoriaIcone: r.categoria?.icone ?? null,
+      categoriaCor: r.categoria?.cor ?? null,
+      essencialidade: r.essencialidade,
+      tipoItem: r.tipo_item,
+    });
+  }
+  return out;
+}
+
 export interface TransacaoFilters {
   tipo?: string;
   categoriaId?: string;

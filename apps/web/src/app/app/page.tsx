@@ -4,6 +4,8 @@ import { getWorkspaceContext } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import {
   getGastosPorCategoria,
+  getGastosPorContexto,
+  getGastosPorEssencialidade,
   getResumoMes,
   listCartoes,
   listTransacoes,
@@ -15,20 +17,33 @@ import { EmptyState } from "@/components/patterns/empty-state";
 import { CategoryDonut } from "@/components/dashboard/category-donut";
 import { TransacaoItem } from "@/components/transacoes/transacao-item";
 import { greeting, formatBRL, formatDate } from "@/lib/format";
+import { LABEL_ESSENCIALIDADE, type Essencialidade } from "@/lib/types/db";
 
 const PALETTE = ["#3D6D84", "#8FA993", "#FF7043", "#7E57C2", "#EC407A", "#C4B8B0"];
+
+const COR_ESSENCIALIDADE: Record<Essencialidade, string> = {
+  essencial: "#8FA993",
+  necessario: "#3D6D84",
+  superfluo: "#E08A4B",
+  investimento: "#7E57C2",
+};
 
 export default async function HomePage() {
   const { profile, workspace, plan } = await getWorkspaceContext();
   const supabase = createClient();
 
-  const [resumo, gastos, recentes, cartoes, colecoesRes] = await Promise.all([
+  const [resumo, gastos, essenc, eventos, recentes, cartoes, colecoesRes] = await Promise.all([
     getResumoMes(workspace.id),
     getGastosPorCategoria(workspace.id),
+    getGastosPorEssencialidade(workspace.id),
+    getGastosPorContexto(workspace.id),
     listTransacoes(workspace.id, { limit: 6 }),
     listCartoes(workspace.id),
     supabase.from("v_colecoes_em_aberto").select("*").eq("workspace_id", workspace.id).limit(4),
   ]);
+
+  const totalEssenc = essenc.reduce((s, e) => s + e.total, 0);
+  const eventosTop = eventos.slice(0, 4);
 
   const colecoes = (colecoesRes.data as { id: string; nome: string; cor: string | null; icone: string | null }[] | null) ?? [];
   const primeiroNome = profile.nome.split(" ")[0];
@@ -107,6 +122,70 @@ export default async function HomePage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Essencial × Supérfluo (essencialidade) */}
+      {totalEssenc > 0 && (
+        <Card>
+          <CardContent className="p-5">
+            <p className="text-body-sm font-medium">Essencial × Supérfluo</p>
+            <p className="text-caption text-muted-foreground">
+              Para onde o dinheiro vai por natureza do gasto
+            </p>
+            <div className="mt-4 flex h-3 w-full overflow-hidden rounded-full bg-secondary">
+              {essenc.map((e) => (
+                <div
+                  key={e.essencialidade}
+                  style={{
+                    width: `${(e.total / totalEssenc) * 100}%`,
+                    backgroundColor: COR_ESSENCIALIDADE[e.essencialidade],
+                  }}
+                />
+              ))}
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {essenc.map((e) => (
+                <div key={e.essencialidade} className="flex items-center gap-2">
+                  <span
+                    className="size-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: COR_ESSENCIALIDADE[e.essencialidade] }}
+                  />
+                  <div className="min-w-0">
+                    <p className="truncate text-caption text-muted-foreground">
+                      {LABEL_ESSENCIALIDADE[e.essencialidade]}
+                    </p>
+                    <p className="tabular text-body-sm font-medium">
+                      {Math.round((e.total / totalEssenc) * 100)}%
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Eventos (contexto) — custo por evento da vida familiar */}
+      {eventosTop.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-h4 font-semibold tracking-tight">Eventos</h2>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {eventosTop.map((ev) => (
+              <Card key={ev.contextoId}>
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">{ev.icone ?? "🗓️"}</span>
+                    <p className="truncate text-body-sm font-medium">{ev.nome}</p>
+                  </div>
+                  <p className="tabular mt-3 text-body-lg font-semibold">{formatBRL(ev.total)}</p>
+                  <p className="text-caption text-muted-foreground">
+                    {ev.nTransacoes} {ev.nTransacoes === 1 ? "lançamento" : "lançamentos"}
+                  </p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Coleções ativas */}
       {colecoes.length > 0 && (
