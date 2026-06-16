@@ -53,6 +53,56 @@ export const niaPrecoSchema = z.object({
 });
 export type NiaPrecoInput = z.infer<typeof niaPrecoSchema>;
 
+/** Alerta proativo da Nia (push WhatsApp). Ver lib/admin/alertas + migration 0011. */
+const alvoSchema = z.object({
+  workspaceId: z.string().uuid(),
+  profileId: z.string().uuid().nullable().default(null),
+});
+
+export const alertaSchema = z
+  .object({
+    id: z.string().uuid().optional(),
+    nome: z.string().trim().min(1, "Informe um nome").max(120),
+    tipo: z.enum([
+      "saldo_negativo",
+      "orcamento_estourado",
+      "orcamento_perto",
+      "cartao_limite",
+      "resumo_semanal",
+      "resumo_mensal",
+      "personalizado",
+    ]),
+    ativo: z.boolean().default(false),
+    frequencia: z.enum(["imediato", "diario", "semanal", "mensal"]),
+    hora: z.coerce.number().int().min(0).max(23).default(9),
+    diaSemana: z.coerce.number().int().min(0).max(6).nullable().optional(),
+    diaMes: z.coerce.number().int().min(1).max(28).nullable().optional(),
+    limiarPct: z.coerce.number().int().min(1).max(100).nullable().optional(),
+    template: z.string().trim().max(800).optional().or(z.literal("")),
+    publicoAlvo: z.enum(["todos_pro", "especificos"]),
+    alvos: z.array(alvoSchema).max(200).default([]),
+  })
+  .refine((d) => d.tipo !== "personalizado" || (d.template && d.template.trim().length > 0), {
+    message: "Alerta personalizado precisa de uma mensagem.",
+    path: ["template"],
+  })
+  .refine((d) => d.publicoAlvo !== "especificos" || d.alvos.length > 0, {
+    message: "Escolha ao menos um destinatário.",
+    path: ["alvos"],
+  });
+export type AlertaInput = z.infer<typeof alertaSchema>;
+
+/** Teste de envio WhatsApp (admin). */
+export const testeWhatsappSchema = z.object({
+  telefone: z
+    .string()
+    .trim()
+    .transform((s) => s.replace(/\D/g, ""))
+    .pipe(z.string().min(10, "Telefone inválido").max(15)),
+  mensagem: z.string().trim().max(800).optional().or(z.literal("")),
+});
+export type TesteWhatsappInput = z.infer<typeof testeWhatsappSchema>;
+
 /** Edição de plano (admin de planos). */
 export const planoSchema = z.object({
   id: z.string().uuid(),

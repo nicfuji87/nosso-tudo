@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Plug, CreditCard, Megaphone, Sparkles, type LucideIcon } from "lucide-react";
+import { Plug, CreditCard, Megaphone, Sparkles, BellRing, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface AdminTab {
@@ -14,6 +14,7 @@ interface AdminTab {
 const TABS: AdminTab[] = [
   { href: "/app/admin/integracoes", label: "Integrações", icon: Plug },
   { href: "/app/admin/nia", label: "Nia", icon: Sparkles },
+  { href: "/app/admin/alertas", label: "Alertas", icon: BellRing },
   { href: "/app/admin/planos", label: "Planos", icon: CreditCard },
   { href: "/app/admin/anuncios", label: "Anúncios", icon: Megaphone },
 ];

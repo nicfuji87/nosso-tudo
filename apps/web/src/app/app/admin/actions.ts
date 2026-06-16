@@ -8,6 +8,14 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getAsaasConfig, saveAsaas, saveNia, saveWhatsapp } from "@/lib/admin/settings";
 import { deletePreco, savePreco, saveNiaConfig } from "@/lib/nia/admin";
 import {
+  saveAlerta,
+  deleteAlerta,
+  toggleAlerta,
+  dispararAlertas,
+  enviarTesteWhatsapp,
+  type DisparoResultado,
+} from "@/lib/admin/alertas";
+import {
   asaasConfigSchema,
   whatsappConfigSchema,
   niaConfigSchema,
@@ -15,6 +23,8 @@ import {
   niaPrecoSchema,
   planoSchema,
   anuncioSchema,
+  alertaSchema,
+  testeWhatsappSchema,
 } from "@/lib/schemas/admin";
 import { ASAAS_BASE_URL } from "@/lib/asaas/constants";
 
@@ -209,6 +219,87 @@ export async function excluirPreco(provedor: string, modelo: string): Promise<{ 
   }
   revalidatePath("/app/admin/nia");
   return {};
+}
+
+// ---- Alertas proativos da Nia (push WhatsApp) ------------------------------
+
+export async function salvarAlerta(input: unknown): Promise<{ error?: string }> {
+  const gate = await requirePlatformAdmin();
+  if ("error" in gate) return { error: gate.error };
+
+  const parsed = alertaSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  const d = parsed.data;
+
+  try {
+    await saveAlerta(
+      {
+        id: d.id,
+        nome: d.nome,
+        tipo: d.tipo,
+        ativo: d.ativo,
+        frequencia: d.frequencia,
+        hora: d.hora,
+        diaSemana: d.diaSemana ?? null,
+        diaMes: d.diaMes ?? null,
+        limiarPct: d.limiarPct ?? null,
+        template: d.template || null,
+        publicoAlvo: d.publicoAlvo,
+        alvos: d.alvos,
+      },
+      gate.userId,
+    );
+  } catch {
+    return { error: "Não foi possível salvar o alerta." };
+  }
+  revalidatePath("/app/admin/alertas");
+  return {};
+}
+
+export async function excluirAlerta(id: string): Promise<{ error?: string }> {
+  const gate = await requirePlatformAdmin();
+  if ("error" in gate) return { error: gate.error };
+  try {
+    await deleteAlerta(id);
+  } catch {
+    return { error: "Não foi possível excluir o alerta." };
+  }
+  revalidatePath("/app/admin/alertas");
+  return {};
+}
+
+export async function alternarAlerta(id: string, ativo: boolean): Promise<{ error?: string }> {
+  const gate = await requirePlatformAdmin();
+  if ("error" in gate) return { error: gate.error };
+  try {
+    await toggleAlerta(id, ativo);
+  } catch {
+    return { error: "Não foi possível alterar o alerta." };
+  }
+  revalidatePath("/app/admin/alertas");
+  return {};
+}
+
+/** Roda a avaliação agora (ignora a janela de horário; respeita a deduplicação). */
+export async function dispararAlertasAgora(
+  alertaId?: string,
+): Promise<DisparoResultado & { error?: string }> {
+  const gate = await requirePlatformAdmin();
+  if ("error" in gate) return { ok: false, error: gate.error };
+  const res = await dispararAlertas({ alertaId, forcar: true });
+  revalidatePath("/app/admin/alertas");
+  return res;
+}
+
+/** Envia uma mensagem de teste para validar a credencial uazapi. */
+export async function testarEnvioWhatsapp(
+  input: unknown,
+): Promise<DisparoResultado & { error?: string }> {
+  const gate = await requirePlatformAdmin();
+  if ("error" in gate) return { ok: false, error: gate.error };
+  const parsed = testeWhatsappSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  return enviarTesteWhatsapp(parsed.data.telefone, parsed.data.mensagem || undefined);
 }
 
 // ---- Planos ----------------------------------------------------------------

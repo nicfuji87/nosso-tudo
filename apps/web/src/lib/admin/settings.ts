@@ -163,6 +163,27 @@ export async function saveWhatsapp(
   );
 }
 
+/**
+ * Config para disparar a Edge Function de alertas (nia-alertas-cron).
+ * `cronSecret` é o segredo compartilhado com o pg_cron; o admin reusa para
+ * "disparar agora" / "enviar teste". `uazapiPronto` indica se há credencial
+ * de envio (URL + token) cadastrada.
+ */
+export interface WhatsappDispatch {
+  baseUrl: string | null;
+  cronSecret: string | null;
+  uazapiPronto: boolean;
+}
+
+export async function getWhatsappDispatch(): Promise<WhatsappDispatch> {
+  const row = await readSettings("whatsapp");
+  return {
+    baseUrl: (row?.valor?.functions_base_url as string) ?? null,
+    cronSecret: row?.secrets?.cron_secret ?? null,
+    uazapiPronto: Boolean(row?.valor?.uazapi_url && row?.secrets?.uazapi_token),
+  };
+}
+
 // ---- Nia (assistente de IA) -------------------------------------------------
 // As keys ficam em secrets["<provedor>_api_key"] — o mesmo nome que lib/nia/config lê.
 
