@@ -163,6 +163,7 @@ export function NiaChat({
   const [loading, setLoading] = useState(false);
   const [anexos, setAnexos] = useState<PendingAnexo[]>([]);
   const [gravando, setGravando] = useState(false);
+  const [transcrevendo, setTranscrevendo] = useState(false);
   const conversaId = useRef<string | undefined>(conversaIdInicial);
   const fileRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
@@ -255,13 +256,37 @@ export function NiaChat({
         stream.getTracks().forEach((t) => t.stop());
         setGravando(false);
         const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        if (blob.size > 0) await subirAnexo(blob, `audio-${Date.now()}.webm`, "audio/webm", "audio");
+        if (blob.size > 0) await transcreverParaCampo(blob);
       };
       recorderRef.current = rec;
       rec.start();
       setGravando(true);
     } catch {
       toast.error("Não consegui acessar o microfone");
+    }
+  }
+
+  /** Transcreve a gravação e joga o texto no campo, para o usuário revisar/editar. */
+  async function transcreverParaCampo(blob: Blob) {
+    setTranscrevendo(true);
+    try {
+      const form = new FormData();
+      form.append("file", blob, `audio-${Date.now()}.webm`);
+      const res = await fetch("/api/nia/transcrever", { method: "POST", body: form });
+      const data = (await res.json().catch(() => ({}))) as { texto?: string; error?: string };
+      if (!res.ok || !data.texto) {
+        toast.error(data.error ?? "Não consegui transcrever o áudio.");
+        return;
+      }
+      setInput((prev) => (prev ? `${prev.trimEnd()} ${data.texto}` : data.texto!));
+      requestAnimationFrame(() => {
+        ajustarAltura();
+        inputRef.current?.focus();
+      });
+    } catch {
+      toast.error("Sem conexão para transcrever o áudio.");
+    } finally {
+      setTranscrevendo(false);
     }
   }
 
@@ -514,11 +539,13 @@ export function NiaChat({
               size="icon"
               variant="ghost"
               onClick={toggleGravacao}
-              disabled={loading}
-              aria-label={gravando ? "Parar gravação" : "Gravar áudio"}
+              disabled={loading || transcrevendo}
+              aria-label={
+                transcrevendo ? "Transcrevendo áudio" : gravando ? "Parar gravação" : "Gravar áudio"
+              }
               className={cn(gravando && "animate-pulse text-destructive")}
             >
-              <Mic className="size-4" />
+              {transcrevendo ? <Loader2 className="size-4 animate-spin" /> : <Mic className="size-4" />}
             </Button>
           </div>
           <Button

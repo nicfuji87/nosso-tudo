@@ -82,7 +82,7 @@ async function lerDocumento(
 }
 
 /** Transcreve áudio via OpenAI Whisper. Retorna "" se sem chave/erro (degrada). */
-async function transcrever(blob: Blob, nome: string): Promise<string> {
+export async function transcrever(blob: Blob, nome: string): Promise<string> {
   const key = await getApiKey("openai");
   if (!key) return "";
   const form = new FormData();
