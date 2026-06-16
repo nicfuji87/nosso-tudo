@@ -1,6 +1,7 @@
 import "server-only";
 import type { z } from "zod";
 import {
+  buscarMatchEstabelecimento,
   getGastosPorCategoria,
   getResumoMes,
   listCartoes,
@@ -11,6 +12,7 @@ import {
   listTransacoes,
 } from "@/lib/db/queries";
 import { formatBRL, formatDate } from "@/lib/format";
+import { normalizarTexto } from "@/lib/normalize";
 import {
   consultarCadastrosArgs,
   consultarGastosArgs,
@@ -207,13 +209,23 @@ const lancarTransacao: NiaTool = {
   async executar(args, ctx) {
     const d = valida(lancarTransacaoArgs, args);
     const data = d.data_transacao ?? new Date().toISOString().slice(0, 10);
+
+    // Zona cinza de estabelecimento (0.60–0.94 e não-exato) → pergunta inline no chat.
+    let match: { candidatoId: string; sugestao: string; score: number } | null = null;
+    if (d.estabelecimento) {
+      const top = await buscarMatchEstabelecimento(ctx.workspaceId, d.estabelecimento);
+      if (top && normalizarTexto(top.nome) !== normalizarTexto(d.estabelecimento) && top.score >= 0.6 && top.score < 0.95) {
+        match = { candidatoId: top.id, sugestao: top.nome, score: top.score };
+      }
+    }
+
     const acaoId = await registrarAcao({
       workspaceId: ctx.workspaceId,
       profileId: ctx.profileId,
       conversaId: ctx.conversaId,
       ferramenta: "lancar_transacao",
       nivel: "confirmar",
-      payloadProposto: { ...d, data_transacao: data },
+      payloadProposto: { ...d, data_transacao: data, _match: match },
     });
     if (!acaoId) throw new Error("Não consegui preparar o lançamento.");
     const widget: NiaWidget = {
@@ -226,6 +238,7 @@ const lancarTransacao: NiaTool = {
       categoria: d.categoria ?? null,
       estabelecimento: d.estabelecimento ?? null,
       data,
+      match: match ? { sugestao: match.sugestao, score: match.score } : null,
     };
     const texto = `Preparei um lançamento de ${formatBRL(d.valor)} (${d.descricao}) para o usuário confirmar.`;
     return { texto, widget };

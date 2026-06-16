@@ -18,7 +18,7 @@ import {
   votarMensagem,
 } from "@/app/app/nia/actions";
 import { LABEL_COMPORTAMENTO, LABEL_TIPO_ENTIDADE, LABEL_TIPO_TRANSACAO } from "@/lib/types/db";
-import type { NiaWidget, WidgetResumoPeriodo } from "@/lib/nia/schemas";
+import type { NiaWidget, WidgetConfirmarTransacao, WidgetResumoPeriodo } from "@/lib/nia/schemas";
 
 interface Msg {
   id: string;
@@ -226,26 +226,8 @@ function WidgetView({ widget }: { widget: NiaWidget }) {
   switch (widget.tipo) {
     case "resumo_periodo":
       return <ResumoPeriodoCard w={widget} />;
-    case "confirmar_transacao": {
-      const detalhes = [
-        LABEL_TIPO_TRANSACAO[widget.tipoTransacao],
-        widget.categoria,
-        widget.estabelecimento,
-      ]
-        .filter(Boolean)
-        .join(" · ");
-      return (
-        <AcaoCard
-          titulo={widget.descricao}
-          subtitulo={detalhes}
-          valor={widget.valor}
-          confirmar={() => confirmarTransacao(widget.acaoId)}
-          descartar={() => rejeitarAcao(widget.acaoId)}
-          onUndo={() => desfazerTransacao(widget.acaoId)}
-          labelFeito="Lançado"
-        />
-      );
-    }
+    case "confirmar_transacao":
+      return <ConfirmarTransacaoCard w={widget} />;
     case "criar_pessoa":
       return (
         <AcaoCard
@@ -314,6 +296,125 @@ function WidgetView({ widget }: { widget: NiaWidget }) {
     default:
       return null;
   }
+}
+
+function ConfirmarTransacaoCard({ w }: { w: WidgetConfirmarTransacao }) {
+  const [estado, setEstado] = useState<EstadoAcao>("idle");
+  const [erro, setErro] = useState<string | null>(null);
+  const [decisao, setDecisao] = useState<"mesmo" | "outro">("mesmo");
+
+  const detalhes = [LABEL_TIPO_TRANSACAO[w.tipoTransacao], w.categoria, w.estabelecimento]
+    .filter(Boolean)
+    .join(" · ");
+
+  async function confirmar() {
+    setEstado("salvando");
+    const r = await confirmarTransacao(w.acaoId, w.match ? decisao : undefined);
+    if (r.error) {
+      setErro(r.error);
+      setEstado("erro");
+    } else {
+      setEstado("feito");
+    }
+  }
+  async function descartar() {
+    await rejeitarAcao(w.acaoId);
+    setEstado("descartado");
+  }
+  async function undo() {
+    setEstado("desfazendo");
+    const r = await desfazerTransacao(w.acaoId);
+    if (r.error) {
+      setErro(r.error);
+      setEstado("erro");
+    } else {
+      setEstado("desfeito");
+    }
+  }
+
+  const editavel = estado === "idle" || estado === "salvando";
+
+  return (
+    <div className="rounded-2xl border border-border bg-card p-4 shadow-card">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-medium">{w.descricao}</p>
+          {detalhes && <p className="text-caption text-muted-foreground">{detalhes}</p>}
+        </div>
+        <p className="shrink-0 font-mono text-body font-semibold tabular-nums">{formatBRL(w.valor)}</p>
+      </div>
+
+      {w.match && editavel && (
+        <div className="mt-3 rounded-xl border border-border bg-secondary/40 p-3">
+          <p className="text-caption text-muted-foreground">
+            Escrito <span className="text-foreground">“{w.estabelecimento}”</span> — é o mesmo{" "}
+            <span className="text-foreground">{w.match.sugestao}</span> que você já usa?
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={() => setDecisao("mesmo")}
+              className={cn(
+                "rounded-full border px-3 py-1 text-caption transition-colors",
+                decisao === "mesmo"
+                  ? "border-accent bg-accent/10 text-foreground"
+                  : "border-border text-muted-foreground hover:bg-secondary",
+              )}
+            >
+              É o mesmo
+            </button>
+            <button
+              type="button"
+              onClick={() => setDecisao("outro")}
+              className={cn(
+                "rounded-full border px-3 py-1 text-caption transition-colors",
+                decisao === "outro"
+                  ? "border-accent bg-accent/10 text-foreground"
+                  : "border-border text-muted-foreground hover:bg-secondary",
+              )}
+            >
+              É outro
+            </button>
+          </div>
+        </div>
+      )}
+
+      {estado === "feito" && (
+        <div className="mt-3 flex items-center justify-between">
+          <p className="flex items-center gap-1.5 text-body-sm text-accent">
+            <Check className="size-4" /> Lançado
+          </p>
+          <button
+            type="button"
+            onClick={undo}
+            className="text-caption text-muted-foreground underline-offset-2 hover:underline"
+          >
+            desfazer
+          </button>
+        </div>
+      )}
+      {estado === "desfazendo" && (
+        <p className="mt-3 flex items-center gap-1.5 text-body-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" /> desfazendo…
+        </p>
+      )}
+      {estado === "desfeito" && <p className="mt-3 text-body-sm text-muted-foreground">Desfeito.</p>}
+      {estado === "descartado" && <p className="mt-3 text-body-sm text-muted-foreground">Descartado.</p>}
+      {estado === "erro" && <p className="mt-3 text-body-sm text-destructive">{erro}</p>}
+
+      {editavel && (
+        <div className="mt-3 flex gap-2">
+          <Button size="sm" onClick={confirmar} disabled={estado === "salvando"}>
+            {estado === "salvando" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+            Confirmar
+          </Button>
+          <Button size="sm" variant="ghost" onClick={descartar} disabled={estado === "salvando"}>
+            <X className="size-4" /> Descartar
+          </Button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ResumoPeriodoCard({ w }: { w: WidgetResumoPeriodo }) {

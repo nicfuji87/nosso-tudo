@@ -36,8 +36,31 @@ async function carregarAcao(acaoId: string): Promise<AcaoRow | null> {
   return (data as AcaoRow | null) ?? null;
 }
 
-/** Executa o lançamento proposto pela Nia, após confirmação do usuário. */
-export async function confirmarTransacao(acaoId: string): Promise<{ error?: string; ok?: boolean }> {
+/** Aprende um apelido para um estabelecimento (zona cinza confirmada como "o mesmo"). */
+async function adicionarApelido(estabId: string, apelido: string): Promise<void> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("estabelecimentos")
+    .select("apelidos")
+    .eq("id", estabId)
+    .maybeSingle();
+  const atuais = Array.isArray((data as { apelidos: string[] } | null)?.apelidos)
+    ? (data as { apelidos: string[] }).apelidos
+    : [];
+  const norm = normalizarTexto(apelido);
+  if (atuais.some((a) => normalizarTexto(a) === norm)) return;
+  await supabase.from("estabelecimentos").update({ apelidos: [...atuais, apelido] }).eq("id", estabId);
+}
+
+/**
+ * Executa o lançamento proposto pela Nia, após confirmação do usuário.
+ * `decisaoMatch` resolve a zona cinza de estabelecimento: "mesmo" vincula ao
+ * candidato (e aprende o apelido); "outro" cria um estabelecimento novo.
+ */
+export async function confirmarTransacao(
+  acaoId: string,
+  decisaoMatch?: "mesmo" | "outro",
+): Promise<{ error?: string; ok?: boolean }> {
   const acao = await carregarAcao(acaoId);
   if (!acao) return { error: "Ação não encontrada." };
   if (acao.status !== "proposta") return { error: "Essa ação já foi processada." };
@@ -46,6 +69,9 @@ export async function confirmarTransacao(acaoId: string): Promise<{ error?: stri
   const parsed = lancarTransacaoArgs.safeParse(acao.payload_proposto);
   if (!parsed.success) return { error: "Dados da proposta inválidos." };
   const d = parsed.data;
+  const match =
+    (acao.payload_proposto as { _match?: { candidatoId: string; sugestao: string } | null } | null)
+      ?._match ?? null;
 
   // Resolve categoria por nome (match exato normalizado), se informada.
   let categoriaId: string | undefined;
@@ -55,6 +81,13 @@ export async function confirmarTransacao(acaoId: string): Promise<{ error?: stri
     categoriaId = cats.find((c) => normalizarTexto(c.nome) === alvo)?.id;
   }
 
+  // Zona cinza: "mesmo" (default) vincula ao existente; "outro" mantém o nome digitado.
+  let estabelecimento = d.estabelecimento;
+  if (match && decisaoMatch !== "outro") {
+    estabelecimento = match.sugestao;
+    if (d.estabelecimento) await adicionarApelido(match.candidatoId, d.estabelecimento);
+  }
+
   const res = await criarTransacao({
     tipo: d.tipo,
     descricao: d.descricao,
@@ -62,7 +95,7 @@ export async function confirmarTransacao(acaoId: string): Promise<{ error?: stri
     data_transacao: d.data_transacao ?? new Date().toISOString().slice(0, 10),
     categoria_id: categoriaId,
     meio_pagamento: d.meio_pagamento,
-    estabelecimento: d.estabelecimento,
+    estabelecimento,
     tags: [],
   });
   if (res.error) return { error: res.error };

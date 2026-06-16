@@ -113,6 +113,26 @@ export async function listCartoes(workspaceId: string): Promise<Cartao[]> {
   return (data as Cartao[] | null) ?? [];
 }
 
+export interface MatchEstabelecimento {
+  id: string;
+  nome: string;
+  score: number;
+}
+
+/** Melhor candidato de estabelecimento por similaridade (pg_trgm), ou null. Sob RLS. */
+export async function buscarMatchEstabelecimento(
+  workspaceId: string,
+  nome: string,
+): Promise<MatchEstabelecimento | null> {
+  const supabase = createClient();
+  const { data } = await supabase.rpc("buscar_match_estabelecimento", {
+    p_workspace_id: workspaceId,
+    p_nome: nome,
+  });
+  const top = (data as { id: string; nome: string; score: number }[] | null)?.[0];
+  return top ? { id: top.id, nome: top.nome, score: Number(top.score) } : null;
+}
+
 export interface ColecaoResumo {
   id: string;
   nome: string;

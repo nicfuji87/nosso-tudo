@@ -124,6 +124,8 @@ export interface WidgetConfirmarTransacao {
   categoria: string | null;
   estabelecimento: string | null;
   data: string;
+  /** Dúvida de estabelecimento (zona cinza): a Nia achou um parecido. */
+  match?: { sugestao: string; score: number } | null;
 }
 
 export interface WidgetCriarPessoa {
