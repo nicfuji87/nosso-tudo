@@ -14,6 +14,8 @@ export interface MidiaProcessada {
   tipo: string;
   nome: string | null;
   storagePath: string;
+  /** Leitura em texto do anexo (imagem/PDF) — vai no histórico de forma invisível. */
+  leitura: string | null;
 }
 
 export interface AnexoProcessado {
@@ -27,6 +29,56 @@ export interface AnexoProcessado {
 
 async function blobParaBase64(blob: Blob): Promise<string> {
   return Buffer.from(await blob.arrayBuffer()).toString("base64");
+}
+
+/** Modelo barato (visão) para a leitura textual de notas/recibos. */
+const MODELO_LEITURA = "claude-haiku-4-5";
+
+/**
+ * Lê uma imagem/PDF e devolve a transcrição dos dados em texto corrido (estabelecimento,
+ * data, total, itens). Persiste como `texto_extraido` e entra no histórico da conversa,
+ * para a Nia "lembrar" da nota mesmo depois que o arquivo bruto é descartado (privacidade).
+ * Degrada para "" se não houver chave Anthropic ou em qualquer erro.
+ */
+async function lerDocumento(
+  base64: string,
+  mimeType: string,
+  tipo: "imagem" | "pdf",
+): Promise<string> {
+  const key = await getApiKey("anthropic");
+  if (!key) return "";
+  const fonte =
+    tipo === "imagem"
+      ? { type: "image", source: { type: "base64", media_type: mimeType, data: base64 } }
+      : { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } };
+  const instrucao =
+    "Transcreva os dados deste documento (provável nota fiscal, recibo ou comprovante) em texto corrido e objetivo, em português do Brasil. " +
+    "Inclua, quando houver: estabelecimento, data, valor total, forma de pagamento e a lista de itens com quantidade e valor. " +
+    "Se não for um documento financeiro, descreva em uma frase o que é. Não comente nem opine — só os dados.";
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: MODELO_LEITURA,
+        max_tokens: 1024,
+        messages: [{ role: "user", content: [fonte, { type: "text", text: instrucao }] }],
+      }),
+    });
+    if (!res.ok) return "";
+    const data = (await res.json()) as { content?: { type: string; text?: string }[] };
+    return (data.content ?? [])
+      .filter((b) => b.type === "text")
+      .map((b) => b.text ?? "")
+      .join("\n")
+      .trim();
+  } catch {
+    return "";
+  }
 }
 
 /** Transcreve áudio via OpenAI Whisper. Retorna "" se sem chave/erro (degrada). */
@@ -65,6 +117,7 @@ export async function processarAnexos(
     if (!blob) continue;
 
     let textoExtraido: string | null = null;
+    let leitura: string | null = null;
     if (a.tipo === "audio") {
       const t = await transcrever(blob, a.nomeOriginal ?? "audio");
       if (t) {
@@ -72,7 +125,14 @@ export async function processarAnexos(
         textoExtraido = t;
       }
     } else {
-      conteudos.push({ tipo: a.tipo, mimeType: a.mimeType, base64: await blobParaBase64(blob) });
+      const base64 = await blobParaBase64(blob);
+      conteudos.push({ tipo: a.tipo, mimeType: a.mimeType, base64 });
+      // Leitura textual (imagem/PDF) para o histórico invisível e a busca de documentos.
+      const lida = await lerDocumento(base64, a.mimeType, a.tipo);
+      if (lida) {
+        textoExtraido = lida;
+        leitura = lida;
+      }
     }
 
     const { data: midia } = await supabase
@@ -93,7 +153,7 @@ export async function processarAnexos(
       .select("id")
       .maybeSingle();
     const id = (midia as { id: string } | null)?.id;
-    if (id) midias.push({ id, tipo: a.tipo, nome: a.nomeOriginal ?? null, storagePath: a.storagePath });
+    if (id) midias.push({ id, tipo: a.tipo, nome: a.nomeOriginal ?? null, storagePath: a.storagePath, leitura });
   }
 
   return { textoTranscrito: transcricoes.join("\n").trim(), conteudos, midias };
