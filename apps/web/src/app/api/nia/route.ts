@@ -115,7 +115,7 @@ export async function POST(req: Request): Promise<Response> {
     workspaceId,
     papel: "user",
     conteudo: userMessage,
-    midias: proc.midias.map((m) => ({ id: m.id, tipo: m.tipo, nome: m.nome })),
+    midias: proc.midias.map((m) => ({ id: m.id, tipo: m.tipo, nome: m.nome, leitura: m.leitura })),
   });
 
   // Memória da família (nia_contexto) injetada como referência — nunca como instrução (P3).

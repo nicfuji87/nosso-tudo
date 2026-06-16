@@ -81,6 +81,49 @@ function novoId(): string {
     : String(Math.random());
 }
 
+const MAX_DIM_IMG = 1600;
+const QUALIDADE_JPEG = 0.72;
+
+/**
+ * Reduz a imagem antes do upload: redimensiona para no máx. 1600px no maior lado
+ * e recodifica em JPEG (~0.72). Evita guardar arquivos grandes no Storage e reduz
+ * o payload enviado ao modelo. Degrada para o arquivo original em qualquer erro.
+ */
+async function comprimirImagem(
+  file: File,
+): Promise<{ blob: Blob; nome: string; mime: string }> {
+  const original = { blob: file as Blob, nome: file.name, mime: file.type };
+  if (!file.type.startsWith("image/")) return original;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const escala = Math.min(1, MAX_DIM_IMG / Math.max(bitmap.width, bitmap.height));
+    // Já pequena e leve: não mexe.
+    if (escala === 1 && file.size <= 600 * 1024) {
+      bitmap.close?.();
+      return original;
+    }
+    const w = Math.round(bitmap.width * escala);
+    const h = Math.round(bitmap.height * escala);
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      bitmap.close?.();
+      return original;
+    }
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close?.();
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((b) => resolve(b), "image/jpeg", QUALIDADE_JPEG),
+    );
+    if (!blob || blob.size >= file.size) return original;
+    return { blob, nome: file.name.replace(/\.[^.]+$/, "") + ".jpg", mime: "image/jpeg" };
+  } catch {
+    return original;
+  }
+}
+
 export function NiaChat({
   nome,
   workspaceId,
@@ -183,7 +226,12 @@ export function NiaChat({
         toast.error("Tipo não suportado", { description: file.name });
         continue;
       }
-      await subirAnexo(file, file.name, file.type, tipo);
+      if (tipo === "imagem") {
+        const c = await comprimirImagem(file);
+        await subirAnexo(c.blob, c.nome, c.mime, "imagem");
+      } else {
+        await subirAnexo(file, file.name, file.type, tipo);
+      }
     }
   }
 
@@ -832,9 +880,16 @@ function ChecklistItensCard({
   const qtd = incluidos.filter(Boolean).length;
   const editavel = estado === "idle" || estado === "salvando" || estado === "erro";
 
+  const todosMarcados = qtd === w.itens.length;
+  const muitosItens = w.itens.length > 8;
+
   function toggle(i: number) {
     if (!editavel || estado === "salvando") return;
     setIncluidos((prev) => prev.map((v, j) => (j === i ? !v : v)));
+  }
+  function toggleTodos() {
+    if (!editavel || estado === "salvando") return;
+    setIncluidos(() => w.itens.map(() => !todosMarcados));
   }
   async function confirmar() {
     const indices = incluidos.flatMap((v, i) => (v ? [i] : []));
@@ -858,7 +913,22 @@ function ChecklistItensCard({
         <p className="font-medium">{w.descricao}</p>
         {w.estabelecimento && <p className="text-caption text-muted-foreground">{w.estabelecimento}</p>}
       </div>
-      <div className="divide-y divide-border">
+      {editavel && w.itens.length > 1 && (
+        <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
+          <span className="text-caption text-muted-foreground">
+            {qtd} de {w.itens.length} selecionados
+          </span>
+          <button
+            type="button"
+            onClick={toggleTodos}
+            disabled={estado === "salvando"}
+            className="text-caption font-medium text-accent underline-offset-2 hover:underline"
+          >
+            {todosMarcados ? "Limpar" : "Selecionar todos"}
+          </button>
+        </div>
+      )}
+      <div className={cn("divide-y divide-border", muitosItens && "max-h-72 overflow-y-auto")}>
         {w.itens.map((it, i) => (
           <button
             key={i}

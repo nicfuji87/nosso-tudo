@@ -455,19 +455,25 @@ export async function getHistoricoRecente(
   const supabase = createClient();
   const { data } = await supabase
     .from("mensagens_ia")
-    .select("papel, conteudo, created_at")
+    .select("papel, conteudo, midias, created_at")
     .eq("conversa_id", conversaId)
     .in("papel", ["user", "assistant"])
     .order("created_at", { ascending: false })
     .limit(limite);
-  const rows = (data as { papel: string; conteudo: string }[] | null) ?? [];
-  const msgs: TurnoHistorico[] = rows
-    .reverse()
-    .filter((r) => r.conteudo && r.conteudo.trim().length > 0)
-    .map((r) => ({
-      role: r.papel === "assistant" ? "assistant" : "user",
-      content: r.conteudo.slice(0, 4000),
-    }));
+  const rows =
+    (data as { papel: string; conteudo: string | null; midias: { leitura?: string | null }[] | null }[] | null) ?? [];
+  const msgs: TurnoHistorico[] = [];
+  for (const r of rows.reverse()) {
+    // Leitura do anexo (imagem/PDF) injetada como contexto invisível — a Nia "lembra"
+    // da nota mesmo nos turnos seguintes, sem reenviar o arquivo bruto.
+    const leitura = Array.isArray(r.midias)
+      ? r.midias.map((m) => m?.leitura).filter(Boolean).join("\n").trim()
+      : "";
+    let content = (r.conteudo ?? "").trim();
+    if (leitura) content = `${content}\n\n[Conteúdo do anexo enviado: ${leitura}]`.trim();
+    if (!content) continue;
+    msgs.push({ role: r.papel === "assistant" ? "assistant" : "user", content: content.slice(0, 6000) });
+  }
   // Anthropic exige que a 1ª mensagem seja do usuário.
   while (msgs.length > 0 && msgs[0]!.role === "assistant") msgs.shift();
   return msgs;
