@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  Camera,
   Check,
   FileText,
   Image as ImageIcon,
@@ -85,6 +86,7 @@ export function NiaChat({ nome, workspaceId }: { nome: string; workspaceId: stri
   const [gravando, setGravando] = useState(false);
   const conversaId = useRef<string | undefined>(undefined);
   const fileRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const fim = useRef<HTMLDivElement>(null);
@@ -342,6 +344,26 @@ export function NiaChat({ nome, workspaceId }: { nome: string; workspaceId: stri
               e.target.value = "";
             }}
           />
+          <input
+            ref={cameraRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            hidden
+            onChange={(e) => {
+              handleFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => cameraRef.current?.click()}
+            disabled={loading}
+            aria-label="Tirar foto (nota fiscal, recibo)"
+          >
+            <Camera className="size-4" />
+          </Button>
           <Button
             size="icon"
             variant="ghost"
