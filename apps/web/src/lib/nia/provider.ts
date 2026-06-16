@@ -9,6 +9,12 @@ import { getTool, type NiaTool, type NiaToolContext } from "@/lib/nia/tools";
  * registro abaixo, sem mexer no resto. Ver PLANO-NIA.md §2.
  */
 
+export interface AnexoConteudo {
+  tipo: "imagem" | "pdf";
+  mimeType: string;
+  base64: string;
+}
+
 export interface NiaProviderInput {
   apiKey: string;
   modelo: string;
@@ -16,8 +22,35 @@ export interface NiaProviderInput {
   temperature: number;
   maxTokens: number;
   userMessage: string;
+  /** Imagem/PDF para multimodal (áudio já vem transcrito no userMessage). */
+  anexos?: AnexoConteudo[];
   tools: NiaTool[];
   ctx: NiaToolContext;
+}
+
+/** Conteúdo da 1ª mensagem do usuário no formato Anthropic (texto + imagem/documento). */
+function anthropicUserContent(userMessage: string, anexos?: AnexoConteudo[]): string | unknown[] {
+  if (!anexos || anexos.length === 0) return userMessage;
+  const blocks: unknown[] = anexos.map((a) =>
+    a.tipo === "imagem"
+      ? { type: "image", source: { type: "base64", media_type: a.mimeType, data: a.base64 } }
+      : { type: "document", source: { type: "base64", media_type: "application/pdf", data: a.base64 } },
+  );
+  if (userMessage) blocks.push({ type: "text", text: userMessage });
+  return blocks;
+}
+
+/** Conteúdo no formato OpenAI (imagens via data URL; PDF não suportado no Chat Completions). */
+function openaiUserContent(userMessage: string, anexos?: AnexoConteudo[]): string | unknown[] {
+  if (!anexos || anexos.length === 0) return userMessage;
+  const parts: unknown[] = [];
+  if (userMessage) parts.push({ type: "text", text: userMessage });
+  for (const a of anexos) {
+    if (a.tipo === "imagem") {
+      parts.push({ type: "image_url", image_url: { url: `data:${a.mimeType};base64,${a.base64}` } });
+    }
+  }
+  return parts;
 }
 
 export interface NiaProviderResult {
@@ -89,7 +122,9 @@ interface AnthropicMessage {
 }
 
 const anthropicProvider: NiaProvider = async (input) => {
-  const messages: AnthropicMessage[] = [{ role: "user", content: input.userMessage }];
+  const messages: AnthropicMessage[] = [
+    { role: "user", content: anthropicUserContent(input.userMessage, input.anexos) },
+  ];
   const widgets: NiaWidget[] = [];
   const ferramentas: string[] = [];
   let tokensInput = 0;
@@ -184,7 +219,7 @@ interface OpenAIToolCall {
 }
 interface OpenAIMsg {
   role: "system" | "user" | "assistant" | "tool";
-  content: string | null;
+  content: string | unknown[] | null;
   tool_calls?: OpenAIToolCall[];
   tool_call_id?: string;
 }
@@ -219,7 +254,7 @@ function ehRaciocinio(modelo: string): boolean {
 const openaiProvider: NiaProvider = async (input) => {
   const messages: OpenAIMsg[] = [
     { role: "system", content: input.systemPrompt },
-    { role: "user", content: input.userMessage },
+    { role: "user", content: openaiUserContent(input.userMessage, input.anexos) },
   ];
   const widgets: NiaWidget[] = [];
   const ferramentas: string[] = [];
@@ -299,7 +334,7 @@ const openaiProvider: NiaProvider = async (input) => {
 const openaiStream: NiaStreamProvider = async (input, cb) => {
   const messages: OpenAIMsg[] = [
     { role: "system", content: input.systemPrompt },
-    { role: "user", content: input.userMessage },
+    { role: "user", content: openaiUserContent(input.userMessage, input.anexos) },
   ];
   const ferramentas: string[] = [];
   let tokensInput = 0;
@@ -423,7 +458,9 @@ const openaiStream: NiaStreamProvider = async (input, cb) => {
 
 /** Anthropic com streaming (SSE) token-a-token + loop de tool-use + prompt caching. */
 const anthropicStream: NiaStreamProvider = async (input, cb) => {
-  const messages: AnthropicMessage[] = [{ role: "user", content: input.userMessage }];
+  const messages: AnthropicMessage[] = [
+    { role: "user", content: anthropicUserContent(input.userMessage, input.anexos) },
+  ];
   const ferramentas: string[] = [];
   let tokensInput = 0;
   let tokensOutput = 0;

@@ -32,5 +32,5 @@ export default async function NiaPage() {
   }
 
   const primeiroNome = ctx.profile.nome.split(" ")[0] ?? ctx.profile.nome;
-  return <NiaChat nome={primeiroNome} />;
+  return <NiaChat nome={primeiroNome} workspaceId={ctx.workspace.id} />;
 }

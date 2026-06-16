@@ -1,10 +1,24 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Loader2, Send, Sparkles, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import {
+  Check,
+  FileText,
+  Image as ImageIcon,
+  Loader2,
+  Mic,
+  Paperclip,
+  Send,
+  Sparkles,
+  ThumbsDown,
+  ThumbsUp,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatBRL } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { toast } from "@/components/ui/sonner";
+import { createClient } from "@/lib/supabase/client";
 import {
   confirmarCartao,
   confirmarCategoria,
@@ -26,6 +40,28 @@ interface Msg {
   texto: string;
   widgets: NiaWidget[];
   mensagemId?: string | null;
+  anexos?: { tipo: string; nome: string }[];
+}
+
+type TipoAnexo = "imagem" | "pdf" | "audio";
+
+interface PendingAnexo {
+  id: string;
+  tipo: TipoAnexo;
+  nome: string;
+  storagePath: string;
+  mimeType: string;
+  tamanho: number;
+  pronto: boolean;
+}
+
+const ICONE_ANEXO = { imagem: ImageIcon, pdf: FileText, audio: Mic } as const;
+
+function tipoDeMime(mime: string): TipoAnexo | null {
+  if (mime.startsWith("image/")) return "imagem";
+  if (mime === "application/pdf") return "pdf";
+  if (mime.startsWith("audio/")) return "audio";
+  return null;
 }
 
 function novoId(): string {
@@ -34,7 +70,7 @@ function novoId(): string {
     : String(Math.random());
 }
 
-export function NiaChat({ nome }: { nome: string }) {
+export function NiaChat({ nome, workspaceId }: { nome: string; workspaceId: string }) {
   const [msgs, setMsgs] = useState<Msg[]>([
     {
       id: "intro",
@@ -45,18 +81,62 @@ export function NiaChat({ nome }: { nome: string }) {
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [anexos, setAnexos] = useState<PendingAnexo[]>([]);
   const conversaId = useRef<string | undefined>(undefined);
+  const fileRef = useRef<HTMLInputElement>(null);
   const fim = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fim.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, loading]);
 
+  async function handleFiles(files: FileList | null) {
+    if (!files) return;
+    for (const file of Array.from(files)) {
+      const tipo = tipoDeMime(file.type);
+      if (!tipo) {
+        toast.error("Tipo não suportado", { description: file.name });
+        continue;
+      }
+      const id = novoId();
+      const ext = file.name.includes(".") ? `.${file.name.split(".").pop()}` : "";
+      const storagePath = `${workspaceId}/${id}${ext}`;
+      setAnexos((a) => [
+        ...a,
+        { id, tipo, nome: file.name, storagePath, mimeType: file.type, tamanho: file.size, pronto: false },
+      ]);
+      const supabase = createClient();
+      const { error } = await supabase.storage.from("nia-anexos").upload(storagePath, file, { upsert: false });
+      if (error) {
+        toast.error("Falha ao enviar anexo", { description: file.name });
+        setAnexos((a) => a.filter((x) => x.id !== id));
+      } else {
+        setAnexos((a) => a.map((x) => (x.id === id ? { ...x, pronto: true } : x)));
+      }
+    }
+  }
+
+  function removerAnexo(id: string) {
+    setAnexos((a) => a.filter((x) => x.id !== id));
+  }
+
   async function enviar() {
     const texto = input.trim();
-    if (!texto || loading) return;
+    const prontos = anexos.filter((a) => a.pronto);
+    if (loading || anexos.some((a) => !a.pronto)) return;
+    if (!texto && prontos.length === 0) return;
     setInput("");
-    setMsgs((m) => [...m, { id: novoId(), autor: "user", texto, widgets: [] }]);
+    setAnexos([]);
+    setMsgs((m) => [
+      ...m,
+      {
+        id: novoId(),
+        autor: "user",
+        texto,
+        widgets: [],
+        anexos: prontos.map((a) => ({ tipo: a.tipo, nome: a.nome })),
+      },
+    ]);
     setLoading(true);
 
     const niaId = novoId();
@@ -68,7 +148,17 @@ export function NiaChat({ nome }: { nome: string }) {
       const res = await fetch("/api/nia", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ mensagem: texto, conversaId: conversaId.current }),
+        body: JSON.stringify({
+          mensagem: texto,
+          conversaId: conversaId.current,
+          anexos: prontos.map((a) => ({
+            tipo: a.tipo,
+            storagePath: a.storagePath,
+            mimeType: a.mimeType,
+            nomeOriginal: a.nome,
+            tamanho: a.tamanho,
+          })),
+        }),
       });
 
       if (!res.ok || !res.body) {
@@ -151,6 +241,21 @@ export function NiaChat({ nome }: { nome: string }) {
               )}
             >
               {m.texto && <p className="whitespace-pre-wrap leading-relaxed">{m.texto}</p>}
+              {m.anexos && m.anexos.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {m.anexos.map((a, i) => {
+                    const Icone = ICONE_ANEXO[a.tipo as TipoAnexo] ?? FileText;
+                    return (
+                      <span
+                        key={i}
+                        className="inline-flex items-center gap-1 rounded-md bg-black/10 px-1.5 py-0.5 text-caption"
+                      >
+                        <Icone className="size-3" /> {a.nome}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
               {m.widgets.map((w, i) => (
                 <WidgetView key={i} widget={w} />
               ))}
@@ -166,23 +271,73 @@ export function NiaChat({ nome }: { nome: string }) {
         <div ref={fim} />
       </div>
 
-      <div className="mt-4 flex items-end gap-2 rounded-2xl border border-border bg-card p-2 shadow-card">
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              enviar();
-            }
-          }}
-          rows={1}
-          placeholder="Fale com a Nia…"
-          className="max-h-32 flex-1 resize-none bg-transparent px-2 py-2 text-body-sm outline-none placeholder:text-muted-foreground"
-        />
-        <Button size="icon" onClick={enviar} disabled={loading || !input.trim()} aria-label="Enviar">
-          <Send className="size-4" />
-        </Button>
+      <div className="mt-4 rounded-2xl border border-border bg-card p-2 shadow-card">
+        {anexos.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2 px-1">
+            {anexos.map((a) => {
+              const Icone = ICONE_ANEXO[a.tipo];
+              return (
+                <span
+                  key={a.id}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-secondary px-2 py-1 text-caption"
+                >
+                  {a.pronto ? (
+                    <Icone className="size-3.5" />
+                  ) : (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  )}
+                  <span className="max-w-32 truncate">{a.nome}</span>
+                  <button type="button" onClick={() => removerAnexo(a.id)} aria-label="Remover anexo">
+                    <X className="size-3" />
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+        )}
+        <div className="flex items-end gap-2">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*,application/pdf,audio/*"
+            multiple
+            hidden
+            onChange={(e) => {
+              handleFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => fileRef.current?.click()}
+            disabled={loading}
+            aria-label="Anexar imagem, PDF ou áudio"
+          >
+            <Paperclip className="size-4" />
+          </Button>
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                enviar();
+              }
+            }}
+            rows={1}
+            placeholder="Fale com a Nia…"
+            className="max-h-32 flex-1 resize-none bg-transparent px-2 py-2 text-body-sm outline-none placeholder:text-muted-foreground"
+          />
+          <Button
+            size="icon"
+            onClick={enviar}
+            disabled={loading || anexos.some((a) => !a.pronto) || (!input.trim() && anexos.length === 0)}
+            aria-label="Enviar"
+          >
+            <Send className="size-4" />
+          </Button>
+        </div>
       </div>
     </div>
   );

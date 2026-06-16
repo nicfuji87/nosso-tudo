@@ -195,9 +195,31 @@ export interface NiaResposta {
   widgets: NiaWidget[];
 }
 
-/** Corpo aceito pelo POST /api/nia. */
-export const niaRequestSchema = z.object({
-  mensagem: z.string().trim().min(1).max(2000),
-  conversaId: z.string().uuid().optional(),
+/** Anexo enviado pelo cliente (já subido ao Storage; o route baixa e processa). */
+export const niaAnexoSchema = z.object({
+  tipo: z.enum(["imagem", "pdf", "audio"]),
+  storagePath: z.string().min(1).max(400),
+  mimeType: z.string().min(1).max(120),
+  nomeOriginal: z.string().max(255).optional(),
+  tamanho: z.number().int().nonnegative().optional(),
 });
+export type NiaAnexoInput = z.infer<typeof niaAnexoSchema>;
+
+/** Corpo aceito pelo POST /api/nia. */
+export const niaRequestSchema = z
+  .object({
+    mensagem: z.string().trim().max(2000).default(""),
+    conversaId: z.string().uuid().optional(),
+    anexos: z.array(niaAnexoSchema).max(6).default([]),
+  })
+  .refine((d) => d.mensagem.length > 0 || d.anexos.length > 0, {
+    message: "Mensagem vazia.",
+  });
 export type NiaRequest = z.infer<typeof niaRequestSchema>;
+
+/** Referência de mídia guardada no histórico (mensagens_ia.midias). */
+export interface MidiaRef {
+  id: string;
+  tipo: string;
+  nome: string | null;
+}
