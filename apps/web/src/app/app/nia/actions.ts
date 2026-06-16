@@ -10,6 +10,8 @@ import {
   criarCategoriaArgs,
   criarCompromissoArgs,
   criarContaArgs,
+  criarMetaArgs,
+  criarOrcamentoArgs,
   criarPessoaArgs,
   lancarTransacaoArgs,
   lembrarFatoArgs,
@@ -274,6 +276,76 @@ export async function confirmarCartao(acaoId: string): Promise<{ error?: string;
     ultimos_digitos: d.ultimos_digitos,
   });
   if (res.error) return { error: res.error };
+
+  await atualizarAcao(acaoId, { status: "executada", resultado: { ok: true } });
+  return { ok: true };
+}
+
+/** Cria a meta financeira proposta pela Nia. */
+export async function confirmarMeta(acaoId: string): Promise<{ error?: string; ok?: boolean }> {
+  const acao = await carregarAcao(acaoId);
+  if (!acao) return { error: "Ação não encontrada." };
+  if (acao.status !== "proposta") return { error: "Essa ação já foi processada." };
+  if (acao.ferramenta !== "criar_meta") return { error: "Ação não suportada." };
+
+  const parsed = criarMetaArgs.safeParse(acao.payload_proposto);
+  if (!parsed.success) return { error: "Dados da proposta inválidos." };
+  const d = parsed.data;
+
+  const supabase = createClient();
+  const { error } = await supabase.from("metas_financeiras").insert({
+    workspace_id: acao.workspace_id,
+    nome: d.nome,
+    valor_alvo: d.valor_alvo,
+    data_alvo: d.data_alvo ?? null,
+  });
+  if (error) return { error: "Não foi possível criar a meta." };
+
+  await atualizarAcao(acaoId, { status: "executada", resultado: { ok: true } });
+  return { ok: true };
+}
+
+/** Define/atualiza o orçamento mensal de uma categoria (proposto pela Nia). */
+export async function confirmarOrcamento(acaoId: string): Promise<{ error?: string; ok?: boolean }> {
+  const acao = await carregarAcao(acaoId);
+  if (!acao) return { error: "Ação não encontrada." };
+  if (acao.status !== "proposta") return { error: "Essa ação já foi processada." };
+  if (acao.ferramenta !== "criar_orcamento") return { error: "Ação não suportada." };
+
+  const parsed = criarOrcamentoArgs.safeParse(acao.payload_proposto);
+  if (!parsed.success) return { error: "Dados da proposta inválidos." };
+  const d = parsed.data;
+
+  const alvo = normalizarTexto(d.categoria);
+  const cats = await listCategorias(acao.workspace_id);
+  const categoriaId = cats.find((c) => normalizarTexto(c.nome) === alvo)?.id;
+  if (!categoriaId) return { error: `A categoria "${d.categoria}" não existe. Crie-a primeiro.` };
+
+  const supabase = createClient();
+  const inicio = new Date();
+  inicio.setDate(1);
+  const mesRef = inicio.toISOString().slice(0, 10);
+
+  const { data: existente } = await supabase
+    .from("orcamentos")
+    .select("id")
+    .eq("workspace_id", acao.workspace_id)
+    .eq("categoria_id", categoriaId)
+    .eq("mes_referencia", mesRef)
+    .is("entidade_id", null)
+    .maybeSingle();
+
+  const erro = existente
+    ? (await supabase.from("orcamentos").update({ valor_planejado: d.valor_planejado }).eq("id", (existente as { id: string }).id)).error
+    : (
+        await supabase.from("orcamentos").insert({
+          workspace_id: acao.workspace_id,
+          categoria_id: categoriaId,
+          mes_referencia: mesRef,
+          valor_planejado: d.valor_planejado,
+        })
+      ).error;
+  if (erro) return { error: "Não foi possível salvar o orçamento." };
 
   await atualizarAcao(acaoId, { status: "executada", resultado: { ok: true } });
   return { ok: true };

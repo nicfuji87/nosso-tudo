@@ -26,6 +26,8 @@ import {
   confirmarCompromisso,
   confirmarConta,
   confirmarFato,
+  confirmarMeta,
+  confirmarOrcamento,
   confirmarPessoa,
   confirmarTransacao,
   desfazerTransacao,
@@ -481,6 +483,28 @@ function WidgetView({ widget }: { widget: NiaWidget }) {
           confirmar={() => confirmarFato(widget.acaoId)}
           descartar={() => rejeitarAcao(widget.acaoId)}
           labelFeito="Guardado"
+        />
+      );
+    case "criar_meta":
+      return (
+        <AcaoCard
+          titulo={widget.nome}
+          subtitulo={`Meta${widget.dataAlvo ? ` · até ${widget.dataAlvo}` : ""}`}
+          valor={widget.valorAlvo}
+          confirmar={() => confirmarMeta(widget.acaoId)}
+          descartar={() => rejeitarAcao(widget.acaoId)}
+          labelFeito="Meta criada"
+        />
+      );
+    case "criar_orcamento":
+      return (
+        <AcaoCard
+          titulo={`Orçamento · ${widget.categoria}`}
+          subtitulo="Limite mensal"
+          valor={widget.valorPlanejado}
+          confirmar={() => confirmarOrcamento(widget.acaoId)}
+          descartar={() => rejeitarAcao(widget.acaoId)}
+          labelFeito="Orçamento definido"
         />
       );
     case "criar_categoria":

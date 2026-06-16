@@ -9,6 +9,8 @@ import {
   listColecoes,
   listContas,
   listEntidades,
+  listMetas,
+  listOrcamentos,
   listTransacoes,
 } from "@/lib/db/queries";
 import { formatBRL, formatDate } from "@/lib/format";
@@ -20,6 +22,8 @@ import {
   criarCategoriaArgs,
   criarCompromissoArgs,
   criarContaArgs,
+  criarMetaArgs,
+  criarOrcamentoArgs,
   criarPessoaArgs,
   lancarTransacaoArgs,
   lembrarFatoArgs,
@@ -110,7 +114,7 @@ const consultarCadastros: NiaTool = {
     properties: {
       tipo: {
         type: "string",
-        enum: ["pessoas", "contas", "cartoes", "categorias", "compromissos"],
+        enum: ["pessoas", "contas", "cartoes", "categorias", "compromissos", "metas", "orcamentos"],
         description: "O que listar.",
       },
     },
@@ -140,11 +144,33 @@ const consultarCadastros: NiaTool = {
       const nomes = list.map((c) => c.nome).join(", ") || "nenhuma";
       return { texto: `${list.length} categoria(s): ${nomes}.` };
     }
-    const list = (await listColecoes(ctx.workspaceId)).filter((c) => c.tipo === "compromisso");
+    if (tipo === "compromissos") {
+      const list = (await listColecoes(ctx.workspaceId)).filter((c) => c.tipo === "compromisso");
+      const linhas =
+        list.map((c) => `${c.nome} — ${c.status ?? "aberto"}${c.valor ? ` (${formatBRL(c.valor)})` : ""}`).join("; ") ||
+        "nenhum";
+      return { texto: `${list.length} compromisso(s): ${linhas}.` };
+    }
+    if (tipo === "metas") {
+      const list = await listMetas(ctx.workspaceId);
+      const linhas =
+        list
+          .map(
+            (m) =>
+              `${m.nome}: ${formatBRL(m.valorAtual)} de ${formatBRL(m.valorAlvo)}${m.dataAlvo ? ` (até ${m.dataAlvo})` : ""}`,
+          )
+          .join("; ") || "nenhuma";
+      return { texto: `${list.length} meta(s): ${linhas}.` };
+    }
+    const orc = await listOrcamentos(ctx.workspaceId);
     const linhas =
-      list.map((c) => `${c.nome} — ${c.status ?? "aberto"}${c.valor ? ` (${formatBRL(c.valor)})` : ""}`).join("; ") ||
-      "nenhum";
-    return { texto: `${list.length} compromisso(s): ${linhas}.` };
+      orc
+        .map(
+          (o) =>
+            `${o.categoriaNome}: ${formatBRL(o.gasto)} de ${formatBRL(o.planejado)} (${Math.round((o.gasto / Math.max(1, o.planejado)) * 100)}%)`,
+        )
+        .join("; ") || "nenhum";
+    return { texto: `${orc.length} orçamento(s) este mês: ${linhas}.` };
   },
 };
 
@@ -455,6 +481,76 @@ const criarCartao: NiaTool = {
   },
 };
 
+const criarMeta: NiaTool = {
+  nome: "criar_meta",
+  descricao:
+    "Propõe criar uma meta financeira da família (ex.: 'juntar R$ 5.000 para a viagem'). Gera cartão de confirmação.",
+  nivel: "confirmar_estrutural",
+  inputSchema: {
+    type: "object",
+    properties: {
+      nome: { type: "string" },
+      valor_alvo: { type: "number", description: "Quanto se quer juntar." },
+      data_alvo: { type: "string", description: "Data ISO (YYYY-MM-DD) opcional." },
+    },
+    required: ["nome", "valor_alvo"],
+  },
+  async executar(args, ctx) {
+    const d = valida(criarMetaArgs, args);
+    const acaoId = await registrarAcao({
+      workspaceId: ctx.workspaceId,
+      profileId: ctx.profileId,
+      conversaId: ctx.conversaId,
+      ferramenta: "criar_meta",
+      nivel: "confirmar_estrutural",
+      payloadProposto: d,
+    });
+    if (!acaoId) throw new Error("Não consegui preparar a meta.");
+    const widget: NiaWidget = {
+      tipo: "criar_meta",
+      acaoId,
+      nome: d.nome,
+      valorAlvo: d.valor_alvo,
+      dataAlvo: d.data_alvo ?? null,
+    };
+    return { texto: `Preparei a meta "${d.nome}" para o usuário confirmar.`, widget };
+  },
+};
+
+const criarOrcamento: NiaTool = {
+  nome: "criar_orcamento",
+  descricao:
+    "Propõe definir ou atualizar o orçamento mensal de uma categoria (ex.: 'limite de R$ 800 no Mercado'). A categoria precisa existir. Gera cartão de confirmação.",
+  nivel: "confirmar_estrutural",
+  inputSchema: {
+    type: "object",
+    properties: {
+      categoria: { type: "string", description: "Nome da categoria." },
+      valor_planejado: { type: "number", description: "Limite mensal em reais." },
+    },
+    required: ["categoria", "valor_planejado"],
+  },
+  async executar(args, ctx) {
+    const d = valida(criarOrcamentoArgs, args);
+    const acaoId = await registrarAcao({
+      workspaceId: ctx.workspaceId,
+      profileId: ctx.profileId,
+      conversaId: ctx.conversaId,
+      ferramenta: "criar_orcamento",
+      nivel: "confirmar_estrutural",
+      payloadProposto: d,
+    });
+    if (!acaoId) throw new Error("Não consegui preparar o orçamento.");
+    const widget: NiaWidget = {
+      tipo: "criar_orcamento",
+      acaoId,
+      categoria: d.categoria,
+      valorPlanejado: d.valor_planejado,
+    };
+    return { texto: `Preparei o orçamento de "${d.categoria}" para o usuário confirmar.`, widget };
+  },
+};
+
 const guardarDocumento: NiaTool = {
   nome: "guardar_documento",
   descricao:
@@ -481,6 +577,8 @@ export const NIA_TOOLS: NiaTool[] = [
   criarConta,
   criarCartao,
   criarCompromisso,
+  criarMeta,
+  criarOrcamento,
   lembrarFato,
   guardarDocumento,
 ];

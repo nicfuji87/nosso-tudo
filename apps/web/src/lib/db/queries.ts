@@ -113,6 +113,65 @@ export async function listCartoes(workspaceId: string): Promise<Cartao[]> {
   return (data as Cartao[] | null) ?? [];
 }
 
+export interface MetaResumo {
+  id: string;
+  nome: string;
+  valorAlvo: number;
+  valorAtual: number;
+  dataAlvo: string | null;
+  status: string;
+}
+
+export async function listMetas(workspaceId: string): Promise<MetaResumo[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("metas_financeiras")
+    .select("id, nome, valor_alvo, valor_atual, data_alvo, status")
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: false });
+  return ((data as
+    | { id: string; nome: string; valor_alvo: number; valor_atual: number; data_alvo: string | null; status: string }[]
+    | null) ?? []).map((m) => ({
+    id: m.id,
+    nome: m.nome,
+    valorAlvo: Number(m.valor_alvo),
+    valorAtual: Number(m.valor_atual ?? 0),
+    dataAlvo: m.data_alvo,
+    status: m.status,
+  }));
+}
+
+export interface OrcamentoResumo {
+  categoriaId: string;
+  categoriaNome: string;
+  planejado: number;
+  gasto: number;
+}
+
+export async function listOrcamentos(workspaceId: string): Promise<OrcamentoResumo[]> {
+  const supabase = createClient();
+  const inicio = new Date();
+  inicio.setDate(1);
+  const mesRef = inicio.toISOString().slice(0, 10);
+  const { data } = await supabase
+    .from("orcamentos")
+    .select("valor_planejado, categoria:categorias(id, nome)")
+    .eq("workspace_id", workspaceId)
+    .eq("mes_referencia", mesRef);
+  const rows =
+    (data as { valor_planejado: number; categoria: { id: string; nome: string } | null }[] | null) ?? [];
+  const gastos = await getGastosPorCategoria(workspaceId);
+  const gastoPorCat = new Map(gastos.map((g) => [g.categoria_id, g.total]));
+  return rows
+    .filter((r) => r.categoria)
+    .map((r) => ({
+      categoriaId: r.categoria!.id,
+      categoriaNome: r.categoria!.nome,
+      planejado: Number(r.valor_planejado),
+      gasto: gastoPorCat.get(r.categoria!.id) ?? 0,
+    }));
+}
+
 export interface TurnoHistorico {
   role: "user" | "assistant";
   content: string;

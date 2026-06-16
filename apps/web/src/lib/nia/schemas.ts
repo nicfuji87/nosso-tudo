@@ -36,9 +36,22 @@ export const consultarGastosArgs = z.object({
 export type ConsultarGastosArgs = z.infer<typeof consultarGastosArgs>;
 
 export const consultarCadastrosArgs = z.object({
-  tipo: z.enum(["pessoas", "contas", "cartoes", "categorias", "compromissos"]),
+  tipo: z.enum(["pessoas", "contas", "cartoes", "categorias", "compromissos", "metas", "orcamentos"]),
 });
 export type ConsultarCadastrosArgs = z.infer<typeof consultarCadastrosArgs>;
+
+export const criarMetaArgs = z.object({
+  nome: z.string().trim().min(1).max(120),
+  valor_alvo: z.number().positive(),
+  data_alvo: z.string().optional(),
+});
+export type CriarMetaArgs = z.infer<typeof criarMetaArgs>;
+
+export const criarOrcamentoArgs = z.object({
+  categoria: z.string().trim().min(1).max(120),
+  valor_planejado: z.number().positive(),
+});
+export type CriarOrcamentoArgs = z.infer<typeof criarOrcamentoArgs>;
 
 export const listarTransacoesArgs = z.object({
   busca: z.string().trim().max(100).optional(),
@@ -173,6 +186,21 @@ export interface WidgetCriarCartao {
   ultimosDigitos: string | null;
 }
 
+export interface WidgetCriarMeta {
+  tipo: "criar_meta";
+  acaoId: string;
+  nome: string;
+  valorAlvo: number;
+  dataAlvo: string | null;
+}
+
+export interface WidgetCriarOrcamento {
+  tipo: "criar_orcamento";
+  acaoId: string;
+  categoria: string;
+  valorPlanejado: number;
+}
+
 export type NiaWidget =
   | WidgetResumoPeriodo
   | WidgetConfirmarTransacao
@@ -181,7 +209,9 @@ export type NiaWidget =
   | WidgetLembrarFato
   | WidgetCriarCategoria
   | WidgetCriarConta
-  | WidgetCriarCartao;
+  | WidgetCriarCartao
+  | WidgetCriarMeta
+  | WidgetCriarOrcamento;
 
 /* ------------------------------------------------------------------ */
 /* Envelopes de transporte                                            */
