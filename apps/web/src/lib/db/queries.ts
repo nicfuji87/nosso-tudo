@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { formatBRL } from "@/lib/format";
 import type {
   Cartao,
   Categoria,
@@ -170,6 +171,71 @@ export async function listOrcamentos(workspaceId: string): Promise<OrcamentoResu
       planejado: Number(r.valor_planejado),
       gasto: gastoPorCat.get(r.categoria!.id) ?? 0,
     }));
+}
+
+export interface Alerta {
+  nivel: "atencao" | "alerta";
+  texto: string;
+}
+
+/**
+ * Avisos financeiros determinísticos (sem LLM): saldo negativo, orçamento
+ * estourado/perto e cartão perto do limite. Base da Nia proativa.
+ */
+export async function getAlertas(workspaceId: string): Promise<Alerta[]> {
+  const supabase = createClient();
+  const alertas: Alerta[] = [];
+  const inicio = new Date();
+  inicio.setDate(1);
+  const mesRef = inicio.toISOString().slice(0, 10);
+
+  const resumo = await getResumoMes(workspaceId);
+  if (resumo.saldo < 0) {
+    alertas.push({ nivel: "alerta", texto: `Saldo do mês está negativo: ${formatBRL(resumo.saldo)}.` });
+  }
+
+  for (const o of await listOrcamentos(workspaceId)) {
+    const pct = Math.round((o.gasto / Math.max(1, o.planejado)) * 100);
+    if (o.gasto > o.planejado) {
+      alertas.push({
+        nivel: "alerta",
+        texto: `Orçamento de ${o.categoriaNome} estourou: ${formatBRL(o.gasto)} de ${formatBRL(o.planejado)} (${pct}%).`,
+      });
+    } else if (o.gasto >= o.planejado * 0.8) {
+      alertas.push({
+        nivel: "atencao",
+        texto: `Orçamento de ${o.categoriaNome} em ${pct}% (${formatBRL(o.gasto)} de ${formatBRL(o.planejado)}).`,
+      });
+    }
+  }
+
+  const cartoes = (await listCartoes(workspaceId)).filter((c) => c.limite && c.limite > 0);
+  if (cartoes.length > 0) {
+    const { data } = await supabase
+      .from("transacoes")
+      .select("cartao_id, valor")
+      .eq("workspace_id", workspaceId)
+      .eq("tipo", "despesa")
+      .gte("data_transacao", mesRef)
+      .not("cartao_id", "is", null);
+    const uso = new Map<string, number>();
+    for (const t of (data as { cartao_id: string; valor: number }[] | null) ?? []) {
+      uso.set(t.cartao_id, (uso.get(t.cartao_id) ?? 0) + Number(t.valor));
+    }
+    for (const c of cartoes) {
+      const limite = c.limite as number;
+      const usado = uso.get(c.id) ?? 0;
+      if (usado >= limite * 0.8) {
+        const pct = Math.round((usado / limite) * 100);
+        alertas.push({
+          nivel: usado >= limite ? "alerta" : "atencao",
+          texto: `Cartão ${c.apelido} em ${pct}% do limite (${formatBRL(usado)} de ${formatBRL(limite)}).`,
+        });
+      }
+    }
+  }
+
+  return alertas;
 }
 
 export interface TurnoHistorico {

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Sparkles } from "lucide-react";
 import { canUseFeature, getWorkspaceContext, isPlatformAdmin } from "@/lib/auth";
+import { getAlertas } from "@/lib/db/queries";
 import { Button } from "@/components/ui/button";
 import { NiaChat } from "@/components/nia/nia-chat";
 import { NIA_FEATURE } from "@/lib/nia/schemas";
@@ -32,5 +33,12 @@ export default async function NiaPage() {
   }
 
   const primeiroNome = ctx.profile.nome.split(" ")[0] ?? ctx.profile.nome;
-  return <NiaChat nome={primeiroNome} workspaceId={ctx.workspace.id} />;
+  const alertas = await getAlertas(ctx.workspace.id);
+  return (
+    <NiaChat
+      nome={primeiroNome}
+      workspaceId={ctx.workspace.id}
+      alertas={alertas.map((a) => a.texto)}
+    />
+  );
 }

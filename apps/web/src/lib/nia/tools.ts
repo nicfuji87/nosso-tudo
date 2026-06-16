@@ -2,6 +2,7 @@ import "server-only";
 import type { z } from "zod";
 import {
   buscarMatchEstabelecimento,
+  getAlertas,
   getGastosPorCategoria,
   getResumoMes,
   listCartoes,
@@ -198,6 +199,19 @@ const listarTransacoes: NiaTool = {
         }`,
     );
     return { texto: `Transações:\n${linhas.join("\n")}` };
+  },
+};
+
+const consultarAlertas: NiaTool = {
+  nome: "consultar_alertas",
+  descricao:
+    "Verifica avisos financeiros do mês (saldo negativo, orçamento estourado ou perto, cartão perto do limite). Use quando o usuário perguntar se há algo pra se preocupar ou pedir um panorama.",
+  nivel: "auto",
+  inputSchema: { type: "object", properties: {} },
+  async executar(_args, ctx) {
+    const alertas = await getAlertas(ctx.workspaceId);
+    if (alertas.length === 0) return { texto: "Nenhum alerta — as finanças estão sob controle." };
+    return { texto: "Avisos:\n" + alertas.map((a) => `- ${a.texto}`).join("\n") };
   },
 };
 
@@ -644,6 +658,7 @@ const guardarDocumento: NiaTool = {
 export const NIA_TOOLS: NiaTool[] = [
   consultarGastos,
   consultarCadastros,
+  consultarAlertas,
   listarTransacoes,
   lancarTransacao,
   lancarTransacaoDetalhada,

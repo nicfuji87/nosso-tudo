@@ -79,15 +79,25 @@ function novoId(): string {
     : String(Math.random());
 }
 
-export function NiaChat({ nome, workspaceId }: { nome: string; workspaceId: string }) {
-  const [msgs, setMsgs] = useState<Msg[]>([
-    {
-      id: "intro",
-      autor: "nia",
-      texto: `Oi, ${nome}! Sou a Nia. Me conta um gasto — tipo "paguei 80 no mercado" — ou pergunta "quanto gastei esse mês?".`,
-      widgets: [],
-    },
-  ]);
+export function NiaChat({
+  nome,
+  workspaceId,
+  alertas = [],
+}: {
+  nome: string;
+  workspaceId: string;
+  alertas?: string[];
+}) {
+  const [msgs, setMsgs] = useState<Msg[]>(() => {
+    const base = `Oi, ${nome}! Sou a Nia. Me conta um gasto — tipo "paguei 80 no mercado" — ou pergunta "quanto gastei esse mês?".`;
+    const aviso =
+      alertas.length > 0
+        ? `\n\n⚠️ Tenho ${alertas.length} aviso${alertas.length > 1 ? "s" : ""} pra você:\n${alertas
+            .map((a) => `• ${a}`)
+            .join("\n")}`
+        : "";
+    return [{ id: "intro", autor: "nia", texto: base + aviso, widgets: [] }];
+  });
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [anexos, setAnexos] = useState<PendingAnexo[]>([]);
