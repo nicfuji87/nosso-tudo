@@ -194,11 +194,9 @@ Fatia vertical que exercita toda a arquitetura (RLS, ferramenta tipada, widget, 
 - Aba "Nia (IA)" em Integrações — grava a API key do provedor.
 - Console: **uso de tokens/custo por usuário** (views `v_nia_uso_*`) + **editor de prompt/provedor/modelo versionado** (`nia_config`, cada save = nova versão, rollback-friendly) — `lib/nia/admin.ts`, `components/admin/nia-console.tsx`.
 
-**Já entregue além da fundação:** cota mensal (`plans.limites.nia_tokens_mes`, bypass admin); injeção de `nia_contexto` no prompt; feedback 👍/👎 + painel de análise conversacional (`getInsightsNia`); migrations 0007 e 0008 aplicadas ✓.
+**Já entregue além da fundação:** cota mensal; injeção de `nia_contexto`; feedback 👍/👎 + análise conversacional; **adaptador OpenAI** (Chat Completions, incl. GPT-5/raciocínio) + gestão de preços por modelo; **ferramentas de leitura** (`consultar_cadastros`, `listar_transacoes`) e **de cadastro** (`criar_categoria/conta/cartao`); **prompt caching da Anthropic**; **streaming token-a-token (OpenAI)**; migrations 0007–0009 aplicadas ✓. Tudo em produção.
 
-**Para ligar (quando quiser testar):** em `/app/admin/integracoes` → aba Nia → colar a Anthropic API key → acessar `/app/nia` (o fundador, como platform admin, acessa mesmo no Free).
-
-**Ainda não feito (próximas fatias):** streaming token-a-token (reescreve o transporte — melhor verificar com chave ao vivo); widget `resolver_match` (zona cinza inline — hoje a resolução fina de estabelecimento só roda no WhatsApp/Inbox).
+**Ainda não feito (próximas fatias):** streaming **nativo da Anthropic** (OpenAI já faz token-a-token; Anthropic usa fallback de texto completo); widget `resolver_match` (zona cinza inline — hoje a resolução fina de estabelecimento só roda no WhatsApp/Inbox).
 
 ## 9. Faseamento (encaixa após a Fase 3 do plano principal)
 

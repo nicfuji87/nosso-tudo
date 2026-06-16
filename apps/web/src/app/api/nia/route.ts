@@ -2,14 +2,14 @@ import { NextResponse } from "next/server";
 import { getUser, isPlatformAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { calcularCusto, getApiKey, getNiaConfig } from "@/lib/nia/config";
-import { getProvider } from "@/lib/nia/provider";
-import { NIA_FEATURE, niaRequestSchema, type NiaResposta } from "@/lib/nia/schemas";
+import { getProvider, getStreamProvider } from "@/lib/nia/provider";
+import { NIA_FEATURE, niaRequestSchema, type NiaWidget } from "@/lib/nia/schemas";
 import { getOrCreateConversa, salvarMensagem } from "@/lib/nia/store";
 import { NIA_TOOLS } from "@/lib/nia/tools";
 
 export const runtime = "nodejs";
 
-export async function POST(req: Request): Promise<NextResponse> {
+export async function POST(req: Request): Promise<Response> {
   const user = await getUser();
   if (!user) return NextResponse.json({ error: "Sessão expirada." }, { status: 401 });
 
@@ -120,54 +120,79 @@ export async function POST(req: Request): Promise<NextResponse> {
           .join("\n")}`
       : config.systemPrompt;
 
-  try {
-    const t0 = Date.now();
-    const result = await provider({
-      apiKey,
-      modelo: config.modelo,
-      systemPrompt,
-      temperature: config.temperature,
-      maxTokens: config.maxTokens,
-      userMessage: parsed.data.mensagem,
-      tools: NIA_TOOLS,
-      ctx: { workspaceId, profileId: user.id, conversaId },
-    });
-    const latenciaMs = Date.now() - t0;
-    const custo = await calcularCusto(
-      config.provedor,
-      config.modelo,
-      result.tokensInput,
-      result.tokensOutput,
-      result.tokensCache,
-    );
+  const input = {
+    apiKey,
+    modelo: config.modelo,
+    systemPrompt,
+    temperature: config.temperature,
+    maxTokens: config.maxTokens,
+    userMessage: parsed.data.mensagem,
+    tools: NIA_TOOLS,
+    ctx: { workspaceId, profileId: user.id, conversaId },
+  };
+  const streamFn = getStreamProvider(config.provedor);
+  const encoder = new TextEncoder();
 
-    const mensagemId = await salvarMensagem({
-      conversaId,
-      workspaceId,
-      papel: "assistant",
-      conteudo: result.texto,
-      widgets: result.widgets,
-      ferramentas: result.ferramentas,
-      tokensInput: result.tokensInput,
-      tokensOutput: result.tokensOutput,
-      tokensCache: result.tokensCache,
-      provedor: config.provedor,
-      modelo: config.modelo,
-      custo,
-      latenciaMs,
-    });
+  // Stream NDJSON: {type:"text",delta} · {type:"widget",widget} · {type:"done",...} · {type:"error",...}
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (obj: unknown) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+      const widgets: NiaWidget[] = [];
+      try {
+        const t0 = Date.now();
+        let res: { texto: string; ferramentas: string[]; tokensInput: number; tokensOutput: number; tokensCache: number };
+        if (streamFn) {
+          res = await streamFn(input, {
+            onText: (delta) => send({ type: "text", delta }),
+            onWidget: (w) => {
+              widgets.push(w);
+              send({ type: "widget", widget: w });
+            },
+          });
+        } else {
+          // Provedor sem streaming nativo (ex.: anthropic): emite o texto completo de uma vez.
+          const r = await provider(input);
+          if (r.texto) send({ type: "text", delta: r.texto });
+          for (const w of r.widgets) {
+            widgets.push(w);
+            send({ type: "widget", widget: w });
+          }
+          res = r;
+        }
 
-    const resposta: NiaResposta = {
-      conversaId,
-      mensagemId,
-      texto: result.texto,
-      widgets: result.widgets,
-    };
-    return NextResponse.json(resposta);
-  } catch (e) {
-    return NextResponse.json(
-      { error: "A Nia teve um problema ao responder. Tente de novo." , detalhe: (e as Error).message },
-      { status: 500 },
-    );
-  }
+        const latenciaMs = Date.now() - t0;
+        const custo = await calcularCusto(
+          config.provedor,
+          config.modelo,
+          res.tokensInput,
+          res.tokensOutput,
+          res.tokensCache,
+        );
+        const mensagemId = await salvarMensagem({
+          conversaId,
+          workspaceId,
+          papel: "assistant",
+          conteudo: res.texto,
+          widgets,
+          ferramentas: res.ferramentas,
+          tokensInput: res.tokensInput,
+          tokensOutput: res.tokensOutput,
+          tokensCache: res.tokensCache,
+          provedor: config.provedor,
+          modelo: config.modelo,
+          custo,
+          latenciaMs,
+        });
+        send({ type: "done", conversaId, mensagemId });
+      } catch (e) {
+        send({ type: "error", error: "A Nia teve um problema ao responder.", detalhe: (e as Error).message });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-store" },
+  });
 }

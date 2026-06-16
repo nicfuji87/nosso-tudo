@@ -18,7 +18,7 @@ import {
   votarMensagem,
 } from "@/app/app/nia/actions";
 import { LABEL_COMPORTAMENTO, LABEL_TIPO_ENTIDADE, LABEL_TIPO_TRANSACAO } from "@/lib/types/db";
-import type { NiaResposta, NiaWidget, WidgetResumoPeriodo } from "@/lib/nia/schemas";
+import type { NiaWidget, WidgetResumoPeriodo } from "@/lib/nia/schemas";
 
 interface Msg {
   id: string;
@@ -58,40 +58,74 @@ export function NiaChat({ nome }: { nome: string }) {
     setInput("");
     setMsgs((m) => [...m, { id: novoId(), autor: "user", texto, widgets: [] }]);
     setLoading(true);
+
+    const niaId = novoId();
+    setMsgs((m) => [...m, { id: niaId, autor: "nia", texto: "", widgets: [], mensagemId: null }]);
+    const patch = (fn: (msg: Msg) => Msg) =>
+      setMsgs((m) => m.map((x) => (x.id === niaId ? fn(x) : x)));
+
     try {
       const res = await fetch("/api/nia", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ mensagem: texto, conversaId: conversaId.current }),
       });
-      const data = (await res.json()) as Partial<NiaResposta> & { error?: string };
-      if (!res.ok) {
-        setMsgs((m) => [
-          ...m,
-          { id: novoId(), autor: "nia", texto: data.error ?? "Tive um problema.", widgets: [] },
-        ]);
-      } else {
-        conversaId.current = data.conversaId;
-        setMsgs((m) => [
-          ...m,
-          {
-            id: novoId(),
-            autor: "nia",
-            texto: data.texto || "Pronto.",
-            widgets: data.widgets ?? [],
-            mensagemId: data.mensagemId ?? null,
-          },
-        ]);
+
+      if (!res.ok || !res.body) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        patch((x) => ({ ...x, texto: data.error ?? "Tive um problema." }));
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let acc = "";
+
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let ev: {
+            type: string;
+            delta?: string;
+            widget?: NiaWidget;
+            conversaId?: string;
+            mensagemId?: string | null;
+            error?: string;
+          };
+          try {
+            ev = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (ev.type === "text" && ev.delta) {
+            acc += ev.delta;
+            patch((x) => ({ ...x, texto: acc }));
+          } else if (ev.type === "widget" && ev.widget) {
+            const w = ev.widget;
+            patch((x) => ({ ...x, widgets: [...x.widgets, w] }));
+          } else if (ev.type === "done") {
+            conversaId.current = ev.conversaId ?? conversaId.current;
+            patch((x) => ({ ...x, mensagemId: ev.mensagemId ?? null, texto: x.texto || "Pronto." }));
+          } else if (ev.type === "error") {
+            patch((x) => ({ ...x, texto: acc || ev.error || "Tive um problema." }));
+          }
+        }
       }
     } catch {
-      setMsgs((m) => [
-        ...m,
-        { id: novoId(), autor: "nia", texto: "Sem conexão agora. Tente de novo.", widgets: [] },
-      ]);
+      patch((x) => ({ ...x, texto: "Sem conexão agora. Tente de novo." }));
     } finally {
       setLoading(false);
     }
   }
+
+  const ultima = msgs[msgs.length - 1];
+  const aguardando = loading && ultima?.autor === "nia" && !ultima.texto && ultima.widgets.length === 0;
 
   return (
     <div className="flex h-[calc(100dvh-9rem)] flex-col">
@@ -124,7 +158,7 @@ export function NiaChat({ nome }: { nome: string }) {
             </div>
           </div>
         ))}
-        {loading && (
+        {aguardando && (
           <div className="flex items-center gap-2 text-body-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" /> Nia está pensando…
           </div>

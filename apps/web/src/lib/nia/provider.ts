@@ -32,6 +32,17 @@ export interface NiaProviderResult {
 
 export type NiaProvider = (input: NiaProviderInput) => Promise<NiaProviderResult>;
 
+export interface NiaStreamCallbacks {
+  onText: (delta: string) => void;
+  onWidget: (w: NiaWidget) => void;
+}
+/** Resultado do streaming (sem widgets: estes são emitidos via onWidget). */
+export type NiaStreamResult = Omit<NiaProviderResult, "widgets">;
+export type NiaStreamProvider = (
+  input: NiaProviderInput,
+  cb: NiaStreamCallbacks,
+) => Promise<NiaStreamResult>;
+
 const MAX_TURNS = 4;
 
 /* ------------------------------ Anthropic ------------------------------ */
@@ -170,6 +181,20 @@ interface OpenAIResponse {
     prompt_tokens_details?: { cached_tokens?: number };
   };
 }
+interface OpenAIStreamChunk {
+  choices?: {
+    delta?: {
+      content?: string;
+      tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[];
+    };
+    finish_reason?: string | null;
+  }[];
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    prompt_tokens_details?: { cached_tokens?: number };
+  } | null;
+}
 
 /** Modelos de raciocínio (GPT-5.x, o-series) não aceitam temperature e usam max_completion_tokens. */
 function ehRaciocinio(modelo: string): boolean {
@@ -255,6 +280,132 @@ const openaiProvider: NiaProvider = async (input) => {
   return { texto: textoFinal, widgets, ferramentas, tokensInput, tokensOutput, tokensCache };
 };
 
+/** OpenAI com streaming (SSE) token-a-token + loop de tool-use. */
+const openaiStream: NiaStreamProvider = async (input, cb) => {
+  const messages: OpenAIMsg[] = [
+    { role: "system", content: input.systemPrompt },
+    { role: "user", content: input.userMessage },
+  ];
+  const ferramentas: string[] = [];
+  let tokensInput = 0;
+  let tokensOutput = 0;
+  let tokensCache = 0;
+  let textoFinal = "";
+
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    const body: Record<string, unknown> = {
+      model: input.modelo,
+      max_completion_tokens: input.maxTokens,
+      messages,
+      stream: true,
+      stream_options: { include_usage: true },
+      tools: input.tools.map((t) => ({
+        type: "function",
+        function: { name: t.nome, description: t.descricao, parameters: t.inputSchema },
+      })),
+    };
+    if (!ehRaciocinio(input.modelo)) body.temperature = input.temperature;
+
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${input.apiKey}` },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok || !res.body) {
+      const detalhe = await res.text().catch(() => "");
+      throw new Error(`Provedor openai retornou ${res.status}: ${detalhe.slice(0, 200)}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let assistantContent = "";
+    let finishReason = "";
+    const toolAcc = new Map<number, { id: string; name: string; args: string }>();
+
+    let parar = false;
+    while (!parar) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const raw of lines) {
+        const line = raw.trim();
+        if (!line.startsWith("data:")) continue;
+        const payload = line.slice(5).trim();
+        if (payload === "[DONE]") {
+          parar = true;
+          break;
+        }
+        let json: OpenAIStreamChunk;
+        try {
+          json = JSON.parse(payload) as OpenAIStreamChunk;
+        } catch {
+          continue;
+        }
+        if (json.usage) {
+          tokensInput += json.usage.prompt_tokens ?? 0;
+          tokensOutput += json.usage.completion_tokens ?? 0;
+          tokensCache += json.usage.prompt_tokens_details?.cached_tokens ?? 0;
+        }
+        const choice = json.choices?.[0];
+        if (!choice) continue;
+        const delta = choice.delta ?? {};
+        if (delta.content) {
+          assistantContent += delta.content;
+          textoFinal += delta.content;
+          cb.onText(delta.content);
+        }
+        if (delta.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const idx = tc.index ?? 0;
+            const cur = toolAcc.get(idx) ?? { id: "", name: "", args: "" };
+            if (tc.id) cur.id = tc.id;
+            if (tc.function?.name) cur.name = tc.function.name;
+            if (tc.function?.arguments) cur.args += tc.function.arguments;
+            toolAcc.set(idx, cur);
+          }
+        }
+        if (choice.finish_reason) finishReason = choice.finish_reason;
+      }
+    }
+
+    if (finishReason !== "tool_calls" || toolAcc.size === 0) break;
+
+    const toolCalls = [...toolAcc.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, v]) => ({ id: v.id, type: "function", function: { name: v.name, arguments: v.args } }));
+    messages.push({ role: "assistant", content: assistantContent || null, tool_calls: toolCalls });
+
+    for (const call of toolCalls) {
+      ferramentas.push(call.function.name);
+      const tool = getTool(call.function.name);
+      let conteudo: string;
+      if (!tool) {
+        conteudo = `Ferramenta desconhecida: ${call.function.name}`;
+      } else {
+        try {
+          let args: unknown = {};
+          try {
+            args = JSON.parse(call.function.arguments || "{}");
+          } catch {
+            args = {};
+          }
+          const r = await tool.executar(args, input.ctx);
+          conteudo = r.texto;
+          if (r.widget) cb.onWidget(r.widget);
+        } catch (e) {
+          conteudo = `Erro ao executar ${call.function.name}: ${(e as Error).message}`;
+        }
+      }
+      messages.push({ role: "tool", tool_call_id: call.id, content: conteudo });
+    }
+  }
+
+  return { texto: textoFinal, ferramentas, tokensInput, tokensOutput, tokensCache };
+};
+
 /* ------------------------------ Registro ------------------------------ */
 
 const PROVIDERS: Record<string, NiaProvider> = {
@@ -263,8 +414,17 @@ const PROVIDERS: Record<string, NiaProvider> = {
   // google: googleProvider,   // próximo adaptador — mesma interface
 };
 
+const STREAM_PROVIDERS: Record<string, NiaStreamProvider> = {
+  openai: openaiStream,
+  // anthropic: anthropicStream,  // próximo: streaming nativo da Anthropic
+};
+
 export function getProvider(slug: string): NiaProvider | undefined {
   return PROVIDERS[slug];
+}
+
+export function getStreamProvider(slug: string): NiaStreamProvider | undefined {
+  return STREAM_PROVIDERS[slug];
 }
 
 export function provedoresDisponiveis(): string[] {
