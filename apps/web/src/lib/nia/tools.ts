@@ -1,9 +1,13 @@
 import "server-only";
 import type { z } from "zod";
+import { createClient } from "@/lib/supabase/server";
 import {
+  buscarDocumentos,
+  buscarItens,
   buscarMatchEstabelecimento,
   getAlertas,
   getGastosPorCategoria,
+  getMidia,
   getResumoMes,
   listCartoes,
   listCategorias,
@@ -17,6 +21,8 @@ import {
 import { formatBRL, formatDate } from "@/lib/format";
 import { normalizarTexto } from "@/lib/normalize";
 import {
+  buscarDocumentosArgs,
+  buscarItensArgs,
   consultarCadastrosArgs,
   consultarGastosArgs,
   criarCartaoArgs,
@@ -26,6 +32,7 @@ import {
   criarMetaArgs,
   criarOrcamentoArgs,
   criarPessoaArgs,
+  enviarDocumentoArgs,
   lancarTransacaoArgs,
   lancarTransacaoDetalhadaArgs,
   lembrarFatoArgs,
@@ -639,18 +646,97 @@ const criarOrcamento: NiaTool = {
   },
 };
 
-const guardarDocumento: NiaTool = {
-  nome: "guardar_documento",
+const buscarItensTool: NiaTool = {
+  nome: "buscar_itens",
   descricao:
-    "Mantém no histórico uma IMAGEM ou PDF anexado que é um documento financeiro (nota fiscal, recibo, fatura, comprovante, boleto, extrato). Por padrão imagens e PDFs NÃO são guardados — chame isto só quando o anexo for um documento financeiro útil. NUNCA chame para foto de pessoa, documento pessoal ou arquivo irrelevante. (O áudio é mantido pela transcrição.)",
+    "Busca itens/produtos já comprados (linhas das notas) por nome — ex.: 'feijão'. Responde quando, onde e por quanto. Use para 'eu comprei X?', 'quando comprei Y?', 'comprei feijão no Pão de Açúcar?'.",
+  nivel: "auto",
+  inputSchema: { type: "object", properties: { termo: { type: "string" } }, required: ["termo"] },
+  async executar(args, ctx) {
+    const { termo } = valida(buscarItensArgs, args);
+    const itens = await buscarItens(ctx.workspaceId, termo);
+    if (itens.length === 0) return { texto: `Não encontrei "${termo}" nas compras registradas.` };
+    const linhas = itens.map(
+      (i) =>
+        `${i.nome}${i.data ? ` — ${formatDate(i.data)}` : ""}${i.estabelecimento ? ` no ${i.estabelecimento}` : ""}${
+          i.valorTotal != null ? ` (${formatBRL(i.valorTotal)})` : ""
+        }`,
+    );
+    return { texto: linhas.join("\n") };
+  },
+};
+
+const consultarDocumentos: NiaTool = {
+  nome: "consultar_documentos",
+  descricao:
+    "Busca notas/recibos guardados pela leitura de texto (ex.: 'nota do Pão de Açúcar', 'nota de 2 de fevereiro'). Retorna o conteúdo lido e o id do documento (use o id em enviar_documento). Use para 'o que tinha naquela nota'.",
   nivel: "auto",
   inputSchema: {
     type: "object",
-    properties: { motivo: { type: "string", description: "Que documento é (ex.: 'nota do mercado')." } },
+    properties: { busca: { type: "string", description: "Termo: estabelecimento, item ou data." } },
   },
-  async executar(_args, ctx) {
+  async executar(args, ctx) {
+    const { busca } = valida(buscarDocumentosArgs, args);
+    const docs = await buscarDocumentos(ctx.workspaceId, busca);
+    if (docs.length === 0) return { texto: "Não encontrei documentos com esse conteúdo." };
+    const linhas = docs.map(
+      (d) => `[id:${d.id}] ${d.nome ?? "documento"} (${formatDate(d.data)}): ${(d.resumo ?? "").slice(0, 400)}`,
+    );
+    return { texto: linhas.join("\n\n") };
+  },
+};
+
+const enviarDocumento: NiaTool = {
+  nome: "enviar_documento",
+  descricao:
+    "Envia ao usuário um documento guardado (nota/recibo), exibindo-o no chat. Use o id obtido em consultar_documentos. Confirme com o usuário antes ('quer que eu te mande?').",
+  nivel: "auto",
+  inputSchema: { type: "object", properties: { midia_id: { type: "string" } }, required: ["midia_id"] },
+  async executar(args, ctx) {
+    const { midia_id } = valida(enviarDocumentoArgs, args);
+    const midia = await getMidia(ctx.workspaceId, midia_id);
+    if (!midia) return { texto: "Documento não encontrado." };
+    const supabase = createClient();
+    const { data } = await supabase.storage.from(midia.bucket).createSignedUrl(midia.storagePath, 3600);
+    if (!data?.signedUrl) return { texto: "Não consegui gerar o link do documento." };
+    const widget: NiaWidget = {
+      tipo: "documento",
+      url: data.signedUrl,
+      nome: midia.nome ?? "documento",
+      ehImagem: midia.tipo === "imagem",
+    };
+    return { texto: "Aqui está o documento.", widget };
+  },
+};
+
+const guardarDocumento: NiaTool = {
+  nome: "guardar_documento",
+  descricao:
+    "Mantém no histórico uma IMAGEM ou PDF anexado que é um documento financeiro (nota fiscal, recibo, fatura, comprovante, boleto, extrato). Passe em 'resumo' a leitura do documento (estabelecimento, data, itens, total) para poder consultá-lo depois sem reler o arquivo. Por padrão imagens e PDFs NÃO são guardados — chame só para documentos financeiros úteis. NUNCA chame para foto de pessoa, documento pessoal ou arquivo irrelevante. (O áudio é mantido pela transcrição.)",
+  nivel: "auto",
+  inputSchema: {
+    type: "object",
+    properties: {
+      resumo: { type: "string", description: "Leitura do documento: estabelecimento, data, itens e total." },
+    },
+  },
+  async executar(args, ctx) {
+    const resumo =
+      typeof (args as { resumo?: unknown })?.resumo === "string"
+        ? (args as { resumo: string }).resumo.slice(0, 4000)
+        : null;
     const docs = ctx.docsTurno ?? [];
     if (ctx.reter) for (const d of docs) ctx.reter.push(d.midiaId);
+    if (resumo && docs.length > 0) {
+      const supabase = createClient();
+      await supabase
+        .from("midias")
+        .update({ texto_extraido: resumo })
+        .in(
+          "id",
+          docs.map((d) => d.midiaId),
+        );
+    }
     return { texto: docs.length > 0 ? "Documento mantido no histórico." : "Não há anexo para guardar." };
   },
 };
@@ -670,6 +756,9 @@ export const NIA_TOOLS: NiaTool[] = [
   criarMeta,
   criarOrcamento,
   lembrarFato,
+  buscarItensTool,
+  consultarDocumentos,
+  enviarDocumento,
   guardarDocumento,
 ];
 

@@ -109,6 +109,15 @@ export const lembrarFatoArgs = z.object({
 });
 export type LembrarFatoArgs = z.infer<typeof lembrarFatoArgs>;
 
+export const buscarItensArgs = z.object({ termo: z.string().trim().min(1).max(100) });
+export type BuscarItensArgs = z.infer<typeof buscarItensArgs>;
+
+export const buscarDocumentosArgs = z.object({ busca: z.string().trim().max(100).optional() });
+export type BuscarDocumentosArgs = z.infer<typeof buscarDocumentosArgs>;
+
+export const enviarDocumentoArgs = z.object({ midia_id: z.string().uuid() });
+export type EnviarDocumentoArgs = z.infer<typeof enviarDocumentoArgs>;
+
 export const criarCategoriaArgs = z.object({
   nome: z.string().trim().min(1).max(60),
   comportamento: z.enum(COMPORTAMENTOS_CATEGORIA).default("basico"),
@@ -230,6 +239,13 @@ export interface WidgetChecklistItens {
   itens: { nome: string; quantidade: number | null; valorTotal: number | null }[];
 }
 
+export interface WidgetDocumento {
+  tipo: "documento";
+  url: string;
+  nome: string;
+  ehImagem: boolean;
+}
+
 export type NiaWidget =
   | WidgetResumoPeriodo
   | WidgetConfirmarTransacao
@@ -241,7 +257,8 @@ export type NiaWidget =
   | WidgetCriarCartao
   | WidgetCriarMeta
   | WidgetCriarOrcamento
-  | WidgetChecklistItens;
+  | WidgetChecklistItens
+  | WidgetDocumento;
 
 /* ------------------------------------------------------------------ */
 /* Envelopes de transporte                                            */

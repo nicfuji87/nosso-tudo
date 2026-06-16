@@ -173,6 +173,93 @@ export async function listOrcamentos(workspaceId: string): Promise<OrcamentoResu
     }));
 }
 
+export interface ItemBusca {
+  nome: string;
+  data: string;
+  estabelecimento: string | null;
+  valorTotal: number | null;
+}
+
+/** Busca itens comprados (linhas de nota) por termo na descrição. */
+export async function buscarItens(workspaceId: string, termo: string, limite = 12): Promise<ItemBusca[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("itens_transacao")
+    .select("descricao_original, valor_total, transacao:transacoes(data_transacao, estabelecimento:estabelecimentos(nome))")
+    .eq("workspace_id", workspaceId)
+    .ilike("descricao_original", `%${termo}%`)
+    .limit(limite);
+  const rows =
+    (data as
+      | {
+          descricao_original: string;
+          valor_total: number | null;
+          transacao: { data_transacao: string; estabelecimento: { nome: string } | null } | null;
+        }[]
+      | null) ?? [];
+  return rows
+    .map((r) => ({
+      nome: r.descricao_original,
+      data: r.transacao?.data_transacao ?? "",
+      estabelecimento: r.transacao?.estabelecimento?.nome ?? null,
+      valorTotal: r.valor_total != null ? Number(r.valor_total) : null,
+    }))
+    .sort((a, b) => b.data.localeCompare(a.data));
+}
+
+export interface DocBusca {
+  id: string;
+  nome: string | null;
+  resumo: string | null;
+  data: string;
+  tipo: string;
+}
+
+/** Busca documentos (notas/recibos) pela leitura de texto guardada (texto_extraido). */
+export async function buscarDocumentos(workspaceId: string, termo?: string, limite = 8): Promise<DocBusca[]> {
+  const supabase = createClient();
+  let q = supabase
+    .from("midias")
+    .select("id, nome_original, texto_extraido, created_at, tipo")
+    .eq("workspace_id", workspaceId)
+    .in("tipo", ["imagem", "pdf"])
+    .not("texto_extraido", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(limite);
+  if (termo) q = q.ilike("texto_extraido", `%${termo}%`);
+  const { data } = await q;
+  return ((data as
+    | { id: string; nome_original: string | null; texto_extraido: string | null; created_at: string; tipo: string }[]
+    | null) ?? []).map((m) => ({
+    id: m.id,
+    nome: m.nome_original,
+    resumo: m.texto_extraido,
+    data: m.created_at,
+    tipo: m.tipo,
+  }));
+}
+
+export interface MidiaArquivo {
+  bucket: string;
+  storagePath: string;
+  nome: string | null;
+  mimeType: string | null;
+  tipo: string;
+}
+
+export async function getMidia(workspaceId: string, midiaId: string): Promise<MidiaArquivo | null> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("midias")
+    .select("bucket, storage_path, nome_original, mime_type, tipo")
+    .eq("workspace_id", workspaceId)
+    .eq("id", midiaId)
+    .maybeSingle();
+  if (!data) return null;
+  const m = data as { bucket: string; storage_path: string; nome_original: string | null; mime_type: string | null; tipo: string };
+  return { bucket: m.bucket, storagePath: m.storage_path, nome: m.nome_original, mimeType: m.mime_type, tipo: m.tipo };
+}
+
 export interface Alerta {
   nivel: "atencao" | "alerta";
   texto: string;

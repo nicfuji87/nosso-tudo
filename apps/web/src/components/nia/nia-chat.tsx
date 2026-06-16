@@ -40,6 +40,7 @@ import type {
   NiaWidget,
   WidgetChecklistItens,
   WidgetConfirmarTransacao,
+  WidgetDocumento,
   WidgetResumoPeriodo,
 } from "@/lib/nia/schemas";
 
@@ -470,6 +471,8 @@ function WidgetView({ widget }: { widget: NiaWidget }) {
       return <ConfirmarTransacaoCard w={widget} />;
     case "checklist_itens":
       return <ChecklistItensCard w={widget} />;
+    case "documento":
+      return <DocumentoCard w={widget} />;
     case "criar_pessoa":
       return (
         <AcaoCard
@@ -678,6 +681,32 @@ function ConfirmarTransacaoCard({ w }: { w: WidgetConfirmarTransacao }) {
         </div>
       )}
     </div>
+  );
+}
+
+function DocumentoCard({ w }: { w: WidgetDocumento }) {
+  if (w.ehImagem) {
+    return (
+      <a
+        href={w.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="block max-w-[16rem] overflow-hidden rounded-2xl border border-border shadow-card"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={w.url} alt={w.nome} className="w-full object-cover" />
+      </a>
+    );
+  }
+  return (
+    <a
+      href={w.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-body-sm shadow-card hover:bg-secondary"
+    >
+      <FileText className="size-4 text-accent" /> {w.nome}
+    </a>
   );
 }
 
