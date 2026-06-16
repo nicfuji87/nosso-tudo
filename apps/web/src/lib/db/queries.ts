@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { formatBRL } from "@/lib/format";
+import type { NiaWidget } from "@/lib/nia/schemas";
 import type {
   Cartao,
   Categoria,
@@ -354,6 +355,81 @@ export async function getHistoricoRecente(
   // Anthropic exige que a 1ª mensagem seja do usuário.
   while (msgs.length > 0 && msgs[0]!.role === "assistant") msgs.shift();
   return msgs;
+}
+
+export interface MensagemHistorico {
+  id: string;
+  autor: "user" | "nia";
+  texto: string;
+  widgets: NiaWidget[];
+  mensagemId: string | null;
+  anexos?: { tipo: string; nome: string }[];
+}
+
+/** Conversa mais recente (não arquivada) do workspace — base da continuidade do chat. */
+export async function getConversaAtiva(workspaceId: string): Promise<string | null> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("conversas_ia")
+    .select("id")
+    .eq("workspace_id", workspaceId)
+    .eq("arquivada", false)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data as { id: string } | null)?.id ?? null;
+}
+
+/** Todas as mensagens de uma conversa, em ordem cronológica, no shape do chat. */
+export async function getMensagensConversa(conversaId: string): Promise<MensagemHistorico[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("mensagens_ia")
+    .select("id, papel, conteudo, widgets, midias, created_at")
+    .eq("conversa_id", conversaId)
+    .in("papel", ["user", "assistant"])
+    .order("created_at", { ascending: true });
+  const rows =
+    (data as
+      | {
+          id: string;
+          papel: string;
+          conteudo: string | null;
+          widgets: NiaWidget[] | null;
+          midias: { tipo?: string; nome?: string | null }[] | null;
+          created_at: string;
+        }[]
+      | null) ?? [];
+
+  const msgs: MensagemHistorico[] = [];
+  for (const r of rows) {
+    const texto = r.conteudo ?? "";
+    const widgets = Array.isArray(r.widgets) ? r.widgets : [];
+    if (r.papel === "user") {
+      const anexos = Array.isArray(r.midias)
+        ? r.midias
+            .filter((m) => m && m.tipo)
+            .map((m) => ({ tipo: m.tipo as string, nome: m.nome ?? "anexo" }))
+        : [];
+      if (!texto.trim() && anexos.length === 0) continue;
+      msgs.push({ id: r.id, autor: "user", texto, widgets: [], mensagemId: null, anexos });
+    } else {
+      if (!texto.trim() && widgets.length === 0) continue;
+      msgs.push({ id: r.id, autor: "nia", texto, widgets, mensagemId: r.id });
+    }
+  }
+  return msgs;
+}
+
+/** Status das ações propostas numa conversa: { acaoId → status } (cards do histórico). */
+export async function getStatusAcoes(conversaId: string): Promise<Record<string, string>> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("nia_acoes")
+    .select("id, status")
+    .eq("conversa_id", conversaId);
+  const rows = (data as { id: string; status: string }[] | null) ?? [];
+  return Object.fromEntries(rows.map((r) => [r.id, r.status]));
 }
 
 export interface MatchEstabelecimento {

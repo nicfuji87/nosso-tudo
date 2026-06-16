@@ -11,6 +11,7 @@ import {
   Paperclip,
   Send,
   Sparkles,
+  SquarePen,
   ThumbsDown,
   ThumbsUp,
   X,
@@ -84,35 +85,75 @@ export function NiaChat({
   nome,
   workspaceId,
   alertas = [],
+  conversaIdInicial,
+  mensagensIniciais = [],
+  statusAcoes = {},
 }: {
   nome: string;
   workspaceId: string;
   alertas?: string[];
+  conversaIdInicial?: string;
+  mensagensIniciais?: Msg[];
+  statusAcoes?: Record<string, string>;
 }) {
-  const [msgs, setMsgs] = useState<Msg[]>(() => {
-    const base = `Oi, ${nome}! Sou a Nia. Me conta um gasto — tipo "paguei 80 no mercado" — ou pergunta "quanto gastei esse mês?".`;
-    const aviso =
-      alertas.length > 0
-        ? `\n\n⚠️ Tenho ${alertas.length} aviso${alertas.length > 1 ? "s" : ""} pra você:\n${alertas
+  const saudacao = `Oi, ${nome}! Sou a Nia. Me conta um gasto — tipo "paguei 80 no mercado" — ou pergunta "quanto gastei esse mês?".`;
+  const bolhaAlertas: Msg | null =
+    alertas.length > 0
+      ? {
+          id: "alertas",
+          autor: "nia",
+          texto: `⚠️ Tenho ${alertas.length} aviso${alertas.length > 1 ? "s" : ""} pra você:\n${alertas
             .map((a) => `• ${a}`)
-            .join("\n")}`
-        : "";
-    return [{ id: "intro", autor: "nia", texto: base + aviso, widgets: [] }];
+            .join("\n")}`,
+          widgets: [],
+        }
+      : null;
+
+  const [msgs, setMsgs] = useState<Msg[]>(() => {
+    const inicial: Msg[] = [];
+    if (bolhaAlertas) inicial.push(bolhaAlertas);
+    if (mensagensIniciais.length > 0) inicial.push(...mensagensIniciais);
+    else inicial.push({ id: "intro", autor: "nia", texto: saudacao, widgets: [] });
+    return inicial;
   });
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [anexos, setAnexos] = useState<PendingAnexo[]>([]);
   const [gravando, setGravando] = useState(false);
-  const conversaId = useRef<string | undefined>(undefined);
+  const conversaId = useRef<string | undefined>(conversaIdInicial);
   const fileRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const fim = useRef<HTMLDivElement>(null);
+
+  // Status das ações do histórico só vale para os widgets carregados inicialmente.
+  const statusAcoesIniciais = useRef(statusAcoes);
 
   useEffect(() => {
     fim.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, loading]);
+
+  function ajustarAltura() {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }
+
+  function novaConversa() {
+    if (loading) return;
+    conversaId.current = undefined;
+    setInput("");
+    setAnexos([]);
+    setMsgs(
+      bolhaAlertas
+        ? [bolhaAlertas, { id: "intro", autor: "nia", texto: saudacao, widgets: [] }]
+        : [{ id: "intro", autor: "nia", texto: saudacao, widgets: [] }],
+    );
+    requestAnimationFrame(ajustarAltura);
+  }
 
   async function subirAnexo(blob: Blob, nome: string, mimeType: string, tipo: TipoAnexo) {
     const id = novoId();
@@ -182,6 +223,7 @@ export function NiaChat({
     if (loading || anexos.some((a) => !a.pronto)) return;
     if (!texto && prontos.length === 0) return;
     setInput("");
+    if (inputRef.current) inputRef.current.style.height = "auto";
     setAnexos([]);
     setMsgs((m) => [
       ...m,
@@ -279,10 +321,20 @@ export function NiaChat({
         <span className="flex size-9 items-center justify-center rounded-full bg-accent/15 text-accent">
           <Sparkles className="size-5" />
         </span>
-        <div>
+        <div className="flex-1">
           <h1 className="text-h4 font-semibold leading-tight">Nia</h1>
           <p className="text-caption text-muted-foreground">sua assistente do Nosso Tudo</p>
         </div>
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={novaConversa}
+          disabled={loading}
+          aria-label="Nova conversa"
+          title="Nova conversa"
+        >
+          <SquarePen className="size-5" />
+        </Button>
       </header>
 
       <div className="flex-1 space-y-4 overflow-y-auto pr-1">
@@ -313,7 +365,7 @@ export function NiaChat({
                 </div>
               )}
               {m.widgets.map((w, i) => (
-                <WidgetView key={i} widget={w} />
+                <WidgetView key={i} widget={w} statusAcoes={statusAcoesIniciais.current} />
               ))}
               {m.autor === "nia" && m.mensagemId && <Feedback mensagemId={m.mensagemId} />}
             </div>
@@ -351,70 +403,76 @@ export function NiaChat({
             })}
           </div>
         )}
-        <div className="flex items-end gap-2">
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*,application/pdf,audio/*"
-            multiple
-            hidden
-            onChange={(e) => {
-              handleFiles(e.target.files);
-              e.target.value = "";
-            }}
-          />
-          <input
-            ref={cameraRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            hidden
-            onChange={(e) => {
-              handleFiles(e.target.files);
-              e.target.value = "";
-            }}
-          />
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => cameraRef.current?.click()}
-            disabled={loading}
-            aria-label="Tirar foto (nota fiscal, recibo)"
-          >
-            <Camera className="size-4" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => fileRef.current?.click()}
-            disabled={loading}
-            aria-label="Anexar imagem, PDF ou áudio"
-          >
-            <Paperclip className="size-4" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={toggleGravacao}
-            disabled={loading}
-            aria-label={gravando ? "Parar gravação" : "Gravar áudio"}
-            className={cn(gravando && "animate-pulse text-destructive")}
-          >
-            <Mic className="size-4" />
-          </Button>
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                enviar();
-              }
-            }}
-            rows={1}
-            placeholder="Fale com a Nia…"
-            className="max-h-32 flex-1 resize-none bg-transparent px-2 py-2 text-body-sm outline-none placeholder:text-muted-foreground"
-          />
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*,application/pdf,audio/*"
+          multiple
+          hidden
+          onChange={(e) => {
+            handleFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={cameraRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          hidden
+          onChange={(e) => {
+            handleFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        <textarea
+          ref={inputRef}
+          value={input}
+          onChange={(e) => {
+            setInput(e.target.value);
+            ajustarAltura();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              enviar();
+            }
+          }}
+          rows={2}
+          placeholder="Fale com a Nia…"
+          className="max-h-40 w-full resize-none bg-transparent px-2 py-1.5 text-body outline-none placeholder:text-muted-foreground"
+        />
+        <div className="mt-1 flex items-center justify-between">
+          <div className="flex items-center gap-1">
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => cameraRef.current?.click()}
+              disabled={loading}
+              aria-label="Tirar foto (nota fiscal, recibo)"
+            >
+              <Camera className="size-4" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => fileRef.current?.click()}
+              disabled={loading}
+              aria-label="Anexar imagem, PDF ou áudio"
+            >
+              <Paperclip className="size-4" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={toggleGravacao}
+              disabled={loading}
+              aria-label={gravando ? "Parar gravação" : "Gravar áudio"}
+              className={cn(gravando && "animate-pulse text-destructive")}
+            >
+              <Mic className="size-4" />
+            </Button>
+          </div>
           <Button
             size="icon"
             onClick={enviar}
@@ -463,14 +521,39 @@ function Feedback({ mensagemId }: { mensagemId: string }) {
   );
 }
 
-function WidgetView({ widget }: { widget: NiaWidget }) {
+/** Deriva o estado inicial de um card de ação a partir do status persistido em nia_acoes. */
+function estadoFromStatus(status: string | undefined): EstadoAcao {
+  switch (status) {
+    case "executada":
+    case "confirmada":
+      return "feito";
+    case "rejeitada":
+      return "descartado";
+    case "desfeita":
+      return "desfeito";
+    default:
+      return "idle";
+  }
+}
+
+function WidgetView({
+  widget,
+  statusAcoes = {},
+}: {
+  widget: NiaWidget;
+  statusAcoes?: Record<string, string>;
+}) {
+  const acaoId = "acaoId" in widget ? widget.acaoId : undefined;
+  const estadoInicial = estadoFromStatus(acaoId ? statusAcoes[acaoId] : undefined);
+  const historico = estadoInicial !== "idle";
+
   switch (widget.tipo) {
     case "resumo_periodo":
       return <ResumoPeriodoCard w={widget} />;
     case "confirmar_transacao":
-      return <ConfirmarTransacaoCard w={widget} />;
+      return <ConfirmarTransacaoCard w={widget} estadoInicial={estadoInicial} historico={historico} />;
     case "checklist_itens":
-      return <ChecklistItensCard w={widget} />;
+      return <ChecklistItensCard w={widget} estadoInicial={estadoInicial} />;
     case "documento":
       return <DocumentoCard w={widget} />;
     case "criar_pessoa":
@@ -481,6 +564,7 @@ function WidgetView({ widget }: { widget: NiaWidget }) {
           confirmar={() => confirmarPessoa(widget.acaoId)}
           descartar={() => rejeitarAcao(widget.acaoId)}
           labelFeito="Cadastrado"
+          estadoInicial={estadoInicial}
         />
       );
     case "criar_compromisso":
@@ -494,6 +578,7 @@ function WidgetView({ widget }: { widget: NiaWidget }) {
           confirmar={() => confirmarCompromisso(widget.acaoId)}
           descartar={() => rejeitarAcao(widget.acaoId)}
           labelFeito="Compromisso criado"
+          estadoInicial={estadoInicial}
         />
       );
     case "lembrar_fato":
@@ -504,6 +589,7 @@ function WidgetView({ widget }: { widget: NiaWidget }) {
           confirmar={() => confirmarFato(widget.acaoId)}
           descartar={() => rejeitarAcao(widget.acaoId)}
           labelFeito="Guardado"
+          estadoInicial={estadoInicial}
         />
       );
     case "criar_meta":
@@ -515,6 +601,7 @@ function WidgetView({ widget }: { widget: NiaWidget }) {
           confirmar={() => confirmarMeta(widget.acaoId)}
           descartar={() => rejeitarAcao(widget.acaoId)}
           labelFeito="Meta criada"
+          estadoInicial={estadoInicial}
         />
       );
     case "criar_orcamento":
@@ -526,6 +613,7 @@ function WidgetView({ widget }: { widget: NiaWidget }) {
           confirmar={() => confirmarOrcamento(widget.acaoId)}
           descartar={() => rejeitarAcao(widget.acaoId)}
           labelFeito="Orçamento definido"
+          estadoInicial={estadoInicial}
         />
       );
     case "criar_categoria":
@@ -536,6 +624,7 @@ function WidgetView({ widget }: { widget: NiaWidget }) {
           confirmar={() => confirmarCategoria(widget.acaoId)}
           descartar={() => rejeitarAcao(widget.acaoId)}
           labelFeito="Categoria criada"
+          estadoInicial={estadoInicial}
         />
       );
     case "criar_conta":
@@ -546,6 +635,7 @@ function WidgetView({ widget }: { widget: NiaWidget }) {
           confirmar={() => confirmarConta(widget.acaoId)}
           descartar={() => rejeitarAcao(widget.acaoId)}
           labelFeito="Conta criada"
+          estadoInicial={estadoInicial}
         />
       );
     case "criar_cartao":
@@ -558,6 +648,7 @@ function WidgetView({ widget }: { widget: NiaWidget }) {
           confirmar={() => confirmarCartao(widget.acaoId)}
           descartar={() => rejeitarAcao(widget.acaoId)}
           labelFeito="Cartão criado"
+          estadoInicial={estadoInicial}
         />
       );
     default:
@@ -565,8 +656,16 @@ function WidgetView({ widget }: { widget: NiaWidget }) {
   }
 }
 
-function ConfirmarTransacaoCard({ w }: { w: WidgetConfirmarTransacao }) {
-  const [estado, setEstado] = useState<EstadoAcao>("idle");
+function ConfirmarTransacaoCard({
+  w,
+  estadoInicial = "idle",
+  historico = false,
+}: {
+  w: WidgetConfirmarTransacao;
+  estadoInicial?: EstadoAcao;
+  historico?: boolean;
+}) {
+  const [estado, setEstado] = useState<EstadoAcao>(estadoInicial);
   const [erro, setErro] = useState<string | null>(null);
   const [decisao, setDecisao] = useState<"mesmo" | "outro">("mesmo");
 
@@ -651,13 +750,15 @@ function ConfirmarTransacaoCard({ w }: { w: WidgetConfirmarTransacao }) {
           <p className="flex items-center gap-1.5 text-body-sm text-accent">
             <Check className="size-4" /> Lançado
           </p>
-          <button
-            type="button"
-            onClick={undo}
-            className="text-caption text-muted-foreground underline-offset-2 hover:underline"
-          >
-            desfazer
-          </button>
+          {!historico && (
+            <button
+              type="button"
+              onClick={undo}
+              className="text-caption text-muted-foreground underline-offset-2 hover:underline"
+            >
+              desfazer
+            </button>
+          )}
         </div>
       )}
       {estado === "desfazendo" && (
@@ -710,9 +811,21 @@ function DocumentoCard({ w }: { w: WidgetDocumento }) {
   );
 }
 
-function ChecklistItensCard({ w }: { w: WidgetChecklistItens }) {
+function ChecklistItensCard({
+  w,
+  estadoInicial = "idle",
+}: {
+  w: WidgetChecklistItens;
+  estadoInicial?: EstadoAcao;
+}) {
+  const inicial =
+    estadoInicial === "feito" || estadoInicial === "desfeito"
+      ? "feito"
+      : estadoInicial === "descartado"
+        ? "descartado"
+        : "idle";
   const [incluidos, setIncluidos] = useState<boolean[]>(() => w.itens.map(() => true));
-  const [estado, setEstado] = useState<"idle" | "salvando" | "feito" | "descartado" | "erro">("idle");
+  const [estado, setEstado] = useState<"idle" | "salvando" | "feito" | "descartado" | "erro">(inicial);
   const [erro, setErro] = useState<string | null>(null);
 
   const total = w.itens.reduce((s, it, i) => s + (incluidos[i] && it.valorTotal ? it.valorTotal : 0), 0);
@@ -860,6 +973,7 @@ function AcaoCard({
   descartar,
   onUndo,
   labelFeito = "Feito",
+  estadoInicial = "idle",
 }: {
   titulo: string;
   subtitulo?: string | null;
@@ -868,8 +982,9 @@ function AcaoCard({
   descartar: () => Promise<{ ok: boolean }>;
   onUndo?: () => Promise<{ error?: string; ok?: boolean }>;
   labelFeito?: string;
+  estadoInicial?: EstadoAcao;
 }) {
-  const [estado, setEstado] = useState<EstadoAcao>("idle");
+  const [estado, setEstado] = useState<EstadoAcao>(estadoInicial);
   const [erro, setErro] = useState<string | null>(null);
 
   async function doConfirmar() {
