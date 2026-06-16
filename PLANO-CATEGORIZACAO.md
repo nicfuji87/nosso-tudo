@@ -1,8 +1,23 @@
 # Plano — Categorização item a item + Contexto/Evento
 
-> Status: proposta (jun/2026). Objetivo: evoluir a categorização "uma categoria por
-> transação" para **categoria por item** + **contexto/evento por compra**, sem aumentar
-> o atrito de uso. Base da proposta do Nicolas (saída restaurante+cinema, mercado item a item).
+> Status: **TODAS AS 6 FASES IMPLEMENTADAS** (jun/2026, branch `feat/categorizacao-item`).
+> Objetivo: evoluir a categorização "uma categoria por transação" para **categoria por item**
+> + **contexto/evento por compra**, sem aumentar o atrito. Base da proposta do Nicolas
+> (saída restaurante+cinema, mercado item a item).
+>
+> | Fase | Entrega | Migration/Deploy |
+> |---|---|---|
+> | 1 ✅ | categoria/essencialidade/tipo no item + defaults | `0012` |
+> | 2 ✅ | gastos_por_categoria_v2 + gastos_por_essencialidade | `0013` |
+> | 3 ✅ | tabela contextos + gastos_por_contexto | `0014` |
+> | 4 ✅ | padrão canônico (153 cat) + sync_categorias_canonicas | `0015` |
+> | 5 ✅ | IA classifica na ingestão + memória do produto | `0016` + edge v3 |
+> | 6 ✅ | UI: itens expansíveis, painel essencial×supérfluo, eventos | app |
+>
+> Validado ponta a ponta no exemplo restaurante+cinema (pipoca→Alimentação fora,
+> ingresso→Lazer, estacionamento→Transporte, contexto Passeio em família, total 356 reconciliado).
+> **Pendente:** push da branch + merge na main (deploy Vercel). Edição inline de categoria/
+> essencialidade por item na UI é o próximo polimento natural (hoje a UI mostra; edição é via IA/ingest).
 
 ## 1. Diagnóstico do que já existe
 
