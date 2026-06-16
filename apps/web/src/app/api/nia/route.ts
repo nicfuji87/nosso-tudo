@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getUser, isPlatformAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { processarAnexos } from "@/lib/nia/anexos";
+import { getHistoricoRecente } from "@/lib/db/queries";
+import { processarAnexos, removerMidias } from "@/lib/nia/anexos";
 import { calcularCusto, getApiKey, getNiaConfig } from "@/lib/nia/config";
 import { getProvider, getStreamProvider } from "@/lib/nia/provider";
 import { NIA_FEATURE, niaRequestSchema, type NiaWidget } from "@/lib/nia/schemas";
@@ -100,11 +101,11 @@ export async function POST(req: Request): Promise<Response> {
   const conversaId = await getOrCreateConversa(workspaceId, user.id, parsed.data.conversaId);
   if (!conversaId) return NextResponse.json({ error: "Falha ao abrir a conversa." }, { status: 500 });
 
+  // Janela recente da conversa (multi-turn) — carregada antes de salvar a msg atual.
+  const historico = await getHistoricoRecente(conversaId, 10);
+
   // Anexos: baixa do Storage, transcreve áudio (Whisper), prepara imagem/PDF (multimodal).
-  const proc =
-    parsed.data.anexos.length > 0
-      ? await processarAnexos(workspaceId, user.id, parsed.data.anexos)
-      : { textoTranscrito: "", conteudos: [], midiasRefs: [] };
+  const proc = await processarAnexos(workspaceId, user.id, parsed.data.anexos);
   const userMessage =
     [parsed.data.mensagem, proc.textoTranscrito].filter(Boolean).join("\n") ||
     (proc.conteudos.length > 0 ? "Veja o anexo e me ajude." : "");
@@ -114,7 +115,7 @@ export async function POST(req: Request): Promise<Response> {
     workspaceId,
     papel: "user",
     conteudo: userMessage,
-    midias: proc.midiasRefs,
+    midias: proc.midias.map((m) => ({ id: m.id, tipo: m.tipo, nome: m.nome })),
   });
 
   // Memória da família (nia_contexto) injetada como referência — nunca como instrução (P3).
@@ -131,6 +132,10 @@ export async function POST(req: Request): Promise<Response> {
           .join("\n")}`
       : config.systemPrompt;
 
+  // Retenção: imagens só ficam se a Nia marcar como documento (ctx.reter).
+  const imagensTurno = proc.midias.filter((m) => m.tipo === "imagem").map((m) => ({ midiaId: m.id }));
+  const reter: string[] = [];
+
   const input = {
     apiKey,
     modelo: config.modelo,
@@ -139,8 +144,9 @@ export async function POST(req: Request): Promise<Response> {
     maxTokens: config.maxTokens,
     userMessage,
     anexos: proc.conteudos,
+    historico,
     tools: NIA_TOOLS,
-    ctx: { workspaceId, profileId: user.id, conversaId },
+    ctx: { workspaceId, profileId: user.id, conversaId, imagensTurno, reter },
   };
   const streamFn = getStreamProvider(config.provedor);
   const encoder = new TextEncoder();
@@ -196,6 +202,15 @@ export async function POST(req: Request): Promise<Response> {
           latenciaMs,
         });
         send({ type: "done", conversaId, mensagemId });
+
+        // Retenção: imagens não marcadas como documento são descartadas (privacidade).
+        const descartar = proc.midias.filter((m) => m.tipo === "imagem" && !reter.includes(m.id));
+        if (descartar.length > 0) {
+          await removerMidias(
+            descartar.map((m) => m.id),
+            descartar.map((m) => m.storagePath),
+          );
+        }
       } catch (e) {
         send({ type: "error", error: "A Nia teve um problema ao responder.", detalhe: (e as Error).message });
       } finally {

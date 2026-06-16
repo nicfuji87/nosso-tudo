@@ -82,13 +82,36 @@ export function NiaChat({ nome, workspaceId }: { nome: string; workspaceId: stri
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [anexos, setAnexos] = useState<PendingAnexo[]>([]);
+  const [gravando, setGravando] = useState(false);
   const conversaId = useRef<string | undefined>(undefined);
   const fileRef = useRef<HTMLInputElement>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
   const fim = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fim.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, loading]);
+
+  async function subirAnexo(blob: Blob, nome: string, mimeType: string, tipo: TipoAnexo) {
+    const id = novoId();
+    const ext = nome.includes(".") ? `.${nome.split(".").pop()}` : tipo === "audio" ? ".webm" : "";
+    const storagePath = `${workspaceId}/${id}${ext}`;
+    setAnexos((a) => [
+      ...a,
+      { id, tipo, nome, storagePath, mimeType, tamanho: blob.size, pronto: false },
+    ]);
+    const supabase = createClient();
+    const { error } = await supabase.storage
+      .from("nia-anexos")
+      .upload(storagePath, blob, { upsert: false, contentType: mimeType });
+    if (error) {
+      toast.error("Falha ao enviar anexo", { description: nome });
+      setAnexos((a) => a.filter((x) => x.id !== id));
+    } else {
+      setAnexos((a) => a.map((x) => (x.id === id ? { ...x, pronto: true } : x)));
+    }
+  }
 
   async function handleFiles(files: FileList | null) {
     if (!files) return;
@@ -98,26 +121,38 @@ export function NiaChat({ nome, workspaceId }: { nome: string; workspaceId: stri
         toast.error("Tipo não suportado", { description: file.name });
         continue;
       }
-      const id = novoId();
-      const ext = file.name.includes(".") ? `.${file.name.split(".").pop()}` : "";
-      const storagePath = `${workspaceId}/${id}${ext}`;
-      setAnexos((a) => [
-        ...a,
-        { id, tipo, nome: file.name, storagePath, mimeType: file.type, tamanho: file.size, pronto: false },
-      ]);
-      const supabase = createClient();
-      const { error } = await supabase.storage.from("nia-anexos").upload(storagePath, file, { upsert: false });
-      if (error) {
-        toast.error("Falha ao enviar anexo", { description: file.name });
-        setAnexos((a) => a.filter((x) => x.id !== id));
-      } else {
-        setAnexos((a) => a.map((x) => (x.id === id ? { ...x, pronto: true } : x)));
-      }
+      await subirAnexo(file, file.name, file.type, tipo);
     }
   }
 
   function removerAnexo(id: string) {
     setAnexos((a) => a.filter((x) => x.id !== id));
+  }
+
+  async function toggleGravacao() {
+    if (gravando) {
+      recorderRef.current?.stop();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      chunksRef.current = [];
+      rec.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      rec.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setGravando(false);
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        if (blob.size > 0) await subirAnexo(blob, `audio-${Date.now()}.webm`, "audio/webm", "audio");
+      };
+      recorderRef.current = rec;
+      rec.start();
+      setGravando(true);
+    } catch {
+      toast.error("Não consegui acessar o microfone");
+    }
   }
 
   async function enviar() {
@@ -315,6 +350,16 @@ export function NiaChat({ nome, workspaceId }: { nome: string; workspaceId: stri
             aria-label="Anexar imagem, PDF ou áudio"
           >
             <Paperclip className="size-4" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={toggleGravacao}
+            disabled={loading}
+            aria-label={gravando ? "Parar gravação" : "Gravar áudio"}
+            className={cn(gravando && "animate-pulse text-destructive")}
+          >
+            <Mic className="size-4" />
           </Button>
           <textarea
             value={input}

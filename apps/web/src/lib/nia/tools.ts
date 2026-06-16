@@ -33,6 +33,10 @@ export interface NiaToolContext {
   workspaceId: string;
   profileId: string;
   conversaId: string;
+  /** Imagens anexadas neste turno (política de retenção). */
+  imagensTurno?: { midiaId: string }[];
+  /** Coletor de mídias que a Nia decidiu manter (preenchido por guardar_documento). */
+  reter?: string[];
 }
 
 export interface NiaToolResult {
@@ -451,6 +455,22 @@ const criarCartao: NiaTool = {
   },
 };
 
+const guardarDocumento: NiaTool = {
+  nome: "guardar_documento",
+  descricao:
+    "Mantém no histórico uma IMAGEM anexada que é um documento financeiro (nota fiscal, recibo, fatura, comprovante, boleto). Por padrão imagens NÃO são guardadas — chame isto só quando a imagem for um documento útil. NUNCA chame para foto de pessoa ou imagem pessoal/irrelevante. (PDF e áudio já são mantidos.)",
+  nivel: "auto",
+  inputSchema: {
+    type: "object",
+    properties: { motivo: { type: "string", description: "Que documento é (ex.: 'nota do mercado')." } },
+  },
+  async executar(_args, ctx) {
+    const imgs = ctx.imagensTurno ?? [];
+    if (ctx.reter) for (const i of imgs) ctx.reter.push(i.midiaId);
+    return { texto: imgs.length > 0 ? "Documento mantido no histórico." : "Não há imagem para guardar." };
+  },
+};
+
 export const NIA_TOOLS: NiaTool[] = [
   consultarGastos,
   consultarCadastros,
@@ -462,6 +482,7 @@ export const NIA_TOOLS: NiaTool[] = [
   criarCartao,
   criarCompromisso,
   lembrarFato,
+  guardarDocumento,
 ];
 
 export function getTool(nome: string): NiaTool | undefined {

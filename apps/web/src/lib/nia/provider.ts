@@ -24,6 +24,8 @@ export interface NiaProviderInput {
   userMessage: string;
   /** Imagem/PDF para multimodal (áudio já vem transcrito no userMessage). */
   anexos?: AnexoConteudo[];
+  /** Janela recente da conversa (multi-turn), em ordem cronológica. */
+  historico?: { role: "user" | "assistant"; content: string }[];
   tools: NiaTool[];
   ctx: NiaToolContext;
 }
@@ -123,6 +125,7 @@ interface AnthropicMessage {
 
 const anthropicProvider: NiaProvider = async (input) => {
   const messages: AnthropicMessage[] = [
+    ...(input.historico ?? []).map((h) => ({ role: h.role, content: h.content })),
     { role: "user", content: anthropicUserContent(input.userMessage, input.anexos) },
   ];
   const widgets: NiaWidget[] = [];
@@ -254,6 +257,7 @@ function ehRaciocinio(modelo: string): boolean {
 const openaiProvider: NiaProvider = async (input) => {
   const messages: OpenAIMsg[] = [
     { role: "system", content: input.systemPrompt },
+    ...(input.historico ?? []).map((h) => ({ role: h.role, content: h.content })),
     { role: "user", content: openaiUserContent(input.userMessage, input.anexos) },
   ];
   const widgets: NiaWidget[] = [];
@@ -334,6 +338,7 @@ const openaiProvider: NiaProvider = async (input) => {
 const openaiStream: NiaStreamProvider = async (input, cb) => {
   const messages: OpenAIMsg[] = [
     { role: "system", content: input.systemPrompt },
+    ...(input.historico ?? []).map((h) => ({ role: h.role, content: h.content })),
     { role: "user", content: openaiUserContent(input.userMessage, input.anexos) },
   ];
   const ferramentas: string[] = [];
@@ -459,6 +464,7 @@ const openaiStream: NiaStreamProvider = async (input, cb) => {
 /** Anthropic com streaming (SSE) token-a-token + loop de tool-use + prompt caching. */
 const anthropicStream: NiaStreamProvider = async (input, cb) => {
   const messages: AnthropicMessage[] = [
+    ...(input.historico ?? []).map((h) => ({ role: h.role, content: h.content })),
     { role: "user", content: anthropicUserContent(input.userMessage, input.anexos) },
   ];
   const ferramentas: string[] = [];

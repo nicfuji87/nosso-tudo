@@ -113,6 +113,37 @@ export async function listCartoes(workspaceId: string): Promise<Cartao[]> {
   return (data as Cartao[] | null) ?? [];
 }
 
+export interface TurnoHistorico {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/** Últimas N mensagens da conversa (janela de contexto), em ordem cronológica. */
+export async function getHistoricoRecente(
+  conversaId: string,
+  limite = 10,
+): Promise<TurnoHistorico[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("mensagens_ia")
+    .select("papel, conteudo, created_at")
+    .eq("conversa_id", conversaId)
+    .in("papel", ["user", "assistant"])
+    .order("created_at", { ascending: false })
+    .limit(limite);
+  const rows = (data as { papel: string; conteudo: string }[] | null) ?? [];
+  const msgs: TurnoHistorico[] = rows
+    .reverse()
+    .filter((r) => r.conteudo && r.conteudo.trim().length > 0)
+    .map((r) => ({
+      role: r.papel === "assistant" ? "assistant" : "user",
+      content: r.conteudo.slice(0, 4000),
+    }));
+  // Anthropic exige que a 1ª mensagem seja do usuário.
+  while (msgs.length > 0 && msgs[0]!.role === "assistant") msgs.shift();
+  return msgs;
+}
+
 export interface MatchEstabelecimento {
   id: string;
   nome: string;

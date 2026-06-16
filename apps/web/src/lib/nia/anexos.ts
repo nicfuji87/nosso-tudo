@@ -1,7 +1,7 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { getApiKey } from "@/lib/nia/config";
-import type { MidiaRef, NiaAnexoInput } from "@/lib/nia/schemas";
+import type { NiaAnexoInput } from "@/lib/nia/schemas";
 
 /**
  * Processa anexos da Nia sob o RLS do usuário: baixa do Storage, transcreve
@@ -9,13 +9,20 @@ import type { MidiaRef, NiaAnexoInput } from "@/lib/nia/schemas";
  * do modelo). Cada anexo vira uma linha em `midias` (entra no histórico).
  */
 
+export interface MidiaProcessada {
+  id: string;
+  tipo: string;
+  nome: string | null;
+  storagePath: string;
+}
+
 export interface AnexoProcessado {
   /** Transcrição concatenada dos áudios (vai junto da mensagem do usuário). */
   textoTranscrito: string;
   /** Imagem/PDF prontos para o provedor (Claude lê PDF nativo). */
   conteudos: { tipo: "imagem" | "pdf"; mimeType: string; base64: string }[];
-  /** Referências para guardar na mensagem (mensagens_ia.midias). */
-  midiasRefs: MidiaRef[];
+  /** Mídias gravadas (para o histórico e a política de retenção). */
+  midias: MidiaProcessada[];
 }
 
 async function blobParaBase64(blob: Blob): Promise<string> {
@@ -50,7 +57,7 @@ export async function processarAnexos(
 ): Promise<AnexoProcessado> {
   const supabase = createClient();
   const conteudos: AnexoProcessado["conteudos"] = [];
-  const midiasRefs: MidiaRef[] = [];
+  const midias: MidiaProcessada[] = [];
   const transcricoes: string[] = [];
 
   for (const a of anexos) {
@@ -86,8 +93,16 @@ export async function processarAnexos(
       .select("id")
       .maybeSingle();
     const id = (midia as { id: string } | null)?.id;
-    if (id) midiasRefs.push({ id, tipo: a.tipo, nome: a.nomeOriginal ?? null });
+    if (id) midias.push({ id, tipo: a.tipo, nome: a.nomeOriginal ?? null, storagePath: a.storagePath });
   }
 
-  return { textoTranscrito: transcricoes.join("\n").trim(), conteudos, midiasRefs };
+  return { textoTranscrito: transcricoes.join("\n").trim(), conteudos, midias };
+}
+
+/** Remove mídias (linha + objeto no Storage) — usado pela política de retenção. */
+export async function removerMidias(midiaIds: string[], storagePaths: string[]): Promise<void> {
+  if (midiaIds.length === 0) return;
+  const supabase = createClient();
+  await supabase.from("midias").delete().in("id", midiaIds);
+  if (storagePaths.length > 0) await supabase.storage.from("nia-anexos").remove(storagePaths);
 }
