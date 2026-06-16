@@ -132,8 +132,10 @@ export async function POST(req: Request): Promise<Response> {
           .join("\n")}`
       : config.systemPrompt;
 
-  // Retenção: imagens só ficam se a Nia marcar como documento (ctx.reter).
-  const imagensTurno = proc.midias.filter((m) => m.tipo === "imagem").map((m) => ({ midiaId: m.id }));
+  // Retenção: imagem/PDF só ficam se a Nia marcar como documento (ctx.reter). Áudio fica (transcrição).
+  const docsTurno = proc.midias
+    .filter((m) => m.tipo === "imagem" || m.tipo === "pdf")
+    .map((m) => ({ midiaId: m.id }));
   const reter: string[] = [];
 
   const input = {
@@ -146,7 +148,7 @@ export async function POST(req: Request): Promise<Response> {
     anexos: proc.conteudos,
     historico,
     tools: NIA_TOOLS,
-    ctx: { workspaceId, profileId: user.id, conversaId, imagensTurno, reter },
+    ctx: { workspaceId, profileId: user.id, conversaId, docsTurno, reter },
   };
   const streamFn = getStreamProvider(config.provedor);
   const encoder = new TextEncoder();
@@ -203,8 +205,10 @@ export async function POST(req: Request): Promise<Response> {
         });
         send({ type: "done", conversaId, mensagemId });
 
-        // Retenção: imagens não marcadas como documento são descartadas (privacidade).
-        const descartar = proc.midias.filter((m) => m.tipo === "imagem" && !reter.includes(m.id));
+        // Retenção: imagem/PDF não marcados como documento são descartados (privacidade).
+        const descartar = proc.midias.filter(
+          (m) => (m.tipo === "imagem" || m.tipo === "pdf") && !reter.includes(m.id),
+        );
         if (descartar.length > 0) {
           await removerMidias(
             descartar.map((m) => m.id),
