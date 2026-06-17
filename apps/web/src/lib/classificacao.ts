@@ -1,6 +1,6 @@
 import "server-only";
 import type { createClient } from "@/lib/supabase/server";
-import { normalizarTexto } from "@/lib/normalize";
+import { normalizarTexto, normalizarUnidade } from "@/lib/normalize";
 
 /**
  * Classificação de itens/transações no servidor (paridade com a Edge
@@ -159,6 +159,40 @@ export async function classificarItem(
   }
 
   return { categoriaId, essencialidade, tipo };
+}
+
+/**
+ * Registra os efeitos de uma compra na memória do produto, de forma unit-aware:
+ * fixa a `unidade_padrao` na primeira compra que informa unidade e só atualiza o
+ * `ultimo_preco_unitario` quando a unidade da compra bate com a padrão — assim o
+ * preço guardado continua comparável (não mistura R$/un com R$/kg). A categoria/
+ * essencialidade/tipo do produto NÃO dependem da unidade (ver `classificarItem`).
+ */
+export async function registrarCompraProduto(
+  db: DB,
+  produtoId: string,
+  compra: { unidade?: string | null; valorUnitario?: number | null; data: string },
+): Promise<void> {
+  const { data: p } = await db
+    .from("produtos")
+    .select("unidade_padrao")
+    .eq("id", produtoId)
+    .maybeSingle();
+  const unidadePadrao = (p as { unidade_padrao: string | null } | null)?.unidade_padrao ?? null;
+  const unidadeCompra = normalizarUnidade(compra.unidade);
+
+  const patch: Record<string, unknown> = { ultima_compra_em: compra.data };
+  if (!unidadePadrao && unidadeCompra) patch.unidade_padrao = unidadeCompra;
+
+  // Preço comparável só quando a unidade bate com a referência (ou não há padrão
+  // ainda / a compra não informou unidade — aí registra mesmo assim).
+  const unidadeRef = unidadePadrao ?? unidadeCompra;
+  const mesmaUnidade = !unidadeRef || !unidadeCompra || unidadeCompra === unidadeRef;
+  if (compra.valorUnitario != null && mesmaUnidade) {
+    patch.ultimo_preco_unitario = compra.valorUnitario;
+  }
+
+  await db.from("produtos").update(patch).eq("id", produtoId);
 }
 
 /** Resolve (ou cria) o contexto/evento da compra a partir de um nome. */

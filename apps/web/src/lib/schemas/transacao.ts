@@ -24,5 +24,7 @@ export const transacaoSchema = z.object({
   contexto: z.string().trim().max(120).optional(),
   observacoes: z.string().trim().max(500).optional(),
   tags: z.array(z.string()).default([]),
+  /** Nº de parcelas (1 = à vista). >1 gera um lançamento por mês. `valor` é o total. */
+  parcelas: z.coerce.number().int().min(1).max(60).optional(),
 });
 export type TransacaoInput = z.infer<typeof transacaoSchema>;

@@ -7,6 +7,7 @@ import type {
   ContaBancaria,
   Entidade,
   Essencialidade,
+  Recorrencia,
   TransacaoComRelacoes,
 } from "@/lib/types/db";
 
@@ -196,6 +197,17 @@ export async function listCategorias(workspaceId: string): Promise<Categoria[]> 
     .order("ordem", { ascending: true })
     .order("nome", { ascending: true });
   return (data as Categoria[] | null) ?? [];
+}
+
+export async function listRecorrencias(workspaceId: string): Promise<Recorrencia[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("recorrencias")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .order("ativa", { ascending: false })
+    .order("descricao", { ascending: true });
+  return (data as Recorrencia[] | null) ?? [];
 }
 
 export async function listEntidades(workspaceId: string): Promise<Entidade[]> {
@@ -477,6 +489,75 @@ export async function getHistoricoRecente(
   // Anthropic exige que a 1ª mensagem seja do usuário.
   while (msgs.length > 0 && msgs[0]!.role === "assistant") msgs.shift();
   return msgs;
+}
+
+export interface LancamentoConversa {
+  descricao: string;
+  valor: number;
+  estabelecimento: string | null;
+  itens: { nome: string; quantidade: number | null; unidade: string | null }[];
+}
+
+/**
+ * Lançamentos (despesas/receitas) já confirmados NESTA conversa, via nia_acoes
+ * (status 'executada' → registro_id). Vira memória de curto prazo da Nia: o route
+ * injeta isso no contexto para ela não repropor a mesma compra/itens já lançados.
+ */
+export async function getLancamentosDaConversa(
+  conversaId: string,
+  limite = 10,
+): Promise<LancamentoConversa[]> {
+  const supabase = createClient();
+  const { data: acoes } = await supabase
+    .from("nia_acoes")
+    .select("registro_id")
+    .eq("conversa_id", conversaId)
+    .eq("status", "executada")
+    .in("ferramenta", ["lancar_transacao", "lancar_transacao_detalhada"])
+    .not("registro_id", "is", null)
+    .order("confirmado_em", { ascending: false })
+    .limit(limite);
+  const ids = ((acoes as { registro_id: string }[] | null) ?? []).map((a) => a.registro_id);
+  if (ids.length === 0) return [];
+
+  const [{ data: txs }, { data: itens }] = await Promise.all([
+    supabase
+      .from("transacoes")
+      .select("id, descricao, valor, estabelecimento:estabelecimentos(nome)")
+      .in("id", ids),
+    supabase
+      .from("itens_transacao")
+      .select("transacao_id, descricao_original, quantidade, unidade")
+      .in("transacao_id", ids),
+  ]);
+
+  const itensPorTx = new Map<string, LancamentoConversa["itens"]>();
+  for (const it of (itens as
+    | { transacao_id: string; descricao_original: string; quantidade: number | null; unidade: string | null }[]
+    | null) ?? []) {
+    const arr = itensPorTx.get(it.transacao_id) ?? [];
+    arr.push({
+      nome: it.descricao_original,
+      quantidade: it.quantidade != null ? Number(it.quantidade) : null,
+      unidade: it.unidade,
+    });
+    itensPorTx.set(it.transacao_id, arr);
+  }
+
+  const txRows =
+    (txs as
+      | { id: string; descricao: string; valor: number; estabelecimento: { nome: string } | null }[]
+      | null) ?? [];
+  // Preserva a ordem de `ids` (mais recente primeiro).
+  return ids
+    .map((id) => txRows.find((t) => t.id === id))
+    .filter((t): t is NonNullable<typeof t> => Boolean(t))
+    .map((t) => ({
+      descricao: t.descricao,
+      valor: Number(t.valor),
+      estabelecimento: t.estabelecimento?.nome ?? null,
+      itens: itensPorTx.get(t.id) ?? [],
+    }));
 }
 
 export interface MensagemHistorico {

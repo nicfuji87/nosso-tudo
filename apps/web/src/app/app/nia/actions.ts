@@ -19,11 +19,17 @@ import {
 } from "@/lib/nia/schemas";
 import { atualizarAcao, votar } from "@/lib/nia/store";
 import { normalizarTexto } from "@/lib/normalize";
-import { classificarItem, resolverCategoriaCanonica, resolverProduto } from "@/lib/classificacao";
+import {
+  classificarItem,
+  registrarCompraProduto,
+  resolverCategoriaCanonica,
+  resolverProduto,
+} from "@/lib/classificacao";
 
 interface AcaoRow {
   id: string;
   workspace_id: string;
+  conversa_id: string;
   ferramenta: string;
   status: string;
   payload_proposto: unknown;
@@ -34,10 +40,35 @@ async function carregarAcao(acaoId: string): Promise<AcaoRow | null> {
   const supabase = createClient();
   const { data } = await supabase
     .from("nia_acoes")
-    .select("id, workspace_id, ferramenta, status, payload_proposto, registro_id")
+    .select("id, workspace_id, conversa_id, ferramenta, status, payload_proposto, registro_id")
     .eq("id", acaoId)
     .maybeSingle();
   return (data as AcaoRow | null) ?? null;
+}
+
+/** Itens (nome + valor) já lançados nesta conversa — base do dedupe ao confirmar. */
+async function itensLancadosNaConversa(
+  supabase: ReturnType<typeof createClient>,
+  conversaId: string,
+  exceto: string,
+): Promise<{ nome: string; valorTotal: number | null }[]> {
+  const { data: acoes } = await supabase
+    .from("nia_acoes")
+    .select("registro_id")
+    .eq("conversa_id", conversaId)
+    .eq("status", "executada")
+    .neq("id", exceto)
+    .not("registro_id", "is", null);
+  const ids = ((acoes as { registro_id: string }[] | null) ?? []).map((a) => a.registro_id);
+  if (ids.length === 0) return [];
+  const { data: itens } = await supabase
+    .from("itens_transacao")
+    .select("descricao_original, valor_total")
+    .in("transacao_id", ids);
+  return ((itens as { descricao_original: string; valor_total: number | null }[] | null) ?? []).map((i) => ({
+    nome: i.descricao_original,
+    valorTotal: i.valor_total != null ? Number(i.valor_total) : null,
+  }));
 }
 
 /** Aprende um apelido para um estabelecimento (zona cinza confirmada como "o mesmo"). */
@@ -110,7 +141,7 @@ export async function confirmarTransacao(
 export async function confirmarTransacaoDetalhada(
   acaoId: string,
   indicesIncluidos: number[],
-): Promise<{ error?: string; ok?: boolean }> {
+): Promise<{ error?: string; ok?: boolean; pulados?: number }> {
   const acao = await carregarAcao(acaoId);
   if (!acao) return { error: "Ação não encontrada." };
   if (acao.status !== "proposta") return { error: "Essa ação já foi processada." };
@@ -120,17 +151,36 @@ export async function confirmarTransacaoDetalhada(
   if (!parsed.success) return { error: "Dados da proposta inválidos." };
   const d = parsed.data;
 
-  const inclusos = d.itens.filter((_, i) => indicesIncluidos.includes(i));
-  if (inclusos.length === 0) return { error: "Selecione ao menos um item." };
+  const selecionados = d.itens.filter((_, i) => indicesIncluidos.includes(i));
+  if (selecionados.length === 0) return { error: "Selecione ao menos um item." };
 
-  const valorItem = (it: (typeof inclusos)[number]): number =>
+  const valorItem = (it: (typeof selecionados)[number]): number =>
     it.valor_total ?? (it.valor_unitario != null && it.quantidade != null ? it.valor_unitario * it.quantidade : 0);
-  const valor = Number(inclusos.reduce((s, it) => s + valorItem(it), 0).toFixed(2));
-  if (valor <= 0) return { error: "Não consegui os valores dos itens. Tente informar o total." };
 
   const supabase = createClient();
   const ws = acao.workspace_id;
   const data = d.data_transacao ?? new Date().toISOString().slice(0, 10);
+
+  // Rede de segurança: ignora itens idênticos (mesmo nome + mesmo valor) já lançados
+  // nesta conversa, para não duplicar quando a Nia repropõe uma cesta já registrada.
+  const lancadosPrev = await itensLancadosNaConversa(supabase, acao.conversa_id, acaoId);
+  const jaLancado = (nome: string, vTotal: number): boolean =>
+    vTotal > 0 &&
+    lancadosPrev.some(
+      (p) =>
+        p.valorTotal != null &&
+        Math.abs(p.valorTotal - vTotal) < 0.01 &&
+        normalizarTexto(p.nome) === normalizarTexto(nome),
+    );
+
+  const inclusos = selecionados.filter((it) => !jaLancado(it.nome, valorItem(it)));
+  const pulados = selecionados.length - inclusos.length;
+  if (inclusos.length === 0) {
+    return { error: "Esses itens já tinham sido lançados nesta conversa." };
+  }
+
+  const valor = Number(inclusos.reduce((s, it) => s + valorItem(it), 0).toFixed(2));
+  if (valor <= 0) return { error: "Não consegui os valores dos itens. Tente informar o total." };
 
   // Categoria geral da nota, ancorada no padrão (opcional).
   const catTx = await resolverCategoriaCanonica(supabase, ws, d.categoria);
@@ -183,11 +233,13 @@ export async function confirmarTransacaoDetalhada(
         ordem_na_nota: ordem,
         status_revisao: "confirmado",
       });
+      // Memória do produto: unidade padrão + último preço (comparável só na mesma unidade).
       if (prod.produtoId) {
-        await supabase
-          .from("produtos")
-          .update({ ultimo_preco_unitario: it.valor_unitario ?? null, ultima_compra_em: data })
-          .eq("id", prod.produtoId);
+        await registrarCompraProduto(supabase, prod.produtoId, {
+          unidade: it.unidade ?? null,
+          valorUnitario: it.valor_unitario ?? null,
+          data,
+        });
       }
     }
 
@@ -200,10 +252,10 @@ export async function confirmarTransacaoDetalhada(
 
   await atualizarAcao(acaoId, {
     status: "executada",
-    resultado: { ok: true, itens: inclusos.length },
+    resultado: { ok: true, itens: inclusos.length, pulados },
     registroId: res.id,
   });
-  return { ok: true };
+  return { ok: true, pulados };
 }
 
 /** Cadastra a pessoa/grupo proposto pela Nia. */

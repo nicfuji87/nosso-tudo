@@ -902,6 +902,7 @@ function ChecklistItensCard({
   const [incluidos, setIncluidos] = useState<boolean[]>(() => w.itens.map(() => true));
   const [estado, setEstado] = useState<"idle" | "salvando" | "feito" | "descartado" | "erro">(inicial);
   const [erro, setErro] = useState<string | null>(null);
+  const [pulados, setPulados] = useState(0);
 
   const total = w.itens.reduce((s, it, i) => s + (incluidos[i] && it.valorTotal ? it.valorTotal : 0), 0);
   const qtd = incluidos.filter(Boolean).length;
@@ -926,6 +927,7 @@ function ChecklistItensCard({
       setErro(r.error);
       setEstado("erro");
     } else {
+      setPulados(r.pulados ?? 0);
       setEstado("feito");
     }
   }
@@ -992,7 +994,13 @@ function ChecklistItensCard({
       <div className="flex items-center justify-between gap-2 border-t border-border bg-secondary/40 px-4 py-3">
         {estado === "feito" ? (
           <p className="flex items-center gap-1.5 text-body-sm text-accent">
-            <Check className="size-4" /> Lançado · {qtd} itens
+            <Check className="size-4" /> Lançado · {Math.max(0, qtd - pulados)} itens
+            {pulados > 0 && (
+              <span className="text-muted-foreground">
+                {" "}
+                ({pulados} já {pulados === 1 ? "estava lançado" : "estavam lançados"})
+              </span>
+            )}
           </p>
         ) : estado === "descartado" ? (
           <p className="text-body-sm text-muted-foreground">Descartado.</p>

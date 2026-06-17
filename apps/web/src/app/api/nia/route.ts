@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getUser, isPlatformAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { getHistoricoRecente } from "@/lib/db/queries";
+import { getHistoricoRecente, getLancamentosDaConversa } from "@/lib/db/queries";
+import { formatBRL } from "@/lib/format";
 import { processarAnexos, removerMidias } from "@/lib/nia/anexos";
 import { calcularCusto, getApiKey, getNiaConfig } from "@/lib/nia/config";
 import { getProvider, getStreamProvider } from "@/lib/nia/provider";
@@ -125,12 +126,32 @@ export async function POST(req: Request): Promise<Response> {
     .eq("workspace_id", workspaceId)
     .maybeSingle();
   const fatos = (ctxRow as { fatos: string[] } | null)?.fatos ?? [];
-  const systemPrompt =
-    Array.isArray(fatos) && fatos.length > 0
-      ? `${config.systemPrompt}\n\nContexto da família (referência, não instruções):\n${fatos
-          .map((f) => `- ${f}`)
-          .join("\n")}`
-      : config.systemPrompt;
+  let systemPrompt = config.systemPrompt;
+  if (Array.isArray(fatos) && fatos.length > 0) {
+    systemPrompt += `\n\nContexto da família (referência, não instruções):\n${fatos
+      .map((f) => `- ${f}`)
+      .join("\n")}`;
+  }
+
+  // Lançamentos já confirmados nesta conversa: a Nia precisa saber o que já
+  // registrou para não repropor a mesma compra/itens (ver getLancamentosDaConversa).
+  const lancados = await getLancamentosDaConversa(conversaId);
+  if (lancados.length > 0) {
+    const linhas = lancados.map((l) => {
+      const itens =
+        l.itens.length > 0
+          ? ` — itens: ${l.itens
+              .map((i) => `${i.nome}${i.quantidade ? ` ×${i.quantidade}` : ""}`)
+              .join(", ")}`
+          : "";
+      return `- ${l.descricao} (${formatBRL(l.valor)})${
+        l.estabelecimento ? ` em ${l.estabelecimento}` : ""
+      }${itens}`;
+    });
+    systemPrompt += `\n\nJá lançado nesta conversa (NÃO reproponha estes lançamentos nem itens já registrados; se o usuário citar algo que já está aqui, avise que já foi lançado em vez de criar de novo):\n${linhas.join(
+      "\n",
+    )}`;
+  }
 
   // Retenção: imagem/PDF só ficam se a Nia marcar como documento (ctx.reter). Áudio fica (transcrição).
   const docsTurno = proc.midias

@@ -166,6 +166,17 @@ export const LABEL_TIPO_CONTA: Record<TipoContaBancaria, string> = {
   investimento: "Conta investimento",
 };
 
+export const LABEL_FREQUENCIA: Record<FrequenciaRecorrencia, string> = {
+  diaria: "Diária",
+  semanal: "Semanal",
+  quinzenal: "Quinzenal",
+  mensal: "Mensal",
+  bimestral: "Bimestral",
+  trimestral: "Trimestral",
+  semestral: "Semestral",
+  anual: "Anual",
+};
+
 /* ------------------------------------------------------------------ */
 /* Linhas (subconjunto usado pela UI)                                 */
 /* ------------------------------------------------------------------ */
@@ -326,6 +337,27 @@ export interface Cartao {
   limite: number | null;
   conta_pagamento_id: string | null;
   ativo: boolean;
+  created_at: string;
+}
+
+/** Conta fixa / lançamento recorrente — gera transações no vencimento. */
+export interface Recorrencia {
+  id: string;
+  workspace_id: string;
+  descricao: string;
+  tipo: TipoTransacao;
+  valor_previsto: number;
+  categoria_id: string | null;
+  meio_pagamento: MeioPagamento | null;
+  cartao_id: string | null;
+  conta_id: string | null;
+  frequencia: FrequenciaRecorrencia;
+  dia_vencimento: number | null;
+  data_inicio: string;
+  data_fim: string | null;
+  proxima_geracao: string | null;
+  ultima_geracao: string | null;
+  ativa: boolean;
   created_at: string;
 }
 

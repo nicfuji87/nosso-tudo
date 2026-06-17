@@ -27,6 +27,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/sonner";
 import { MoneyInput } from "./money-input";
 import { FieldError } from "@/components/auth/field-error";
+import { formatBRL } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { transacaoSchema, type TransacaoInput } from "@/lib/schemas/transacao";
 import { LABEL_MEIO_PAGAMENTO, MEIOS_PAGAMENTO } from "@/lib/types/db";
@@ -52,11 +53,14 @@ export function NovaTransacaoDialog({ trigger }: { trigger: React.ReactNode }) {
     formState: { errors, isSubmitting },
   } = useForm<TransacaoInput>({
     resolver: zodResolver(transacaoSchema),
-    defaultValues: { tipo: "despesa", data_transacao: hoje(), tags: [] },
+    defaultValues: { tipo: "despesa", data_transacao: hoje(), tags: [], parcelas: 1 },
   });
 
   const meio = watch("meio_pagamento");
   const mostraCartao = meio === "cartao_credito" || meio === "cartao_debito";
+  const tipo = watch("tipo");
+  const valorTotal = watch("valor") ?? 0;
+  const parcelas = Math.max(1, Math.floor(Number(watch("parcelas")) || 1));
 
   useEffect(() => {
     if (!open || loaded) return;
@@ -80,8 +84,10 @@ export function NovaTransacaoDialog({ trigger }: { trigger: React.ReactNode }) {
       toast.error("Erro ao salvar", { description: res.error });
       return;
     }
-    toast.success("Transação registrada!");
-    reset({ tipo: values.tipo, data_transacao: hoje(), tags: [] });
+    toast.success(
+      values.parcelas && values.parcelas > 1 ? `${values.parcelas} parcelas registradas!` : "Transação registrada!",
+    );
+    reset({ tipo: values.tipo, data_transacao: hoje(), tags: [], parcelas: 1 });
     setOpen(false);
     router.refresh();
   }
@@ -243,6 +249,22 @@ export function NovaTransacaoDialog({ trigger }: { trigger: React.ReactNode }) {
               )}
             </div>
           </div>
+
+          {/* Parcelamento (só despesa) */}
+          {tipo === "despesa" && (
+            <div className="space-y-1.5">
+              <Label htmlFor="parcelas">Parcelas</Label>
+              <Input id="parcelas" type="number" min={1} max={60} placeholder="1" {...register("parcelas")} />
+              {parcelas > 1 && valorTotal > 0 ? (
+                <p className="text-caption text-muted-foreground">
+                  {parcelas}× de aprox. {formatBRL(valorTotal / parcelas)} · um lançamento por mês a partir da data. O
+                  valor acima é o total.
+                </p>
+              ) : (
+                <p className="text-caption text-muted-foreground">1 = à vista.</p>
+              )}
+            </div>
+          )}
 
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
