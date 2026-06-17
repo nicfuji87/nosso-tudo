@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { TransacaoEditSheet } from "@/components/transacoes/transacao-edit-sheet";
 import { formatBRL, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/sonner";
@@ -773,6 +774,7 @@ function ConfirmarTransacaoCard({
   const [estado, setEstado] = useState<EstadoAcao>(estadoInicial);
   const [erro, setErro] = useState<string | null>(null);
   const [decisao, setDecisao] = useState<"mesmo" | "outro">("mesmo");
+  const [editando, setEditando] = useState(false);
 
   const detalhes = [LABEL_TIPO_TRANSACAO[w.tipoTransacao], w.categoria, w.estabelecimento]
     .filter(Boolean)
@@ -883,16 +885,29 @@ function ConfirmarTransacaoCard({
       {estado === "erro" && <p className="mt-3 text-body-sm text-destructive">{erro}</p>}
 
       {editavel && (
-        <div className="mt-3 flex gap-2">
+        <div className="mt-3 flex flex-wrap gap-2">
           <Button size="sm" onClick={confirmar} disabled={estado === "salvando"}>
             {estado === "salvando" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
             Confirmar
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => setEditando(true)} disabled={estado === "salvando"}>
+            <SquarePen className="size-4" /> Editar
           </Button>
           <Button size="sm" variant="ghost" onClick={descartar} disabled={estado === "salvando"}>
             <X className="size-4" /> Descartar
           </Button>
         </div>
       )}
+
+      <TransacaoEditSheet
+        proposta
+        id={editando ? w.acaoId : null}
+        onClose={() => setEditando(false)}
+        onSaved={() => {
+          setEditando(false);
+          setEstado("feito");
+        }}
+      />
     </div>
   );
 }

@@ -24,6 +24,7 @@ import { toast } from "@/components/ui/sonner";
 import { createClient } from "@/lib/supabase/client";
 import { transacaoSchema, type TransacaoInput } from "@/lib/schemas/transacao";
 import { atualizarTransacao, carregarTransacaoEditavel } from "@/app/app/transacoes/actions";
+import { carregarPropostaEditavel, confirmarTransacaoComEdicao } from "@/app/app/nia/actions";
 import {
   LABEL_MEIO_PAGAMENTO,
   MEIOS_PAGAMENTO,
@@ -36,9 +37,14 @@ import {
 export function TransacaoEditSheet({
   id,
   onClose,
+  proposta = false,
+  onSaved,
 }: {
   id: string | null;
   onClose: () => void;
+  /** true = `id` é uma proposta da Nia (nia_acoes); salvar confirma com edição. */
+  proposta?: boolean;
+  onSaved?: () => void;
 }) {
   const router = useRouter();
   const [carregando, setCarregando] = useState(false);
@@ -61,7 +67,7 @@ export function TransacaoEditSheet({
     (async () => {
       const supabase = createClient();
       const [tx, c, e, ca, co] = await Promise.all([
-        carregarTransacaoEditavel(id),
+        proposta ? carregarPropostaEditavel(id) : carregarTransacaoEditavel(id),
         supabase.from("categorias").select("*").eq("ativa", true).order("ordem"),
         supabase.from("entidades").select("*").eq("ativa", true).order("nome"),
         supabase.from("cartoes").select("*").eq("ativo", true).order("apelido"),
@@ -94,17 +100,20 @@ export function TransacaoEditSheet({
     return () => {
       vivo = false;
     };
-  }, [id, reset]);
+  }, [id, reset, proposta]);
 
   async function onSubmit(values: TransacaoInput) {
     if (!id) return;
-    const res = await atualizarTransacao(id, values);
+    const res = proposta
+      ? await confirmarTransacaoComEdicao(id, values)
+      : await atualizarTransacao(id, values);
     if (res.error) {
       toast.error("Erro ao salvar", { description: res.error });
       return;
     }
-    toast.success("Transação atualizada");
+    toast.success(proposta ? "Lançado!" : "Transação atualizada");
     onClose();
+    onSaved?.();
     router.refresh();
   }
 
@@ -112,7 +121,7 @@ export function TransacaoEditSheet({
     <Sheet open={!!id} onOpenChange={(o) => !o && onClose()}>
       <SheetContent side="bottom" className="max-h-[92dvh] overflow-y-auto">
         <SheetHeader className="pr-8">
-          <SheetTitle>Editar transação</SheetTitle>
+          <SheetTitle>{proposta ? "Conferir e ajustar" : "Editar transação"}</SheetTitle>
         </SheetHeader>
 
         {carregando ? (
@@ -281,7 +290,7 @@ export function TransacaoEditSheet({
               </Button>
               <Button type="submit" disabled={isSubmitting}>
                 {isSubmitting && <Loader2 className="size-4 animate-spin" />}
-                Salvar
+                {proposta ? "Salvar e lançar" : "Salvar"}
               </Button>
             </div>
           </form>

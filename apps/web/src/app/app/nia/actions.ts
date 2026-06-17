@@ -2,7 +2,12 @@
 
 import { resolveWorkspaceId } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { criarTransacao, excluirTransacao } from "@/app/app/transacoes/actions";
+import {
+  criarTransacao,
+  excluirTransacao,
+  type TransacaoEditavel,
+} from "@/app/app/transacoes/actions";
+import { transacaoSchema, type TransacaoInput } from "@/lib/schemas/transacao";
 import { criarCartao, criarConta, criarCategoria, criarEntidade } from "@/app/app/cadastros/actions";
 import { listCategorias, listEntidades } from "@/lib/db/queries";
 import {
@@ -180,6 +185,63 @@ export async function confirmarTransacao(
   if (res.error) return { error: res.error };
 
   await atualizarAcao(acaoId, { status: "executada", resultado: { ok: true }, registroId: res.id });
+  return { ok: true };
+}
+
+/**
+ * Carrega a proposta de transação da Nia já com os IDs resolvidos (categoria,
+ * cartão/conta, beneficiário), para pré-preencher o formulário de edição.
+ */
+export async function carregarPropostaEditavel(acaoId: string): Promise<TransacaoEditavel | null> {
+  const acao = await carregarAcao(acaoId);
+  if (!acao || acao.status !== "proposta" || acao.ferramenta !== "lancar_transacao") return null;
+  const parsed = lancarTransacaoArgs.safeParse(acao.payload_proposto);
+  if (!parsed.success) return null;
+  const d = parsed.data;
+
+  const supabase = createClient();
+  const cat = await resolverCategoriaCanonica(supabase, acao.workspace_id, d.categoria);
+  const pag = await resolverPagamento(supabase, acao.workspace_id, d.cartao, d.conta);
+  const beneficiarioId = d.beneficiario ? await resolverEntidade(acao.workspace_id, d.beneficiario) : undefined;
+
+  return {
+    tipo: d.tipo,
+    descricao: d.descricao,
+    valor: d.valor,
+    data_transacao: d.data_transacao ?? new Date().toISOString().slice(0, 10),
+    categoria_id: cat?.id ?? "",
+    meio_pagamento: d.meio_pagamento,
+    cartao_id: pag.cartaoId ?? "",
+    conta_id: pag.contaId ?? "",
+    beneficiario_id: beneficiarioId ?? "",
+    estabelecimento: d.estabelecimento ?? "",
+    contexto: d.contexto ?? "",
+    observacoes: "",
+  };
+}
+
+/** Confirma a proposta da Nia com os valores EDITADOS pelo usuário no formulário. */
+export async function confirmarTransacaoComEdicao(
+  acaoId: string,
+  input: TransacaoInput,
+): Promise<{ error?: string; ok?: boolean }> {
+  const acao = await carregarAcao(acaoId);
+  if (!acao) return { error: "Ação não encontrada." };
+  if (acao.status !== "proposta") return { error: "Essa ação já foi processada." };
+  if (acao.ferramenta !== "lancar_transacao") return { error: "Ação não suportada." };
+
+  const parsed = transacaoSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+
+  // Reusa criarTransacao (resolve estabelecimento/contexto, grava com os IDs editados).
+  const res = await criarTransacao(parsed.data);
+  if (res.error) return { error: res.error };
+
+  await atualizarAcao(acaoId, {
+    status: "executada",
+    resultado: { ok: true, editada: true },
+    registroId: res.id,
+  });
   return { ok: true };
 }
 
