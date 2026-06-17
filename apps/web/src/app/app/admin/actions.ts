@@ -6,6 +6,7 @@ import { getUser, isPlatformAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAsaasConfig, saveAsaas, saveNia, saveWhatsapp } from "@/lib/admin/settings";
+import { rodarRecorrenciasAgora, setRecorrenciasCronAtivo } from "@/lib/admin/recorrencias";
 import { deletePreco, savePreco, saveNiaConfig } from "@/lib/nia/admin";
 import {
   saveAlerta,
@@ -51,6 +52,36 @@ async function requireOwner(): Promise<{ userId: string } | { error: string }> {
   ]);
   if (!member && !admin) return { error: "Sem permissão." };
   return { userId: user.id };
+}
+
+// ---- Recorrências (cron de contas fixas) -----------------------------------
+
+/** Liga/desliga o job pg_cron que gera as contas fixas. */
+export async function alternarCronRecorrencias(ativo: boolean): Promise<{ error?: string; ok?: boolean }> {
+  const gate = await requirePlatformAdmin();
+  if ("error" in gate) return { error: gate.error };
+  try {
+    await setRecorrenciasCronAtivo(ativo);
+  } catch {
+    return { error: "Não foi possível alterar o agendamento." };
+  }
+  revalidatePath("/app/admin/recorrencias");
+  return { ok: true };
+}
+
+/** Roda a geração das contas fixas na hora (fora do horário do cron). */
+export async function executarRecorrenciasAgora(): Promise<{ error?: string; geradas?: number }> {
+  const gate = await requirePlatformAdmin();
+  if ("error" in gate) return { error: gate.error };
+  try {
+    const geradas = await rodarRecorrenciasAgora();
+    revalidatePath("/app/admin/recorrencias");
+    revalidatePath("/app/transacoes");
+    revalidatePath("/app");
+    return { geradas };
+  } catch {
+    return { error: "Não foi possível rodar a geração agora." };
+  }
 }
 
 // ---- Asaas -----------------------------------------------------------------
