@@ -19,6 +19,7 @@ import {
 } from "@/lib/nia/schemas";
 import { atualizarAcao, votar } from "@/lib/nia/store";
 import { normalizarTexto } from "@/lib/normalize";
+import { classificarItem, resolverCategoriaCanonica, resolverProduto } from "@/lib/classificacao";
 
 interface AcaoRow {
   id: string;
@@ -76,13 +77,10 @@ export async function confirmarTransacao(
     (acao.payload_proposto as { _match?: { candidatoId: string; sugestao: string } | null } | null)
       ?._match ?? null;
 
-  // Resolve categoria por nome (match exato normalizado), se informada.
-  let categoriaId: string | undefined;
-  if (d.categoria) {
-    const alvo = normalizarTexto(d.categoria);
-    const cats = await listCategorias(acao.workspace_id);
-    categoriaId = cats.find((c) => normalizarTexto(c.nome) === alvo)?.id;
-  }
+  // Resolve categoria ancorando no padrão canônico (exato → fuzzy), se informada.
+  const supabaseTx = createClient();
+  const cat = await resolverCategoriaCanonica(supabaseTx, acao.workspace_id, d.categoria);
+  const categoriaId = cat?.id;
 
   // Zona cinza: "mesmo" (default) vincula ao existente; "outro" mantém o nome digitado.
   let estabelecimento = d.estabelecimento;
@@ -99,6 +97,7 @@ export async function confirmarTransacao(
     categoria_id: categoriaId,
     meio_pagamento: d.meio_pagamento,
     estabelecimento,
+    contexto: d.contexto,
     tags: [],
   });
   if (res.error) return { error: res.error };
@@ -129,40 +128,74 @@ export async function confirmarTransacaoDetalhada(
   const valor = Number(inclusos.reduce((s, it) => s + valorItem(it), 0).toFixed(2));
   if (valor <= 0) return { error: "Não consegui os valores dos itens. Tente informar o total." };
 
-  let categoriaId: string | undefined;
-  if (d.categoria) {
-    const alvo = normalizarTexto(d.categoria);
-    const cats = await listCategorias(acao.workspace_id);
-    categoriaId = cats.find((c) => normalizarTexto(c.nome) === alvo)?.id;
-  }
+  const supabase = createClient();
+  const ws = acao.workspace_id;
+  const data = d.data_transacao ?? new Date().toISOString().slice(0, 10);
+
+  // Categoria geral da nota, ancorada no padrão (opcional).
+  const catTx = await resolverCategoriaCanonica(supabase, ws, d.categoria);
+  const categoriaId = catTx?.id;
 
   const res = await criarTransacao({
     tipo: "despesa",
     descricao: d.descricao,
     valor,
-    data_transacao: d.data_transacao ?? new Date().toISOString().slice(0, 10),
+    data_transacao: data,
     categoria_id: categoriaId,
     meio_pagamento: d.meio_pagamento,
     estabelecimento: d.estabelecimento,
+    contexto: d.contexto,
     tags: [],
   });
   if (res.error) return { error: res.error };
 
   if (res.id) {
-    const supabase = createClient();
-    await supabase.from("itens_transacao").insert(
-      inclusos.map((it, ordem) => ({
-        workspace_id: acao.workspace_id,
+    const catTotais = new Map<string, number>();
+    let ordem = 0;
+    for (const it of inclusos) {
+      ordem++;
+      const prod = await resolverProduto(supabase, ws, it.nome, null);
+      const cls = await classificarItem(
+        supabase,
+        ws,
+        prod.produtoId,
+        it.categoria ?? null,
+        it.essencialidade ?? null,
+        it.tipo ?? null,
+        categoriaId ?? null,
+      );
+      const vTotal = valorItem(it);
+      if (cls.categoriaId && vTotal > 0) {
+        catTotais.set(cls.categoriaId, (catTotais.get(cls.categoriaId) ?? 0) + vTotal);
+      }
+      await supabase.from("itens_transacao").insert({
+        workspace_id: ws,
         transacao_id: res.id,
+        produto_id: prod.produtoId,
         descricao_original: it.nome,
         quantidade: it.quantidade ?? 1,
         unidade: it.unidade ?? null,
         valor_unitario: it.valor_unitario ?? null,
         valor_total: it.valor_total ?? null,
-        ordem_na_nota: ordem + 1,
+        categoria_id: cls.categoriaId,
+        essencialidade: cls.essencialidade ?? undefined,
+        tipo_item: cls.tipo,
+        ordem_na_nota: ordem,
         status_revisao: "confirmado",
-      })),
-    );
+      });
+      if (prod.produtoId) {
+        await supabase
+          .from("produtos")
+          .update({ ultimo_preco_unitario: it.valor_unitario ?? null, ultima_compra_em: data })
+          .eq("id", prod.produtoId);
+      }
+    }
+
+    // Se a nota não tinha categoria geral, herda a dominante dos itens.
+    if (!categoriaId && catTotais.size > 0) {
+      const dominante = [...catTotais.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+      if (dominante) await supabase.from("transacoes").update({ categoria_id: dominante }).eq("id", res.id);
+    }
   }
 
   await atualizarAcao(acaoId, {
@@ -283,6 +316,18 @@ export async function confirmarCategoria(acaoId: string): Promise<{ error?: stri
 
   const parsed = criarCategoriaArgs.safeParse(acao.payload_proposto);
   if (!parsed.success) return { error: "Dados da proposta inválidos." };
+
+  // Ancora no padrão canônico: se já existe categoria equivalente, reusa (não duplica).
+  const supabase = createClient();
+  const existente = await resolverCategoriaCanonica(supabase, acao.workspace_id, parsed.data.nome, 0.6);
+  if (existente) {
+    await atualizarAcao(acaoId, {
+      status: "executada",
+      resultado: { ok: true, reaproveitada: existente.nome },
+      registroId: existente.id,
+    });
+    return { ok: true };
+  }
 
   const res = await criarCategoria({
     nome: parsed.data.nome,

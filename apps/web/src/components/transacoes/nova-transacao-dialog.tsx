@@ -167,6 +167,16 @@ export function NovaTransacaoDialog({ trigger }: { trigger: React.ReactNode }) {
             <Input id="estab" placeholder="Ex.: Pão de Açúcar" {...register("estabelecimento")} />
           </div>
 
+          {/* Contexto / Evento */}
+          <div className="space-y-1.5">
+            <Label htmlFor="contexto">Contexto / Evento (opcional)</Label>
+            <Input
+              id="contexto"
+              placeholder="Ex.: Passeio em família, Compra do mês"
+              {...register("contexto")}
+            />
+          </div>
+
           {/* Meio + (Cartão | Pagador) */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">

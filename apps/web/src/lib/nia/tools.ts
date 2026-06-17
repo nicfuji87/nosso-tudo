@@ -7,6 +7,8 @@ import {
   buscarMatchEstabelecimento,
   getAlertas,
   getGastosPorCategoria,
+  getGastosPorContexto,
+  getGastosPorEssencialidade,
   getMidia,
   getResumoMes,
   listCartoes,
@@ -19,6 +21,7 @@ import {
   listTransacoes,
 } from "@/lib/db/queries";
 import { formatBRL, formatDate } from "@/lib/format";
+import { LABEL_ESSENCIALIDADE } from "@/lib/types/db";
 import { normalizarTexto } from "@/lib/normalize";
 import {
   buscarDocumentosArgs,
@@ -240,6 +243,11 @@ const lancarTransacao: NiaTool = {
       data_transacao: { type: "string", description: "Data ISO (YYYY-MM-DD). Default: hoje." },
       categoria: { type: "string", description: "Nome da categoria, se o usuário indicar." },
       estabelecimento: { type: "string", description: "Nome do estabelecimento, se houver." },
+      contexto: {
+        type: "string",
+        description:
+          "Contexto/evento do gasto (o porquê), ex.: 'Passeio em família', 'Compra do mês'. Opcional.",
+      },
       meio_pagamento: {
         type: "string",
         enum: [
@@ -307,7 +315,11 @@ const lancarTransacaoDetalhada: NiaTool = {
     properties: {
       descricao: { type: "string", description: "Resumo da compra (ex.: 'Compra no Pão de Açúcar')." },
       estabelecimento: { type: "string" },
-      categoria: { type: "string" },
+      categoria: { type: "string", description: "Categoria geral da nota (opcional)." },
+      contexto: {
+        type: "string",
+        description: "Contexto/evento da compra (ex.: 'Passeio em família', 'Compra do mês'). Opcional.",
+      },
       data_transacao: { type: "string", description: "Data ISO (YYYY-MM-DD)." },
       meio_pagamento: {
         type: "string",
@@ -326,7 +338,8 @@ const lancarTransacaoDetalhada: NiaTool = {
       },
       itens: {
         type: "array",
-        description: "Itens da nota.",
+        description:
+          "Itens da nota. Classifique CADA item: categoria pelo nome do padrão (ex.: 'Hortifruti', 'Limpeza', 'Restaurante'), essencialidade e tipo. Itens da mesma nota podem ter categorias diferentes (mercado mistura comida, limpeza, higiene...).",
         items: {
           type: "object",
           properties: {
@@ -335,6 +348,12 @@ const lancarTransacaoDetalhada: NiaTool = {
             unidade: { type: "string" },
             valor_unitario: { type: "number" },
             valor_total: { type: "number" },
+            categoria: { type: "string", description: "Categoria do item (nome do padrão)." },
+            essencialidade: {
+              type: "string",
+              enum: ["essencial", "necessario", "superfluo", "investimento"],
+            },
+            tipo: { type: "string", description: "Tipo do item (ex.: 'Frutas', 'Bebida', 'Limpeza')." },
           },
           required: ["nome"],
         },
@@ -741,10 +760,53 @@ const guardarDocumento: NiaTool = {
   },
 };
 
+const consultarEssencialidade: NiaTool = {
+  nome: "consultar_essencialidade",
+  descricao:
+    "Mostra os gastos do mês por essencialidade: essencial, necessário, supérfluo e investimento. Use para 'quanto gastei em supérfluos?', 'quanto é essencial?', 'estou gastando muito com coisa supérflua?'.",
+  nivel: "auto",
+  inputSchema: { type: "object", properties: {} },
+  async executar(_args, ctx) {
+    const dados = await getGastosPorEssencialidade(ctx.workspaceId);
+    if (dados.length === 0)
+      return { texto: "Ainda não há gastos classificados por essencialidade neste mês." };
+    const total = dados.reduce((s, d) => s + d.total, 0);
+    const linhas = dados.map(
+      (d) =>
+        `${LABEL_ESSENCIALIDADE[d.essencialidade]}: ${formatBRL(d.total)} (${Math.round(
+          (d.total / Math.max(1, total)) * 100,
+        )}%)`,
+    );
+    return { texto: `Gastos por essencialidade neste mês:\n${linhas.join("\n")}` };
+  },
+};
+
+const consultarContexto: NiaTool = {
+  nome: "consultar_contexto",
+  descricao:
+    "Mostra o custo total por contexto/evento da vida da família (ex.: 'quanto custou o passeio?', 'quanto gastei na viagem?', 'qual o custo da compra do mês?'). Lista os eventos e seus totais.",
+  nivel: "auto",
+  inputSchema: { type: "object", properties: {} },
+  async executar(_args, ctx) {
+    const dados = await getGastosPorContexto(ctx.workspaceId);
+    if (dados.length === 0)
+      return { texto: "Ainda não há eventos/contextos com gastos registrados." };
+    const linhas = dados.map(
+      (d) =>
+        `${d.nome}: ${formatBRL(d.total)} (${d.nTransacoes} ${
+          d.nTransacoes === 1 ? "lançamento" : "lançamentos"
+        })`,
+    );
+    return { texto: `Custo por evento:\n${linhas.join("\n")}` };
+  },
+};
+
 export const NIA_TOOLS: NiaTool[] = [
   consultarGastos,
   consultarCadastros,
   consultarAlertas,
+  consultarEssencialidade,
+  consultarContexto,
   listarTransacoes,
   lancarTransacao,
   lancarTransacaoDetalhada,

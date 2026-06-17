@@ -6,6 +6,7 @@ import type {
   Categoria,
   ContaBancaria,
   Entidade,
+  Essencialidade,
   TransacaoComRelacoes,
 } from "@/lib/types/db";
 
@@ -38,8 +39,123 @@ export async function getResumoMes(workspaceId: string): Promise<ResumoMes> {
 
 export async function getGastosPorCategoria(workspaceId: string): Promise<GastoCategoria[]> {
   const supabase = createClient();
-  const { data } = await supabase.rpc("gastos_por_categoria", { p_workspace_id: workspaceId });
+  // v2: soma pelos itens quando a nota está itemizada; cai na categoria da
+  // transação quando não está (sem contagem dupla). Ver migration 0013.
+  const { data } = await supabase.rpc("gastos_por_categoria_v2", { p_workspace_id: workspaceId });
   return (data as GastoCategoria[] | null) ?? [];
+}
+
+export interface GastoEssencialidade {
+  essencialidade: Essencialidade;
+  total: number;
+}
+
+export async function getGastosPorEssencialidade(
+  workspaceId: string,
+): Promise<GastoEssencialidade[]> {
+  const supabase = createClient();
+  const { data } = await supabase.rpc("gastos_por_essencialidade", { p_workspace_id: workspaceId });
+  return ((data as { essencialidade: Essencialidade; total: number }[] | null) ?? []).map((r) => ({
+    essencialidade: r.essencialidade,
+    total: Number(r.total),
+  }));
+}
+
+export interface GastoContexto {
+  contextoId: string;
+  nome: string;
+  tipo: string | null;
+  cor: string | null;
+  icone: string | null;
+  dataReferencia: string | null;
+  total: number;
+  nTransacoes: number;
+}
+
+/** Custo por contexto/evento (all-time) — "quanto custou o passeio inteiro". */
+export async function getGastosPorContexto(workspaceId: string): Promise<GastoContexto[]> {
+  const supabase = createClient();
+  const { data } = await supabase.rpc("gastos_por_contexto", { p_workspace_id: workspaceId });
+  return ((data as
+    | {
+        contexto_id: string;
+        nome: string;
+        tipo: string | null;
+        cor: string | null;
+        icone: string | null;
+        data_referencia: string | null;
+        total: number;
+        n_transacoes: number;
+      }[]
+    | null) ?? []).map((r) => ({
+    contextoId: r.contexto_id,
+    nome: r.nome,
+    tipo: r.tipo,
+    cor: r.cor,
+    icone: r.icone,
+    dataReferencia: r.data_referencia,
+    total: Number(r.total),
+    nTransacoes: Number(r.n_transacoes),
+  }));
+}
+
+export interface ItemDeTransacao {
+  id: string;
+  transacaoId: string;
+  descricao: string;
+  quantidade: number;
+  valorTotal: number | null;
+  categoriaNome: string | null;
+  categoriaIcone: string | null;
+  categoriaCor: string | null;
+  essencialidade: Essencialidade;
+  tipoItem: string | null;
+}
+
+/** Itens (linhas de nota) das transações informadas, agrupados por transação. */
+export async function getItensPorTransacao(
+  workspaceId: string,
+  transacaoIds: string[],
+): Promise<Record<string, ItemDeTransacao[]>> {
+  const out: Record<string, ItemDeTransacao[]> = {};
+  if (transacaoIds.length === 0) return out;
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("itens_transacao")
+    .select(
+      "id, transacao_id, descricao_original, quantidade, valor_total, essencialidade, tipo_item, categoria:categorias(nome, icone, cor)",
+    )
+    .eq("workspace_id", workspaceId)
+    .in("transacao_id", transacaoIds)
+    .order("ordem_na_nota", { ascending: true });
+  const rows =
+    (data as
+      | {
+          id: string;
+          transacao_id: string;
+          descricao_original: string;
+          quantidade: number | null;
+          valor_total: number | null;
+          essencialidade: Essencialidade;
+          tipo_item: string | null;
+          categoria: { nome: string; icone: string | null; cor: string | null } | null;
+        }[]
+      | null) ?? [];
+  for (const r of rows) {
+    (out[r.transacao_id] ??= []).push({
+      id: r.id,
+      transacaoId: r.transacao_id,
+      descricao: r.descricao_original,
+      quantidade: Number(r.quantidade ?? 1),
+      valorTotal: r.valor_total != null ? Number(r.valor_total) : null,
+      categoriaNome: r.categoria?.nome ?? null,
+      categoriaIcone: r.categoria?.icone ?? null,
+      categoriaCor: r.categoria?.cor ?? null,
+      essencialidade: r.essencialidade,
+      tipoItem: r.tipo_item,
+    });
+  }
+  return out;
 }
 
 export interface TransacaoFilters {

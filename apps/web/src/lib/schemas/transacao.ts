@@ -21,6 +21,7 @@ export const transacaoSchema = z.object({
   pagador_id: uuidOpt,
   beneficiario_id: uuidOpt,
   estabelecimento: z.string().trim().max(120).optional(),
+  contexto: z.string().trim().max(120).optional(),
   observacoes: z.string().trim().max(500).optional(),
   tags: z.array(z.string()).default([]),
 });

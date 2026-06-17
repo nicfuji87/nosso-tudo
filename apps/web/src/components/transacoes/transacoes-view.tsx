@@ -2,8 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MoreHorizontal, Search, Trash2, Wallet } from "lucide-react";
+import { ChevronDown, MoreHorizontal, Search, Trash2, Wallet } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -31,14 +32,34 @@ import { EmptyState } from "@/components/patterns/empty-state";
 import { TransacaoItem } from "./transacao-item";
 import { toast } from "@/components/ui/sonner";
 import { excluirTransacao } from "@/app/app/transacoes/actions";
-import type { Categoria, TransacaoComRelacoes } from "@/lib/types/db";
+import { cn } from "@/lib/utils";
+import { formatBRL } from "@/lib/format";
+import {
+  LABEL_ESSENCIALIDADE,
+  type Categoria,
+  type Essencialidade,
+  type TransacaoComRelacoes,
+} from "@/lib/types/db";
+import type { ItemDeTransacao } from "@/lib/db/queries";
+
+const ESSENCIALIDADE_VARIANT: Record<
+  Essencialidade,
+  "success" | "default" | "warning" | "tech"
+> = {
+  essencial: "success",
+  necessario: "default",
+  superfluo: "warning",
+  investimento: "tech",
+};
 
 export function TransacoesView({
   transacoes,
   categorias,
+  itensPorTx = {},
 }: {
   transacoes: TransacaoComRelacoes[];
   categorias: Categoria[];
+  itensPorTx?: Record<string, ItemDeTransacao[]>;
 }) {
   const router = useRouter();
   const [busca, setBusca] = useState("");
@@ -46,6 +67,7 @@ export function TransacoesView({
   const [categoria, setCategoria] = useState("todas");
   const [excluindo, setExcluindo] = useState<TransacaoComRelacoes | null>(null);
   const [loading, setLoading] = useState(false);
+  const [expandido, setExpandido] = useState<string | null>(null);
 
   const filtradas = useMemo(() => {
     return transacoes.filter((t) => {
@@ -123,23 +145,69 @@ export function TransacoesView({
       ) : (
         <Card>
           <CardContent className="divide-y divide-border/70 px-5 py-1">
-            {filtradas.map((tx) => (
-              <div key={tx.id} className="group flex items-center gap-1">
-                <div className="min-w-0 flex-1">
-                  <TransacaoItem tx={tx} />
+            {filtradas.map((tx) => {
+              const itens = itensPorTx[tx.id] ?? [];
+              const temItens = itens.length > 0;
+              const aberto = expandido === tx.id;
+              return (
+                <div key={tx.id}>
+                  <div className="group flex items-center gap-1">
+                    {temItens ? (
+                      <button
+                        type="button"
+                        onClick={() => setExpandido(aberto ? null : tx.id)}
+                        aria-label={aberto ? "Recolher itens" : "Ver itens"}
+                        className="rounded-full p-1 text-muted-foreground transition-colors hover:bg-secondary"
+                      >
+                        <ChevronDown
+                          className={cn("size-4 transition-transform", aberto && "rotate-180")}
+                        />
+                      </button>
+                    ) : (
+                      <span className="w-6 shrink-0" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <TransacaoItem tx={tx} />
+                    </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger className="rounded-full p-2 text-muted-foreground opacity-0 transition-opacity hover:bg-secondary focus-visible:opacity-100 group-hover:opacity-100">
+                        <MoreHorizontal className="size-4" />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem destructive onClick={() => setExcluindo(tx)}>
+                          <Trash2 /> Excluir
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+
+                  {temItens && aberto && (
+                    <ul className="mb-3 ml-6 space-y-1.5 border-l border-border/70 pl-4">
+                      {itens.map((it) => (
+                        <li key={it.id} className="flex items-center gap-2 text-caption">
+                          <span className="min-w-0 flex-1 truncate">
+                            {it.quantidade > 1 ? `${it.quantidade}× ` : ""}
+                            {it.descricao}
+                          </span>
+                          {it.categoriaNome && (
+                            <span className="shrink-0 text-muted-foreground">
+                              {it.categoriaIcone ? `${it.categoriaIcone} ` : ""}
+                              {it.categoriaNome}
+                            </span>
+                          )}
+                          <Badge variant={ESSENCIALIDADE_VARIANT[it.essencialidade]} size="sm">
+                            {LABEL_ESSENCIALIDADE[it.essencialidade]}
+                          </Badge>
+                          <span className="tabular w-20 shrink-0 text-right font-medium">
+                            {it.valorTotal != null ? formatBRL(it.valorTotal) : "—"}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger className="rounded-full p-2 text-muted-foreground opacity-0 transition-opacity hover:bg-secondary focus-visible:opacity-100 group-hover:opacity-100">
-                    <MoreHorizontal className="size-4" />
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem destructive onClick={() => setExcluindo(tx)}>
-                      <Trash2 /> Excluir
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            ))}
+              );
+            })}
           </CardContent>
         </Card>
       )}

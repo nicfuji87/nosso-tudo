@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { transacaoSchema, type TransacaoInput } from "@/lib/schemas/transacao";
 import { normalizarTexto } from "@/lib/normalize";
+import { resolverContexto } from "@/lib/classificacao";
 
 async function getWorkspaceId(): Promise<{ workspaceId?: string; userId?: string; error?: string }> {
   const supabase = createClient();
@@ -64,6 +65,7 @@ export async function criarTransacao(input: TransacaoInput): Promise<{ error?: s
   const estabelecimentoId = d.estabelecimento
     ? await resolverEstabelecimento(supabase, workspaceId, d.estabelecimento)
     : null;
+  const contextoId = d.contexto ? await resolverContexto(supabase, workspaceId, d.contexto) : null;
 
   const { data: nova, error } = await supabase
     .from("transacoes")
@@ -80,6 +82,7 @@ export async function criarTransacao(input: TransacaoInput): Promise<{ error?: s
       pagador_id: d.pagador_id ?? null,
       beneficiario_id: d.beneficiario_id ?? null,
       estabelecimento_id: estabelecimentoId,
+      contexto_id: contextoId,
       observacoes: d.observacoes ?? null,
       tags: d.tags,
       origem: "app",

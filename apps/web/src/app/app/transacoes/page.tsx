@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { getWorkspaceContext } from "@/lib/auth";
-import { listCategorias, listTransacoes } from "@/lib/db/queries";
+import { getItensPorTransacao, listCategorias, listTransacoes } from "@/lib/db/queries";
 import { PageHeader } from "@/components/patterns/page-header";
 import { TransacoesView } from "@/components/transacoes/transacoes-view";
 
@@ -12,6 +12,10 @@ export default async function TransacoesPage() {
     listTransacoes(workspace.id, { limit: 200 }),
     listCategorias(workspace.id),
   ]);
+  const itensPorTx = await getItensPorTransacao(
+    workspace.id,
+    transacoes.map((t) => t.id),
+  );
 
   return (
     <div className="space-y-6">
@@ -19,7 +23,7 @@ export default async function TransacoesPage() {
         title="Transações"
         description="Tudo o que entra e sai, em um só lugar."
       />
-      <TransacoesView transacoes={transacoes} categorias={categorias} />
+      <TransacoesView transacoes={transacoes} categorias={categorias} itensPorTx={itensPorTx} />
     </div>
   );
 }

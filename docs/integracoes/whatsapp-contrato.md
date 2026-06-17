@@ -35,7 +35,8 @@ POST https://ecwcqooogsvsrddwjavh.supabase.co/functions/v1/ingest-whatsapp
     "descricao": "Compra no mercado",           // OBRIGATÓRIO
     "valor": 287.40,                            // OBRIGATÓRIO (número, >= 0)
     "data_transacao": "2026-06-14",             // opcional (default: hoje)
-    "categoria": "Mercado",                     // por nome (match exato; senão fica null)
+    "categoria": "Alimentação em casa",         // por nome — ancorado no padrão canônico (exato → fuzzy)
+    "contexto": "Compra do mês",                // opcional — evento/por quê (string ou {nome,tipo,data}); criado se não existir
     "estabelecimento": "Pão de Açúcar",         // por nome (matching 4 camadas)
     "meio_pagamento": "cartao_credito",         // cartao_credito|cartao_debito|pix|dinheiro|transferencia|boleto|vr|va|cartao_escola|outro
     "cartao": { "nome": "Nubank", "final": "1234" },  // opcional (match por apelido ou últimos dígitos)
@@ -46,8 +47,12 @@ POST https://ecwcqooogsvsrddwjavh.supabase.co/functions/v1/ingest-whatsapp
     "tags": ["supermercado"]                     // opcional (array de strings)
   },
   "itens": [                                     // opcional — linhas da nota/orçamento (modo detalhado)
-    { "nome": "Banana Prata", "quantidade": 1, "unidade": "kg", "valor_unitario": 5.99, "valor_total": 5.99, "codigo_barras": "789..." },
-    { "nome": "Detergente Ypê", "quantidade": 2, "unidade": "un", "valor_unitario": 3.49, "valor_total": 6.98 }
+    // categoria/essencialidade/tipo por item são OPCIONAIS: se o agente classificar, melhora muito.
+    // Se omitidos, o item herda da memória do produto → categoria da transação.
+    { "nome": "Banana Prata", "quantidade": 1, "unidade": "kg", "valor_unitario": 5.99, "valor_total": 5.99,
+      "categoria": "Hortifruti", "essencialidade": "essencial", "tipo": "Frutas", "codigo_barras": "789..." },
+    { "nome": "Detergente Ypê", "quantidade": 2, "unidade": "un", "valor_unitario": 3.49, "valor_total": 6.98,
+      "categoria": "Limpeza", "essencialidade": "necessario", "tipo": "Limpeza" }
   ],
   "midias": [                                    // opcional — anexos já hospedados (URL pública/temporária)
     { "tipo": "imagem", "url": "https://.../nota.jpg", "mime_type": "image/jpeg", "texto_extraido": "..." }
@@ -62,9 +67,15 @@ Campos mínimos para criar uma transação: `telefone`, `transacao.descricao`, `
 
 - **`tipo`** — se omitido ou inválido, assume `despesa`.
 - **`meio_pagamento`** — se inválido, fica `null`.
-- **`categoria` / `pagador` / `beneficiario` / `conta`** — resolvidos por **match exato
-  normalizado** (minúsculas, sem acento). Se não existir, ficam `null` (não são criados
-  automaticamente — categorias têm comportamento/ícone definidos pelo usuário).
+- **`categoria`** — **ancorada no padrão canônico**: tenta match exato e, se não houver, fuzzy
+  (pg_trgm ≥ 0.45) contra as 153 categorias do padrão. Envie o nome do padrão (ex.: "Alimentação
+  fora", "Restaurante", "IPTU") para casar bem. Se a transação não tiver categoria mas os itens
+  tiverem, a transação herda a **categoria dominante** (maior valor) dos itens.
+- **`contexto`** — evento/por quê da compra ("Passeio em família", "Compra do mês"). Aceita
+  string ou `{ "nome": "...", "tipo": "passeio", "data": "2026-06-16" }`. É **criado** se não
+  existir (reusa o existente por nome). Não confundir com `categoria` (o quê) — contexto é o porquê.
+- **`pagador` / `beneficiario` / `conta`** — resolvidos por **match exato normalizado**
+  (minúsculas, sem acento). Se não existir, ficam `null`.
 - **`cartao`** — casa por `final` (últimos dígitos) e, se não achar, por `nome` (apelido).
 - **`estabelecimento`** — matching em camadas (ver abaixo); é criado se não existir.
 - **`midias[].tipo`** — `imagem | pdf | audio | video | texto | documento` (default `documento`).
@@ -90,16 +101,22 @@ uma em `itens[]`. Para cada item a função:
 1. Resolve o **produto** com a mesma lógica em camadas (`código de barras` → `nome exato` →
    `fuzzy`): **≥ 0.95 / código de barras → sincroniza** com o produto existente (não duplica);
    **0.60–0.94 → cria + abre sugestão no Inbox** (pré-conferência); **< 0.60 → cria novo**.
-2. Cria a linha em `itens_transacao` (descrição original, quantidade, unidade, valor unit./total,
-   `ordem_na_nota`, status e score do match).
-3. Atualiza o histórico do produto (`ultimo_preco_unitario`, `ultima_compra_em`,
-   `ultimo_estabelecimento_id`) — base para o relatório "preço médio do produto X".
+2. **Classifica o item** — define `categoria_id` (memória do produto → `categoria` do item
+   ancorada no padrão → categoria da transação), `essencialidade` (memória → hint → default da
+   categoria → `necessario`) e `tipo_item`.
+3. Cria a linha em `itens_transacao` (descrição original, quantidade, unidade, valor unit./total,
+   categoria, essencialidade, tipo, `ordem_na_nota`, status e score do match).
+4. **Aprende na memória do produto** o que faltava (`categoria_sugerida_id`,
+   `essencialidade_padrao`, `tipo_padrao`) + histórico (`ultimo_preco_unitario`,
+   `ultima_compra_em`, `ultimo_estabelecimento_id`). Assim, a **próxima** compra do mesmo
+   produto já vem classificada sozinha — é o que derruba o atrito.
 
 Assim, "banana" repetida em compras diferentes vira **o mesmo produto** (depois de confirmada
 a sugestão uma vez, o texto vira alias e passa a casar sozinho — `confirmar_match`).
 
 Campos do item: `nome` (obrigatório), `quantidade`, `unidade`, `valor_unitario`, `valor_total`,
-`codigo_barras` (todos opcionais exceto `nome`).
+`codigo_barras`, **`categoria`**, **`essencialidade`** (`essencial|necessario|superfluo|investimento`),
+**`tipo`** (todos opcionais exceto `nome`).
 
 ## Resposta
 
@@ -115,7 +132,7 @@ Campos do item: `nome` (obrigatório), `quantidade`, `unidade`, `valor_unitario`
   "categoria": { "id": "uuid", "nome": "Mercado" },
   "itens": 5,                                   // nº de linhas (itens_transacao) criadas
   "pendencias_inbox": 2,                        // sugestões abertas (estab. + produtos) p/ pré-conferência
-  "confirmacao_whatsapp": "✅ Anotei: R$ 287,40 no Pão de Açúcar (5 itens). Detalhes no app."
+  "confirmacao_whatsapp": "OK Anotei: R$ 287,40 no Pão de Açúcar (5 itens). Detalhes no app."
 }
 ```
 
@@ -124,14 +141,14 @@ Use o campo **`confirmacao_whatsapp`** diretamente como resposta ao usuário no 
 ### Idempotência (reenvio do mesmo `idempotency_key`)
 
 ```jsonc
-{ "ok": true, "duplicado": true, "transacao_id": "uuid", "confirmacao_whatsapp": "✅ Ja tinha anotado isso 🙂" }
+{ "ok": true, "duplicado": true, "transacao_id": "uuid", "confirmacao_whatsapp": "OK Ja tinha anotado isso" }
 ```
 
 ### Erros de roteamento (HTTP 200, `ok:false` — responda o usuário com `confirmacao_whatsapp`)
 
 ```jsonc
 { "ok": false, "error": "telefone_nao_vinculado",
-  "confirmacao_whatsapp": "Nao reconheci esse numero. Vincule seu WhatsApp no app primeiro 🙂" }
+  "confirmacao_whatsapp": "Nao reconheci esse numero. Vincule seu WhatsApp no app primeiro." }
 ```
 
 | `error` | HTTP | Quando |
