@@ -229,7 +229,7 @@ const consultarAlertas: NiaTool = {
 const lancarTransacao: NiaTool = {
   nome: "lancar_transacao",
   descricao:
-    "Propõe o lançamento de uma despesa ou receita. NÃO grava direto: gera um cartão de confirmação para o usuário aprovar. Use quando o usuário relatar um gasto ou recebimento.",
+    "Propõe o lançamento de uma despesa ou receita. NÃO grava direto: gera um cartão de confirmação para o usuário aprovar. Use quando o usuário relatar um gasto ou recebimento. Capture também o meio de pagamento e o cartão/conta quando o usuário mencionar (ex.: 'paguei no Latam Pass', 'saiu do Itaú').",
   nivel: "confirmar",
   inputSchema: {
     type: "object",
@@ -263,6 +263,14 @@ const lancarTransacao: NiaTool = {
           "cartao_escola",
           "outro",
         ],
+      },
+      cartao: {
+        type: "string",
+        description: "Apelido do cartão usado, se o usuário citar (ex.: 'Latam Pass', 'Nubank').",
+      },
+      conta: {
+        type: "string",
+        description: "Apelido da conta usada, se o usuário citar (ex.: 'Itaú Bruna').",
       },
     },
     required: ["descricao", "valor"],
@@ -298,6 +306,8 @@ const lancarTransacao: NiaTool = {
       tipoTransacao: d.tipo,
       categoria: d.categoria ?? null,
       estabelecimento: d.estabelecimento ?? null,
+      meioPagamento: d.meio_pagamento ?? null,
+      pagamento: d.cartao ?? d.conta ?? null,
       data,
       match: match ? { sugestao: match.sugestao, score: match.score } : null,
     };

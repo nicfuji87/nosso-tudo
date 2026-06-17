@@ -19,6 +19,9 @@ export interface NiaProviderInput {
   apiKey: string;
   modelo: string;
   systemPrompt: string;
+  /** Contexto que muda a cada chamada (data/hora, memória, já lançado). Vai num
+   *  bloco separado e NÃO cacheável — preserva o cache do systemPrompt estático. */
+  systemDinamico?: string;
   temperature: number;
   maxTokens: number;
   userMessage: string;
@@ -144,7 +147,10 @@ const anthropicProvider: NiaProvider = async (input) => {
     input_schema: t.inputSchema,
     ...(i === input.tools.length - 1 ? { cache_control: cacheCtrl } : {}),
   }));
-  const systemPayload = [{ type: "text", text: input.systemPrompt, cache_control: cacheCtrl }];
+  const systemPayload: Record<string, unknown>[] = [
+    { type: "text", text: input.systemPrompt, cache_control: cacheCtrl },
+    ...(input.systemDinamico ? [{ type: "text", text: input.systemDinamico }] : []),
+  ];
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -257,6 +263,7 @@ function ehRaciocinio(modelo: string): boolean {
 const openaiProvider: NiaProvider = async (input) => {
   const messages: OpenAIMsg[] = [
     { role: "system", content: input.systemPrompt },
+    ...(input.systemDinamico ? [{ role: "system" as const, content: input.systemDinamico }] : []),
     ...(input.historico ?? []).map((h) => ({ role: h.role, content: h.content })),
     { role: "user", content: openaiUserContent(input.userMessage, input.anexos) },
   ];
@@ -338,6 +345,7 @@ const openaiProvider: NiaProvider = async (input) => {
 const openaiStream: NiaStreamProvider = async (input, cb) => {
   const messages: OpenAIMsg[] = [
     { role: "system", content: input.systemPrompt },
+    ...(input.systemDinamico ? [{ role: "system" as const, content: input.systemDinamico }] : []),
     ...(input.historico ?? []).map((h) => ({ role: h.role, content: h.content })),
     { role: "user", content: openaiUserContent(input.userMessage, input.anexos) },
   ];
@@ -480,7 +488,10 @@ const anthropicStream: NiaStreamProvider = async (input, cb) => {
     input_schema: t.inputSchema,
     ...(i === input.tools.length - 1 ? { cache_control: cacheCtrl } : {}),
   }));
-  const systemPayload = [{ type: "text", text: input.systemPrompt, cache_control: cacheCtrl }];
+  const systemPayload: Record<string, unknown>[] = [
+    { type: "text", text: input.systemPrompt, cache_control: cacheCtrl },
+    ...(input.systemDinamico ? [{ type: "text", text: input.systemDinamico }] : []),
+  ];
 
   const parseJson = (s?: string): unknown => {
     if (!s) return {};

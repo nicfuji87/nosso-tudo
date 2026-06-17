@@ -17,7 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { formatBRL } from "@/lib/format";
+import { formatBRL, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/sonner";
 import { createClient } from "@/lib/supabase/client";
@@ -37,7 +37,12 @@ import {
   rejeitarAcao,
   votarMensagem,
 } from "@/app/app/nia/actions";
-import { LABEL_COMPORTAMENTO, LABEL_TIPO_ENTIDADE, LABEL_TIPO_TRANSACAO } from "@/lib/types/db";
+import {
+  LABEL_COMPORTAMENTO,
+  LABEL_MEIO_PAGAMENTO,
+  LABEL_TIPO_ENTIDADE,
+  LABEL_TIPO_TRANSACAO,
+} from "@/lib/types/db";
 import type {
   NiaWidget,
   WidgetChecklistItens,
@@ -772,6 +777,10 @@ function ConfirmarTransacaoCard({
   const detalhes = [LABEL_TIPO_TRANSACAO[w.tipoTransacao], w.categoria, w.estabelecimento]
     .filter(Boolean)
     .join(" · ");
+  const pagamento = [w.meioPagamento ? LABEL_MEIO_PAGAMENTO[w.meioPagamento] : null, w.pagamento]
+    .filter(Boolean)
+    .join(" · ");
+  const linha2 = [pagamento, w.data ? formatDate(w.data) : null].filter(Boolean).join(" · ");
 
   async function confirmar() {
     setEstado("salvando");
@@ -806,6 +815,7 @@ function ConfirmarTransacaoCard({
         <div className="min-w-0">
           <p className="font-medium">{w.descricao}</p>
           {detalhes && <p className="text-caption text-muted-foreground">{detalhes}</p>}
+          {linha2 && <p className="text-caption text-muted-foreground">{linha2}</p>}
         </div>
         <p className="shrink-0 font-mono text-body font-semibold tabular-nums">{formatBRL(w.valor)}</p>
       </div>

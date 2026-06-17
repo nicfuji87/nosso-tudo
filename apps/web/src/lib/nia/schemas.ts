@@ -13,6 +13,7 @@ import {
   TIPOS_ENTIDADE,
   TIPOS_TRANSACAO,
   type ComportamentoCategoria,
+  type MeioPagamento,
   type TipoEntidade,
   type TipoTransacao,
 } from "@/lib/types/db";
@@ -70,6 +71,8 @@ export const lancarTransacaoArgs = z.object({
   estabelecimento: z.string().trim().max(120).optional(),
   contexto: z.string().trim().max(120).optional(),
   meio_pagamento: z.enum(MEIOS_PAGAMENTO).optional(),
+  cartao: z.string().trim().max(60).optional(),
+  conta: z.string().trim().max(60).optional(),
 });
 export type LancarTransacaoArgs = z.infer<typeof lancarTransacaoArgs>;
 
@@ -184,6 +187,9 @@ export interface WidgetConfirmarTransacao {
   tipoTransacao: TipoTransacao;
   categoria: string | null;
   estabelecimento: string | null;
+  meioPagamento: MeioPagamento | null;
+  /** Conta/cartão informado (apelido), para o usuário conferir onde foi pago. */
+  pagamento: string | null;
   data: string;
   /** Dúvida de estabelecimento (zona cinza): a Nia achou um parecido. */
   match?: { sugestao: string; score: number } | null;

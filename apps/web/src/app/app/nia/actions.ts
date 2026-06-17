@@ -88,6 +88,43 @@ async function adicionarApelido(estabId: string, apelido: string): Promise<void>
   await supabase.from("estabelecimentos").update({ apelidos: [...atuais, apelido] }).eq("id", estabId);
 }
 
+/** Resolve cartão/conta pelo apelido (exato normalizado → contém). */
+async function resolverPagamento(
+  supabase: ReturnType<typeof createClient>,
+  workspaceId: string,
+  cartao?: string,
+  conta?: string,
+): Promise<{ cartaoId?: string; contaId?: string }> {
+  const out: { cartaoId?: string; contaId?: string } = {};
+  const achar = (lista: { id: string; apelido: string }[], termo: string): string | undefined => {
+    const alvo = normalizarTexto(termo);
+    return (
+      lista.find((c) => normalizarTexto(c.apelido) === alvo)?.id ??
+      lista.find((c) => {
+        const n = normalizarTexto(c.apelido);
+        return n.includes(alvo) || alvo.includes(n);
+      })?.id
+    );
+  };
+  if (cartao) {
+    const { data } = await supabase
+      .from("cartoes")
+      .select("id, apelido")
+      .eq("workspace_id", workspaceId)
+      .eq("ativo", true);
+    out.cartaoId = achar(((data as { id: string; apelido: string }[] | null) ?? []), cartao);
+  }
+  if (conta) {
+    const { data } = await supabase
+      .from("contas_bancarias")
+      .select("id, apelido")
+      .eq("workspace_id", workspaceId)
+      .eq("ativa", true);
+    out.contaId = achar(((data as { id: string; apelido: string }[] | null) ?? []), conta);
+  }
+  return out;
+}
+
 /**
  * Executa o lançamento proposto pela Nia, após confirmação do usuário.
  * `decisaoMatch` resolve a zona cinza de estabelecimento: "mesmo" vincula ao
@@ -121,6 +158,8 @@ export async function confirmarTransacao(
     if (d.estabelecimento) await adicionarApelido(match.candidatoId, d.estabelecimento);
   }
 
+  const pag = await resolverPagamento(supabaseTx, acao.workspace_id, d.cartao, d.conta);
+
   const res = await criarTransacao({
     tipo: d.tipo,
     descricao: d.descricao,
@@ -128,6 +167,8 @@ export async function confirmarTransacao(
     data_transacao: d.data_transacao ?? new Date().toISOString().slice(0, 10),
     categoria_id: categoriaId,
     meio_pagamento: d.meio_pagamento,
+    cartao_id: pag.cartaoId,
+    conta_id: pag.contaId,
     estabelecimento,
     contexto: d.contexto,
     tags: [],
