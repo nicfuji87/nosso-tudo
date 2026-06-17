@@ -11,6 +11,11 @@ import { getOrCreateConversa, salvarMensagem } from "@/lib/nia/store";
 import { NIA_TOOLS } from "@/lib/nia/tools";
 
 export const runtime = "nodejs";
+// Agente com streaming + leitura de imagens/PDF + até 4 turnos de tool-use pode
+// passar bem do timeout padrão da função. Sem isto a Vercel mata o stream no meio
+// (texto chega, widget não) e o chat "trava". 60s é o teto do plano Hobby e
+// folgado pro uso normal (pode subir até 300 no Pro).
+export const maxDuration = 60;
 
 export async function POST(req: Request): Promise<Response> {
   const user = await getUser();

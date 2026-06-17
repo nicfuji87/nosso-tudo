@@ -343,6 +343,7 @@ export function NiaChat({
       const decoder = new TextDecoder();
       let buffer = "";
       let acc = "";
+      let finalizado = false; // recebeu 'done' ou 'error'?
 
       for (;;) {
         const { done, value } = await reader.read();
@@ -372,12 +373,21 @@ export function NiaChat({
             const w = ev.widget;
             patch((x) => ({ ...x, widgets: [...x.widgets, w] }));
           } else if (ev.type === "done") {
+            finalizado = true;
             conversaId.current = ev.conversaId ?? conversaId.current;
             patch((x) => ({ ...x, mensagemId: ev.mensagemId ?? null, texto: x.texto || "Pronto." }));
           } else if (ev.type === "error") {
+            finalizado = true;
             patch((x) => ({ ...x, texto: acc || ev.error || "Tive um problema." }));
           }
         }
+      }
+
+      // Stream fechou sem 'done'/'error' (ex.: timeout da função no meio): não
+      // deixa a mensagem pendurada — avisa e deixa o usuário tentar de novo.
+      if (!finalizado) {
+        const aviso = "⚠️ A resposta foi interrompida antes de terminar. Pode mandar de novo?";
+        patch((x) => ({ ...x, texto: acc ? `${acc}\n\n${aviso}` : aviso }));
       }
     } catch {
       patch((x) => ({ ...x, texto: "Sem conexão agora. Tente de novo." }));
