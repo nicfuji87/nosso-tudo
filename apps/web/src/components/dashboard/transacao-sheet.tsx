@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Loader2, Pencil, Trash2 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/sonner";
 import { formatBRL, formatDate } from "@/lib/format";
 import {
   LABEL_ESSENCIALIDADE,
@@ -11,6 +14,7 @@ import {
   LABEL_TIPO_TRANSACAO,
   type Essencialidade,
 } from "@/lib/types/db";
+import { excluirTransacao } from "@/app/app/transacoes/actions";
 import { detalheTransacao, type TransacaoDetalhe } from "./actions";
 
 const ESS_VARIANT: Record<Essencialidade, "success" | "default" | "warning" | "tech"> = {
@@ -20,14 +24,29 @@ const ESS_VARIANT: Record<Essencialidade, "success" | "default" | "warning" | "t
   investimento: "tech",
 };
 
-export function TransacaoSheet({ id, onClose }: { id: string | null; onClose: () => void }) {
+export function TransacaoSheet({
+  id,
+  onClose,
+  onEditar,
+}: {
+  id: string | null;
+  onClose: () => void;
+  onEditar: (id: string) => void;
+}) {
+  const router = useRouter();
   const [det, setDet] = useState<TransacaoDetalhe | null>(null);
   const [carregando, setCarregando] = useState(false);
+  const [confirmandoExcluir, setConfirmandoExcluir] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
 
   useEffect(() => {
-    if (!id) return;
+    if (!id) {
+      setConfirmandoExcluir(false);
+      return;
+    }
     setDet(null);
     setCarregando(true);
+    setConfirmandoExcluir(false);
     let vivo = true;
     detalheTransacao(id).then((d) => {
       if (!vivo) return;
@@ -38,6 +57,20 @@ export function TransacaoSheet({ id, onClose }: { id: string | null; onClose: ()
       vivo = false;
     };
   }, [id]);
+
+  async function excluir() {
+    if (!id) return;
+    setExcluindo(true);
+    const res = await excluirTransacao(id);
+    setExcluindo(false);
+    if (res.error) {
+      toast.error("Erro", { description: res.error });
+      return;
+    }
+    toast.success("Transação excluída");
+    onClose();
+    router.refresh();
+  }
 
   const credito = det?.tipo === "receita" || det?.tipo === "investimento_resgate";
 
@@ -110,6 +143,30 @@ export function TransacaoSheet({ id, onClose }: { id: string | null; onClose: ()
                 </ul>
               </div>
             )}
+
+            <div className="flex items-center gap-2 border-t border-border pt-4">
+              {confirmandoExcluir ? (
+                <>
+                  <span className="flex-1 text-body-sm text-muted-foreground">Excluir mesmo?</span>
+                  <Button size="sm" variant="ghost" onClick={() => setConfirmandoExcluir(false)} disabled={excluindo}>
+                    Cancelar
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={excluir} disabled={excluindo}>
+                    {excluindo ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                    Excluir
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button size="sm" className="flex-1" onClick={() => onEditar(det.id)}>
+                    <Pencil className="size-4" /> Editar
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setConfirmandoExcluir(true)}>
+                    <Trash2 className="size-4" /> Excluir
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         )}
       </SheetContent>

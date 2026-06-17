@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { BalanceCard } from "@/components/dashboard/balance-card";
 import { CategoriasCard } from "@/components/dashboard/categorias-card";
+import { CollapsibleCard } from "@/components/dashboard/collapsible-card";
 import { GastoPorPessoa } from "@/components/dashboard/gasto-por-pessoa";
 import { AtividadeRecente } from "@/components/dashboard/atividade-recente";
 import { EventosLista } from "@/components/dashboard/eventos-lista";
@@ -98,54 +99,55 @@ export default async function HomePage() {
         </Card>
       </div>
 
-      {/* Gasto por pessoa */}
+      {/* Gasto por pessoa — recolhível */}
       {pessoas.length > 0 && (
-        <Card>
-          <CardContent className="p-5">
-            <p className="text-body-sm font-medium">Gasto por pessoa</p>
-            <p className="mb-4 text-caption text-muted-foreground">Quem se beneficiou — despesas do mês</p>
-            <GastoPorPessoa dados={pessoas} />
-          </CardContent>
-        </Card>
+        <CollapsibleCard
+          id="gasto-pessoa"
+          titulo="Gasto por pessoa"
+          subtitulo="Despesas do mês por pessoa"
+          resumo={formatBRL(pessoas.reduce((s, p) => s + p.total, 0))}
+        >
+          <GastoPorPessoa dados={pessoas} />
+        </CollapsibleCard>
       )}
 
-      {/* Essencial × Supérfluo */}
+      {/* Essencial × Supérfluo — recolhível */}
       {totalEssenc > 0 && (
-        <Card>
-          <CardContent className="p-5">
-            <p className="text-body-sm font-medium">Essencial × Supérfluo</p>
-            <p className="text-caption text-muted-foreground">Para onde o dinheiro vai por natureza do gasto</p>
-            <div className="mt-4 flex h-3 w-full overflow-hidden rounded-full bg-secondary">
-              {essenc.map((e) => (
-                <div
-                  key={e.essencialidade}
-                  style={{
-                    width: `${(e.total / totalEssenc) * 100}%`,
-                    backgroundColor: COR_ESSENCIALIDADE[e.essencialidade],
-                  }}
+        <CollapsibleCard
+          id="essencialidade"
+          titulo="Essencial × Supérfluo"
+          subtitulo="Para onde o dinheiro vai por natureza do gasto"
+        >
+          <div className="flex h-3 w-full overflow-hidden rounded-full bg-secondary">
+            {essenc.map((e) => (
+              <div
+                key={e.essencialidade}
+                style={{
+                  width: `${(e.total / totalEssenc) * 100}%`,
+                  backgroundColor: COR_ESSENCIALIDADE[e.essencialidade],
+                }}
+              />
+            ))}
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {essenc.map((e) => (
+              <div key={e.essencialidade} className="flex items-center gap-2">
+                <span
+                  className="size-2.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: COR_ESSENCIALIDADE[e.essencialidade] }}
                 />
-              ))}
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {essenc.map((e) => (
-                <div key={e.essencialidade} className="flex items-center gap-2">
-                  <span
-                    className="size-2.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: COR_ESSENCIALIDADE[e.essencialidade] }}
-                  />
-                  <div className="min-w-0">
-                    <p className="truncate text-caption text-muted-foreground">
-                      {LABEL_ESSENCIALIDADE[e.essencialidade]}
-                    </p>
-                    <p className="text-body-sm font-medium tabular-nums">
-                      {Math.round((e.total / totalEssenc) * 100)}%
-                    </p>
-                  </div>
+                <div className="min-w-0">
+                  <p className="truncate text-caption text-muted-foreground">
+                    {LABEL_ESSENCIALIDADE[e.essencialidade]}
+                  </p>
+                  <p className="text-body-sm font-medium tabular-nums">
+                    {Math.round((e.total / totalEssenc) * 100)}%
+                  </p>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+              </div>
+            ))}
+          </div>
+        </CollapsibleCard>
       )}
 
       {/* Eventos — abríveis */}

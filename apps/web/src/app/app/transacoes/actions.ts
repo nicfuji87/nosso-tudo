@@ -153,5 +153,92 @@ export async function excluirTransacao(id: string): Promise<{ error?: string }> 
   if (error) return { error: "Não foi possível excluir a transação." };
   revalidatePath("/app");
   revalidatePath("/app/transacoes");
+  revalidatePath("/app/relatorios");
+  return {};
+}
+
+export interface TransacaoEditavel {
+  tipo: TransacaoInput["tipo"];
+  descricao: string;
+  valor: number;
+  data_transacao: string;
+  categoria_id: string;
+  meio_pagamento: TransacaoInput["meio_pagamento"];
+  cartao_id: string;
+  conta_id: string;
+  beneficiario_id: string;
+  estabelecimento: string;
+  contexto: string;
+  observacoes: string;
+}
+
+/** Carrega os campos editáveis de uma transação (RLS garante o workspace). */
+export async function carregarTransacaoEditavel(id: string): Promise<TransacaoEditavel | null> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("transacoes")
+    .select(
+      "tipo, descricao, valor, data_transacao, categoria_id, meio_pagamento, cartao_id, conta_id, beneficiario_id, observacoes, estabelecimento:estabelecimentos(nome), contexto:contextos(nome)",
+    )
+    .eq("id", id)
+    .maybeSingle();
+  if (!data) return null;
+  const t = data as unknown as Record<string, unknown>;
+  const estab = t.estabelecimento as { nome?: string } | null;
+  const ctx = t.contexto as { nome?: string } | null;
+  return {
+    tipo: t.tipo as TransacaoInput["tipo"],
+    descricao: String(t.descricao ?? ""),
+    valor: Number(t.valor ?? 0),
+    data_transacao: String(t.data_transacao ?? ""),
+    categoria_id: (t.categoria_id as string | null) ?? "",
+    meio_pagamento: (t.meio_pagamento as TransacaoInput["meio_pagamento"]) ?? undefined,
+    cartao_id: (t.cartao_id as string | null) ?? "",
+    conta_id: (t.conta_id as string | null) ?? "",
+    beneficiario_id: (t.beneficiario_id as string | null) ?? "",
+    estabelecimento: estab?.nome ?? "",
+    contexto: ctx?.nome ?? "",
+    observacoes: (t.observacoes as string | null) ?? "",
+  };
+}
+
+/** Atualiza uma transação existente com os campos editados. */
+export async function atualizarTransacao(id: string, input: TransacaoInput): Promise<{ error?: string }> {
+  const parsed = transacaoSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  const d = parsed.data;
+
+  const { workspaceId, error: ctxErr } = await getWorkspaceId();
+  if (ctxErr || !workspaceId) return { error: ctxErr ?? "Workspace não encontrado." };
+
+  const supabase = createClient();
+  const estabelecimentoId = d.estabelecimento
+    ? await resolverEstabelecimento(supabase, workspaceId, d.estabelecimento)
+    : null;
+  const contextoId = d.contexto ? await resolverContexto(supabase, workspaceId, d.contexto) : null;
+
+  const { error } = await supabase
+    .from("transacoes")
+    .update({
+      tipo: d.tipo,
+      descricao: d.descricao,
+      valor: d.valor,
+      data_transacao: d.data_transacao,
+      categoria_id: d.categoria_id ?? null,
+      meio_pagamento: d.meio_pagamento ?? null,
+      cartao_id: d.cartao_id ?? null,
+      conta_id: d.conta_id ?? null,
+      beneficiario_id: d.beneficiario_id ?? null,
+      estabelecimento_id: estabelecimentoId,
+      contexto_id: contextoId,
+      observacoes: d.observacoes ?? null,
+    })
+    .eq("id", id)
+    .eq("workspace_id", workspaceId);
+  if (error) return { error: "Não foi possível atualizar a transação." };
+
+  revalidatePath("/app");
+  revalidatePath("/app/transacoes");
+  revalidatePath("/app/relatorios");
   return {};
 }
