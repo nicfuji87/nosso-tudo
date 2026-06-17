@@ -59,15 +59,12 @@ export default async function HomePage() {
   const mesAno = formatDate(new Date(), "MMMM 'de' yyyy");
   const mesLabel = mesAno.charAt(0).toUpperCase() + mesAno.slice(1);
 
-  const donut = gastos.slice(0, 5).map((g, i) => ({
+  const categoriasResumo = gastos.map((g, i) => ({
+    id: g.categoria_id,
     nome: g.categoria_nome,
-    valor: Number(g.total),
+    total: Number(g.total),
     cor: g.cor || PALETTE[i % PALETTE.length]!,
   }));
-  if (gastos.length > 5) {
-    const resto = gastos.slice(5).reduce((s, g) => s + Number(g.total), 0);
-    donut.push({ nome: "Outros", valor: resto, cor: "#C4B8B0" });
-  }
 
   return (
     <div className="space-y-6">
@@ -93,7 +90,7 @@ export default async function HomePage() {
           <CardContent className="p-5">
             <p className="text-body-sm font-medium">Gastos por categoria</p>
             <div className="mt-4">
-              <CategoriasCard data={donut} total={resumo.despesas} />
+              <CategoriasCard categorias={categoriasResumo} total={resumo.despesas} />
             </div>
           </CardContent>
         </Card>

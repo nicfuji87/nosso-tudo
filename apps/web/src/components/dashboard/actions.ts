@@ -92,6 +92,50 @@ export async function detalheTransacao(id: string): Promise<TransacaoDetalhe | n
   };
 }
 
+export interface CategoriaDrillTransacao {
+  id: string;
+  descricao: string;
+  valor: number;
+  data: string;
+  estabelecimento: string | null;
+}
+export interface CategoriaDrill {
+  nome: string;
+  total: number;
+  transacoes: CategoriaDrillTransacao[];
+}
+
+/** Lançamentos (despesas confirmadas do mês) de uma categoria — para o drilldown. */
+export async function transacoesPorCategoria(categoriaId: string): Promise<CategoriaDrill | null> {
+  const supabase = createClient();
+  const inicio = new Date();
+  inicio.setDate(1);
+  const mesRef = inicio.toISOString().slice(0, 10);
+
+  const { data: cat } = await supabase.from("categorias").select("nome").eq("id", categoriaId).maybeSingle();
+  const { data } = await supabase
+    .from("transacoes")
+    .select("id, descricao, valor, data_transacao, estabelecimento:estabelecimentos(nome)")
+    .eq("categoria_id", categoriaId)
+    .eq("tipo", "despesa")
+    .eq("status_revisao", "confirmado")
+    .gte("data_transacao", mesRef)
+    .order("data_transacao", { ascending: false });
+
+  const transacoes = ((data as unknown as Record<string, unknown>[] | null) ?? []).map((r) => {
+    const estab = r.estabelecimento as { nome?: string } | null;
+    return {
+      id: String(r.id),
+      descricao: String(r.descricao ?? ""),
+      valor: Number(r.valor ?? 0),
+      data: String(r.data_transacao ?? ""),
+      estabelecimento: estab?.nome ?? null,
+    };
+  });
+  const total = transacoes.reduce((s, t) => s + t.valor, 0);
+  return { nome: String((cat as { nome: string } | null)?.nome ?? "Categoria"), total, transacoes };
+}
+
 export interface ContextoTransacao {
   id: string;
   descricao: string;
