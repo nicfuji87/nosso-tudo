@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, MoreHorizontal, Pencil, Search, Trash2, Wallet } from "lucide-react";
+import { ChevronDown, ListChecks, MoreHorizontal, Pencil, Search, Trash2, Wallet } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { TransacaoItem } from "./transacao-item";
 import { TransacaoEditSheet } from "./transacao-edit-sheet";
+import { ItensEditSheet } from "./itens-edit-sheet";
 import { toast } from "@/components/ui/sonner";
 import { excluirTransacao } from "@/app/app/transacoes/actions";
 import { cn } from "@/lib/utils";
@@ -68,6 +69,7 @@ export function TransacoesView({
   const [categoria, setCategoria] = useState("todas");
   const [excluindo, setExcluindo] = useState<TransacaoComRelacoes | null>(null);
   const [editando, setEditando] = useState<string | null>(null);
+  const [editandoItens, setEditandoItens] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [expandido, setExpandido] = useState<string | null>(null);
 
@@ -182,6 +184,11 @@ export function TransacoesView({
                         <DropdownMenuItem onClick={() => setEditando(tx.id)}>
                           <Pencil /> Editar
                         </DropdownMenuItem>
+                        {temItens && (
+                          <DropdownMenuItem onClick={() => setEditandoItens(tx.id)}>
+                            <ListChecks /> Editar itens
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem destructive onClick={() => setExcluindo(tx)}>
                           <Trash2 /> Excluir
                         </DropdownMenuItem>
@@ -242,6 +249,7 @@ export function TransacoesView({
       </Dialog>
 
       <TransacaoEditSheet id={editando} onClose={() => setEditando(null)} />
+      <ItensEditSheet id={editandoItens} onClose={() => setEditandoItens(null)} />
     </div>
   );
 }

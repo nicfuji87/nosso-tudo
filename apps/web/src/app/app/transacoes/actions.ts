@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { transacaoSchema, type TransacaoInput } from "@/lib/schemas/transacao";
+import type { Essencialidade } from "@/lib/types/db";
 import { normalizarTexto } from "@/lib/normalize";
 import { resolverContexto } from "@/lib/classificacao";
 
@@ -200,6 +201,84 @@ export async function carregarTransacaoEditavel(id: string): Promise<TransacaoEd
     contexto: ctx?.nome ?? "",
     observacoes: (t.observacoes as string | null) ?? "",
   };
+}
+
+export interface ItemEditavel {
+  id: string;
+  nome: string;
+  quantidade: number;
+  valorTotal: number | null;
+  categoriaId: string;
+  essencialidade: Essencialidade;
+}
+
+/** Itens (linhas) de uma transação itemizada, para edição. */
+export async function carregarItensTransacao(transacaoId: string): Promise<ItemEditavel[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("itens_transacao")
+    .select("id, descricao_original, quantidade, valor_total, categoria_id, essencialidade")
+    .eq("transacao_id", transacaoId)
+    .order("ordem_na_nota", { ascending: true });
+  return ((data as Record<string, unknown>[] | null) ?? []).map((i) => ({
+    id: String(i.id),
+    nome: String(i.descricao_original ?? ""),
+    quantidade: i.quantidade != null ? Number(i.quantidade) : 1,
+    valorTotal: i.valor_total != null ? Number(i.valor_total) : null,
+    categoriaId: (i.categoria_id as string | null) ?? "",
+    essencialidade: (i.essencialidade as Essencialidade) ?? "necessario",
+  }));
+}
+
+export interface ItemSalvar {
+  id: string;
+  nome: string;
+  quantidade: number;
+  valorTotal: number | null;
+  categoriaId?: string;
+  essencialidade?: Essencialidade;
+  remover?: boolean;
+}
+
+/** Salva as edições dos itens de uma transação e recalcula o total da transação. */
+export async function salvarItensTransacao(
+  transacaoId: string,
+  itens: ItemSalvar[],
+): Promise<{ error?: string }> {
+  const { workspaceId, error: ctxErr } = await getWorkspaceId();
+  if (ctxErr || !workspaceId) return { error: ctxErr ?? "Workspace não encontrado." };
+  const supabase = createClient();
+
+  const remover = itens.filter((i) => i.remover).map((i) => i.id);
+  if (remover.length > 0) {
+    const { error } = await supabase.from("itens_transacao").delete().in("id", remover);
+    if (error) return { error: "Não foi possível remover um item." };
+  }
+
+  const manter = itens.filter((i) => !i.remover);
+  for (const it of manter) {
+    const { error } = await supabase
+      .from("itens_transacao")
+      .update({
+        descricao_original: it.nome,
+        quantidade: it.quantidade,
+        valor_total: it.valorTotal,
+        categoria_id: it.categoriaId || null,
+        essencialidade: it.essencialidade ?? "necessario",
+      })
+      .eq("id", it.id);
+    if (error) return { error: "Não foi possível salvar um item." };
+  }
+
+  if (manter.length > 0) {
+    const total = Number(manter.reduce((s, it) => s + (it.valorTotal ?? 0), 0).toFixed(2));
+    await supabase.from("transacoes").update({ valor: total }).eq("id", transacaoId).eq("workspace_id", workspaceId);
+  }
+
+  revalidatePath("/app");
+  revalidatePath("/app/transacoes");
+  revalidatePath("/app/relatorios");
+  return {};
 }
 
 /** Atualiza uma transação existente com os campos editados. */

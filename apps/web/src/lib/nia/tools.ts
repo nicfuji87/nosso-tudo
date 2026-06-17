@@ -325,7 +325,7 @@ const lancarTransacao: NiaTool = {
 const lancarTransacaoDetalhada: NiaTool = {
   nome: "lancar_transacao_detalhada",
   descricao:
-    "Lança uma compra com os ITENS individuais (de uma nota fiscal/recibo). Use quando o usuário enviar a foto ou PDF de uma nota: leia cada item (nome, quantidade, valor) e proponha todos. Capture também o meio de pagamento, o cartão/conta e o beneficiário quando aparecerem (ex.: 'Latam Pass' → cartao 'Latam Pass'). NÃO grava direto — gera um checklist para o usuário confirmar item a item.",
+    "Lança uma compra com os ITENS individuais (de uma nota fiscal/recibo). Use quando o usuário enviar a foto ou PDF de uma nota: leia cada item (nome, quantidade, valor) e proponha todos. Capture também o meio de pagamento, o cartão/conta e o beneficiário quando aparecerem (ex.: 'Latam Pass' → cartao 'Latam Pass'). NÃO grava direto — gera um checklist para o usuário confirmar item a item. IMPORTANTE: ao chamar esta ferramenta, responda com UMA frase curta (ex.: 'Separei os itens, confira abaixo 👇') e NÃO repita os itens em texto nem em tabela — o checklist interativo já mostra tudo.",
   nivel: "confirmar",
   inputSchema: {
     type: "object",
