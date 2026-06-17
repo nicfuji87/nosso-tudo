@@ -199,6 +199,40 @@ export async function listCategorias(workspaceId: string): Promise<Categoria[]> 
   return (data as Categoria[] | null) ?? [];
 }
 
+export interface GastoPessoa {
+  id: string;
+  nome: string;
+  total: number;
+}
+
+/** Despesas confirmadas do mês agrupadas por responsável (pagador). */
+export async function getGastosPorPessoa(workspaceId: string): Promise<GastoPessoa[]> {
+  const supabase = createClient();
+  const inicio = new Date();
+  inicio.setDate(1);
+  const mesRef = inicio.toISOString().slice(0, 10);
+  const { data } = await supabase
+    .from("transacoes")
+    .select("valor, pagador:entidades!transacoes_pagador_id_fkey(id, nome)")
+    .eq("workspace_id", workspaceId)
+    .eq("tipo", "despesa")
+    .eq("status_revisao", "confirmado")
+    .gte("data_transacao", mesRef);
+  const rows =
+    (data as { valor: number; pagador: { id: string; nome: string } | null }[] | null) ?? [];
+  const map = new Map<string, { nome: string; total: number }>();
+  for (const r of rows) {
+    const key = r.pagador?.id ?? "—";
+    const atual = map.get(key) ?? { nome: r.pagador?.nome ?? "Sem responsável", total: 0 };
+    atual.total += Number(r.valor);
+    map.set(key, atual);
+  }
+  return [...map.entries()]
+    .map(([id, v]) => ({ id, nome: v.nome, total: v.total }))
+    .filter((p) => p.total > 0)
+    .sort((a, b) => b.total - a.total);
+}
+
 export async function listRecorrencias(workspaceId: string): Promise<Recorrencia[]> {
   const supabase = createClient();
   const { data } = await supabase

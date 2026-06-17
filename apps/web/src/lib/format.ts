@@ -58,9 +58,16 @@ export function initials(name: string | null | undefined): string {
   return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
 }
 
-/** Saudação conforme a hora local. */
+/** Saudação conforme a hora em Brasília (o servidor roda em UTC). */
 export function greeting(date = new Date()): string {
-  const h = date.getHours();
+  const h =
+    Number(
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/Sao_Paulo",
+        hour: "2-digit",
+        hour12: false,
+      }).format(date),
+    ) % 24;
   if (h < 12) return "Bom dia";
   if (h < 18) return "Boa tarde";
   return "Boa noite";

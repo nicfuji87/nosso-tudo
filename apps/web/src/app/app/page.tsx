@@ -6,6 +6,7 @@ import {
   getGastosPorCategoria,
   getGastosPorContexto,
   getGastosPorEssencialidade,
+  getGastosPorPessoa,
   getResumoMes,
   listCartoes,
   listTransacoes,
@@ -14,8 +15,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/patterns/empty-state";
-import { CategoryDonut } from "@/components/dashboard/category-donut";
-import { TransacaoItem } from "@/components/transacoes/transacao-item";
+import { BalanceCard } from "@/components/dashboard/balance-card";
+import { CategoriasCard } from "@/components/dashboard/categorias-card";
+import { GastoPorPessoa } from "@/components/dashboard/gasto-por-pessoa";
+import { AtividadeRecente } from "@/components/dashboard/atividade-recente";
+import { EventosLista } from "@/components/dashboard/eventos-lista";
 import { greeting, formatBRL, formatDate } from "@/lib/format";
 import { LABEL_ESSENCIALIDADE, type Essencialidade } from "@/lib/types/db";
 
@@ -32,10 +36,11 @@ export default async function HomePage() {
   const { profile, workspace, plan } = await getWorkspaceContext();
   const supabase = createClient();
 
-  const [resumo, gastos, essenc, eventos, recentes, cartoes, colecoesRes] = await Promise.all([
+  const [resumo, gastos, essenc, pessoas, eventos, recentes, cartoes, colecoesRes] = await Promise.all([
     getResumoMes(workspace.id),
     getGastosPorCategoria(workspace.id),
     getGastosPorEssencialidade(workspace.id),
+    getGastosPorPessoa(workspace.id),
     getGastosPorContexto(workspace.id),
     listTransacoes(workspace.id, { limit: 6 }),
     listCartoes(workspace.id),
@@ -43,11 +48,15 @@ export default async function HomePage() {
   ]);
 
   const totalEssenc = essenc.reduce((s, e) => s + e.total, 0);
-  const eventosTop = eventos.slice(0, 4);
+  const eventosTop = eventos.slice(0, 6);
 
-  const colecoes = (colecoesRes.data as { id: string; nome: string; cor: string | null; icone: string | null }[] | null) ?? [];
+  const colecoes =
+    (colecoesRes.data as { id: string; nome: string; cor: string | null; icone: string | null }[] | null) ?? [];
   const primeiroNome = profile.nome.split(" ")[0];
   const semDados = resumo.total_transacoes === 0;
+
+  const mesAno = formatDate(new Date(), "MMMM 'de' yyyy");
+  const mesLabel = mesAno.charAt(0).toUpperCase() + mesAno.slice(1);
 
   const donut = gastos.slice(0, 5).map((g, i) => ({
     nome: g.categoria_nome,
@@ -60,16 +69,14 @@ export default async function HomePage() {
   }
 
   return (
-    <div className="space-y-8">
-      {/* Saudação */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-6">
+      {/* Cabeçalho enxuto */}
+      <div className="flex items-end justify-between gap-3">
         <div>
           <p className="text-body-sm text-muted-foreground">
             {greeting()}, {primeiroNome}
           </p>
-          <h1 className="text-h2 font-semibold capitalize tracking-tight">
-            {formatDate(new Date(), "MMMM 'de' yyyy")}
-          </h1>
+          <h1 className="text-h3 font-semibold tracking-tight">{mesLabel}</h1>
         </div>
         {plan.slug === "free" && (
           <Badge variant="tech" className="hidden sm:inline-flex">
@@ -78,59 +85,36 @@ export default async function HomePage() {
         )}
       </div>
 
-      {/* Card saúde do mês */}
-      <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">
-        <div className="atmosphere-soft relative overflow-hidden rounded-2xl bg-brand-graphite p-7 text-brand-offwhite shadow-card">
-          <p className="text-overline uppercase tracking-wide text-brand-offwhite/50">
-            Saldo do mês
-          </p>
-          <p
-            className="tabular mt-2 text-display-md font-semibold tracking-tight"
-            style={{ color: resumo.saldo >= 0 ? "#8FA993" : "#EF8A8A" }}
-          >
-            {formatBRL(resumo.saldo, { sign: true })}
-          </p>
-          <div className="mt-6 grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-caption text-brand-offwhite/50">Receitas</p>
-              <p className="tabular text-body-lg font-medium">{formatBRL(resumo.receitas)}</p>
-            </div>
-            <div>
-              <p className="text-caption text-brand-offwhite/50">Despesas</p>
-              <p className="tabular text-body-lg font-medium">{formatBRL(resumo.despesas)}</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Donut gastos por categoria */}
+      {/* Hero: saldo + categorias */}
+      <div className="grid gap-5 lg:grid-cols-[1fr_1.3fr]">
+        <BalanceCard saldo={resumo.saldo} receitas={resumo.receitas} despesas={resumo.despesas} />
         <Card>
           <CardContent className="p-5">
             <p className="text-body-sm font-medium">Gastos por categoria</p>
-            {donut.length === 0 ? (
-              <div className="flex h-44 items-center justify-center text-center text-caption text-muted-foreground">
-                Sem despesas neste mês ainda.
-              </div>
-            ) : (
-              <div className="relative mt-2">
-                <CategoryDonut data={donut} />
-                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-caption text-muted-foreground">Total</span>
-                  <span className="tabular text-body font-semibold">{formatBRL(resumo.despesas)}</span>
-                </div>
-              </div>
-            )}
+            <div className="mt-4">
+              <CategoriasCard data={donut} total={resumo.despesas} />
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Essencial × Supérfluo (essencialidade) */}
+      {/* Gasto por pessoa */}
+      {pessoas.length > 0 && (
+        <Card>
+          <CardContent className="p-5">
+            <p className="text-body-sm font-medium">Gasto por pessoa</p>
+            <p className="mb-4 text-caption text-muted-foreground">Despesas do mês por responsável</p>
+            <GastoPorPessoa dados={pessoas} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Essencial × Supérfluo */}
       {totalEssenc > 0 && (
         <Card>
           <CardContent className="p-5">
             <p className="text-body-sm font-medium">Essencial × Supérfluo</p>
-            <p className="text-caption text-muted-foreground">
-              Para onde o dinheiro vai por natureza do gasto
-            </p>
+            <p className="text-caption text-muted-foreground">Para onde o dinheiro vai por natureza do gasto</p>
             <div className="mt-4 flex h-3 w-full overflow-hidden rounded-full bg-secondary">
               {essenc.map((e) => (
                 <div
@@ -153,7 +137,7 @@ export default async function HomePage() {
                     <p className="truncate text-caption text-muted-foreground">
                       {LABEL_ESSENCIALIDADE[e.essencialidade]}
                     </p>
-                    <p className="tabular text-body-sm font-medium">
+                    <p className="text-body-sm font-medium tabular-nums">
                       {Math.round((e.total / totalEssenc) * 100)}%
                     </p>
                   </div>
@@ -164,26 +148,20 @@ export default async function HomePage() {
         </Card>
       )}
 
-      {/* Eventos (contexto) — custo por evento da vida familiar */}
+      {/* Eventos — abríveis */}
       {eventosTop.length > 0 && (
         <section className="space-y-3">
           <h2 className="text-h4 font-semibold tracking-tight">Eventos</h2>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {eventosTop.map((ev) => (
-              <Card key={ev.contextoId}>
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg">{ev.icone ?? "🗓️"}</span>
-                    <p className="truncate text-body-sm font-medium">{ev.nome}</p>
-                  </div>
-                  <p className="tabular mt-3 text-body-lg font-semibold">{formatBRL(ev.total)}</p>
-                  <p className="text-caption text-muted-foreground">
-                    {ev.nTransacoes} {ev.nTransacoes === 1 ? "lançamento" : "lançamentos"}
-                  </p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          <EventosLista
+            eventos={eventosTop.map((ev) => ({
+              contextoId: ev.contextoId,
+              nome: ev.nome,
+              icone: ev.icone,
+              tipo: ev.tipo,
+              total: Number(ev.total),
+              nTransacoes: Number(ev.nTransacoes),
+            }))}
+          />
         </section>
       )}
 
@@ -214,7 +192,7 @@ export default async function HomePage() {
         </section>
       )}
 
-      {/* Transações recentes */}
+      {/* Atividade recente — abrível */}
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-h4 font-semibold tracking-tight">Atividade recente</h2>
@@ -234,13 +212,7 @@ export default async function HomePage() {
             description="Toque em “Nova transação” para registrar um gasto ou receita. Em segundos, o Nosso Tudo organiza por você."
           />
         ) : (
-          <Card>
-            <CardContent className="divide-y divide-border/70 p-2 px-5">
-              {recentes.map((tx) => (
-                <TransacaoItem key={tx.id} tx={tx} />
-              ))}
-            </CardContent>
-          </Card>
+          <AtividadeRecente transacoes={recentes} />
         )}
       </section>
 
@@ -261,9 +233,7 @@ export default async function HomePage() {
                     {c.ultimos_digitos ? ` ·· ${c.ultimos_digitos}` : ""}
                   </p>
                   {c.limite != null && (
-                    <p className="tabular mt-3 text-body-sm">
-                      Limite {formatBRL(c.limite)}
-                    </p>
+                    <p className="mt-3 text-body-sm tabular-nums">Limite {formatBRL(c.limite)}</p>
                   )}
                 </CardContent>
               </Card>
