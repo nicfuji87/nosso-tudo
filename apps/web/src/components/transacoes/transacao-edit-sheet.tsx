@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MoneyInput } from "./money-input";
+import { CategoriaPicker } from "./categoria-picker";
 import { FieldError } from "@/components/auth/field-error";
 import { toast } from "@/components/ui/sonner";
 import { createClient } from "@/lib/supabase/client";
@@ -162,19 +163,11 @@ export function TransacaoEditSheet({
                 control={control}
                 name="categoria_id"
                 render={({ field }) => (
-                  <Select value={field.value ?? ""} onValueChange={field.onChange}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecionar categoria" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {categorias.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.icone ? `${c.icone}  ` : ""}
-                          {c.nome}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <CategoriaPicker
+                    categorias={categorias}
+                    value={field.value ?? undefined}
+                    onChange={field.onChange}
+                  />
                 )}
               />
             </div>

@@ -29,20 +29,24 @@ export function formatPercent(value: number, fractionDigits = 0): string {
 }
 
 function toDate(input: Date | string): Date {
-  return typeof input === "string" ? new Date(input) : input;
+  if (typeof input !== "string") return input;
+  // Data só-data (YYYY-MM-DD) deve ser lida como LOCAL, não UTC — senão no fuso
+  // de Brasília (-3) ela "volta" um dia (vira ontem). Acrescenta a hora local.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return new Date(`${input}T00:00:00`);
+  return new Date(input);
 }
 
-/** Data curta: "14 jun 2026". */
-export function formatDate(input: Date | string, pattern = "dd MMM yyyy"): string {
+/** Data curta: "17/06/2026". */
+export function formatDate(input: Date | string, pattern = "dd/MM/yyyy"): string {
   return format(toDate(input), pattern, { locale: ptBR });
 }
 
-/** Rótulo humano: "Hoje", "Ontem" ou data curta. */
+/** Rótulo humano: "Hoje", "Ontem" ou data curta (dd/MM/yyyy). */
 export function formatDayLabel(input: Date | string): string {
   const d = toDate(input);
   if (isToday(d)) return "Hoje";
   if (isYesterday(d)) return "Ontem";
-  return format(d, "dd 'de' MMMM", { locale: ptBR });
+  return format(d, "dd/MM/yyyy", { locale: ptBR });
 }
 
 export function formatRelative(input: Date | string): string {

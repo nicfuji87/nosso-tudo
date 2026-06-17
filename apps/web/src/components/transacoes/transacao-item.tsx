@@ -1,6 +1,6 @@
 import { CategoryIcon } from "@/components/patterns/category-icon";
 import { Badge } from "@/components/ui/badge";
-import { formatBRL, formatDayLabel } from "@/lib/format";
+import { formatBRL, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { TransacaoComRelacoes } from "@/lib/types/db";
 
@@ -34,7 +34,7 @@ export function TransacaoItem({ tx }: { tx: TransacaoComRelacoes }) {
           {isCredito ? "+ " : "− "}
           {formatBRL(tx.valor)}
         </p>
-        <p className="text-caption text-muted-foreground">{formatDayLabel(tx.data_transacao)}</p>
+        <p className="text-caption text-muted-foreground">{formatDate(tx.data_transacao)}</p>
       </div>
     </div>
   );

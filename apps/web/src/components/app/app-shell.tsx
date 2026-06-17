@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Plus, Inbox, Sparkles } from "lucide-react";
+import { useState } from "react";
+import { Plus, Inbox, Menu, Sparkles } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { NAV_ITEMS, type NavItem } from "./nav-config";
 import { UserMenu } from "./user-menu";
@@ -34,6 +36,10 @@ export function AppShell({
   const inboxActive = pathname.startsWith("/app/inbox");
   const niaActive = pathname.startsWith("/app/nia");
   const niaLiberado = isAdmin || plan.slug === "pro";
+  const [mais, setMais] = useState(false);
+  // Bottom bar: 3 destinos principais + Nia no centro + "Mais" (o resto).
+  const principais: [NavItem, NavItem, NavItem] = [NAV_ITEMS[0]!, NAV_ITEMS[1]!, NAV_ITEMS[2]!];
+  const secundarios = NAV_ITEMS.slice(3);
 
   return (
     <div className="min-h-dvh">
@@ -125,15 +131,16 @@ export function AppShell({
           <Logo />
         </Link>
         <div className="flex items-center gap-1">
-          {niaLiberado && (
-            <Link
-              href="/app/nia"
-              aria-label="Nia"
-              className="flex size-9 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground"
-            >
-              <Sparkles className="size-5" />
-            </Link>
-          )}
+          <NovaTransacaoDialog
+            trigger={
+              <button
+                aria-label="Nova transação"
+                className="flex size-9 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground"
+              >
+                <Plus className="size-5" />
+              </button>
+            }
+          />
           <Link
             href="/app/inbox"
             aria-label="Pré-conferência"
@@ -155,29 +162,88 @@ export function AppShell({
         <div className="container max-w-5xl px-4 py-6 pb-28 lg:px-8 lg:py-10">{children}</div>
       </main>
 
-      {/* Bottom nav (mobile) */}
+      {/* Bottom nav (mobile) — Início · Transações · Nia (centro) · Relatórios · Mais */}
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-card/90 backdrop-blur-xl lg:hidden">
         <div className="mx-auto grid max-w-md grid-cols-5 items-center px-2 pb-[env(safe-area-inset-bottom)]">
-          {NAV_ITEMS.slice(0, 2).map((item) => (
-            <BottomLink key={item.href} item={item} isActive={active(pathname, item)} />
-          ))}
+          <BottomLink item={principais[0]} isActive={active(pathname, principais[0])} />
+          <BottomLink item={principais[1]} isActive={active(pathname, principais[1])} />
+
           <div className="flex justify-center">
-            <NovaTransacaoDialog
-              trigger={
-                <button
-                  aria-label="Nova transação"
-                  className="-mt-6 flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-elevated transition-transform active:scale-95"
-                >
-                  <Plus className="size-6" />
-                </button>
-              }
-            />
+            {niaLiberado ? (
+              <Link
+                href="/app/nia"
+                aria-label="Falar com a Nia"
+                className={cn(
+                  "-mt-6 flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-elevated transition-transform active:scale-95",
+                  niaActive && "ring-2 ring-accent ring-offset-2 ring-offset-card",
+                )}
+              >
+                <Sparkles className="size-6" />
+              </Link>
+            ) : (
+              <NovaTransacaoDialog
+                trigger={
+                  <button
+                    aria-label="Nova transação"
+                    className="-mt-6 flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-elevated transition-transform active:scale-95"
+                  >
+                    <Plus className="size-6" />
+                  </button>
+                }
+              />
+            )}
           </div>
-          {NAV_ITEMS.slice(2).map((item) => (
-            <BottomLink key={item.href} item={item} isActive={active(pathname, item)} />
-          ))}
+
+          <BottomLink item={principais[2]} isActive={active(pathname, principais[2])} />
+
+          <button
+            type="button"
+            onClick={() => setMais(true)}
+            className={cn(
+              "flex flex-col items-center gap-1 py-3 text-overline font-medium transition-colors",
+              mais ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
+            <Menu className="size-5" />
+            Mais
+          </button>
         </div>
       </nav>
+
+      {/* Sheet "Mais" — destinos secundários */}
+      <Sheet open={mais} onOpenChange={setMais}>
+        <SheetContent side="bottom" className="lg:hidden">
+          <SheetHeader className="pr-8">
+            <SheetTitle>Mais</SheetTitle>
+          </SheetHeader>
+          <div className="mt-4 grid grid-cols-3 gap-3">
+            {secundarios.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setMais(false)}
+                className="flex flex-col items-center gap-2 rounded-2xl border border-border p-4 text-center transition-colors hover:bg-secondary/60"
+              >
+                <item.icon className="size-5 text-muted-foreground" />
+                <span className="text-body-sm font-medium">{item.label}</span>
+              </Link>
+            ))}
+            <Link
+              href="/app/inbox"
+              onClick={() => setMais(false)}
+              className="relative flex flex-col items-center gap-2 rounded-2xl border border-border p-4 text-center transition-colors hover:bg-secondary/60"
+            >
+              <Inbox className="size-5 text-muted-foreground" />
+              <span className="text-body-sm font-medium">Pré-conferência</span>
+              {inboxCount > 0 && (
+                <span className="absolute right-2 top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-overline font-semibold text-accent-foreground">
+                  {inboxCount > 99 ? "99+" : inboxCount}
+                </span>
+              )}
+            </Link>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

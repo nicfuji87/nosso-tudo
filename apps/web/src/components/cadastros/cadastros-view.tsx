@@ -54,6 +54,7 @@ import { CategoryIcon } from "@/components/patterns/category-icon";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { FieldError } from "@/components/auth/field-error";
 import { MoneyInput } from "@/components/transacoes/money-input";
+import { CategoriaPicker } from "@/components/transacoes/categoria-picker";
 import { toast } from "@/components/ui/sonner";
 import { formatBRL, formatDate } from "@/lib/format";
 import {
@@ -1328,19 +1329,11 @@ function RecorrenciaDialog({
               control={form.control}
               name="categoria_id"
               render={({ field }) => (
-                <Select value={field.value ?? ""} onValueChange={field.onChange}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecionar categoria" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {categorias.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.icone ? `${c.icone}  ` : ""}
-                        {c.nome}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <CategoriaPicker
+                  categorias={categorias}
+                  value={field.value ?? undefined}
+                  onChange={field.onChange}
+                />
               )}
             />
           </div>
