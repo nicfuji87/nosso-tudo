@@ -21,7 +21,7 @@ import {
   listTransacoes,
 } from "@/lib/db/queries";
 import { formatBRL, formatDate } from "@/lib/format";
-import { LABEL_ESSENCIALIDADE } from "@/lib/types/db";
+import { FREQUENCIAS_RECORRENCIA, LABEL_ESSENCIALIDADE, LABEL_FREQUENCIA } from "@/lib/types/db";
 import { normalizarTexto } from "@/lib/normalize";
 import {
   buscarDocumentosArgs,
@@ -35,6 +35,7 @@ import {
   criarMetaArgs,
   criarOrcamentoArgs,
   criarPessoaArgs,
+  criarRecorrenciaArgs,
   enviarDocumentoArgs,
   lancarTransacaoArgs,
   lancarTransacaoDetalhadaArgs,
@@ -386,6 +387,62 @@ const lancarTransacaoDetalhada: NiaTool = {
       })),
     };
     return { texto: `Li ${d.itens.length} itens da nota para o usuário conferir.`, widget };
+  },
+};
+
+const criarRecorrencia: NiaTool = {
+  nome: "criar_recorrencia",
+  descricao:
+    "Propõe cadastrar uma CONTA FIXA (despesa ou receita RECORRENTE): aluguel, mensalidade, assinatura, salário, diarista/passadeira que vem sempre, etc. Use quando o usuário descrever algo que se REPETE no tempo ('todo mês', 'toda terça', 'semana sim, semana não', 'todo dia 10', 'todo ano'). Mapeie a frequência: diaria, semanal, quinzenal (= semana sim/semana não, a cada 15 dias), mensal, bimestral, trimestral, semestral, anual. O sistema gera os lançamentos sozinho no vencimento — então NÃO use lancar_transacao para o mesmo gasto recorrente, nem lembrar_fato (a recorrência já é a memória). Gera um cartão de confirmação.",
+  nivel: "confirmar",
+  inputSchema: {
+    type: "object",
+    properties: {
+      descricao: { type: "string", description: "Nome da conta fixa (ex.: 'Passadeira - Dona Luisa')." },
+      valor: { type: "number", description: "Valor de cada ocorrência, em reais." },
+      frequencia: {
+        type: "string",
+        enum: [...FREQUENCIAS_RECORRENCIA],
+        description: "Periodicidade. 'quinzenal' = a cada 15 dias (semana sim, semana não).",
+      },
+      tipo: { type: "string", enum: ["despesa", "receita"], description: "Default: despesa." },
+      data_inicio: {
+        type: "string",
+        description: "Data ISO (YYYY-MM-DD) da 1ª ocorrência/vencimento. Se já pagou hoje, use hoje. Default: hoje.",
+      },
+      data_fim: { type: "string", description: "Data ISO final (opcional)." },
+      categoria: { type: "string", description: "Nome da categoria (opcional)." },
+    },
+    required: ["descricao", "valor", "frequencia"],
+  },
+  async executar(args, ctx) {
+    const d = valida(criarRecorrenciaArgs, args);
+    const dataInicio = d.data_inicio ?? new Date().toISOString().slice(0, 10);
+    const acaoId = await registrarAcao({
+      workspaceId: ctx.workspaceId,
+      profileId: ctx.profileId,
+      conversaId: ctx.conversaId,
+      ferramenta: "criar_recorrencia",
+      nivel: "confirmar",
+      payloadProposto: { ...d, data_inicio: dataInicio },
+    });
+    if (!acaoId) throw new Error("Não consegui preparar a conta fixa.");
+    const widget: NiaWidget = {
+      tipo: "criar_recorrencia",
+      acaoId,
+      descricao: d.descricao,
+      valor: d.valor,
+      frequenciaLabel: LABEL_FREQUENCIA[d.frequencia],
+      tipoTransacao: d.tipo,
+      categoria: d.categoria ?? null,
+      dataInicio,
+    };
+    return {
+      texto: `Preparei a conta fixa "${d.descricao}" (${LABEL_FREQUENCIA[d.frequencia]}, ${formatBRL(
+        d.valor,
+      )}) para o usuário confirmar.`,
+      widget,
+    };
   },
 };
 
@@ -815,6 +872,7 @@ export const NIA_TOOLS: NiaTool[] = [
   criarConta,
   criarCartao,
   criarCompromisso,
+  criarRecorrencia,
   criarMeta,
   criarOrcamento,
   lembrarFato,

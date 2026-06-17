@@ -7,6 +7,7 @@ import { z } from "zod";
 import {
   COMPORTAMENTOS_CATEGORIA,
   ESSENCIALIDADES,
+  FREQUENCIAS_RECORRENCIA,
   MEIOS_PAGAMENTO,
   TIPOS_CONTA_BANCARIA,
   TIPOS_ENTIDADE,
@@ -102,6 +103,17 @@ export const criarPessoaArgs = z.object({
   tipo: z.enum(TIPOS_ENTIDADE).default("pessoa"),
 });
 export type CriarPessoaArgs = z.infer<typeof criarPessoaArgs>;
+
+export const criarRecorrenciaArgs = z.object({
+  descricao: z.string().trim().min(1).max(255),
+  valor: z.number().positive(),
+  frequencia: z.enum(FREQUENCIAS_RECORRENCIA),
+  tipo: z.enum(["despesa", "receita"]).default("despesa"),
+  data_inicio: z.string().optional(),
+  data_fim: z.string().optional(),
+  categoria: z.string().trim().max(120).optional(),
+});
+export type CriarRecorrenciaArgs = z.infer<typeof criarRecorrenciaArgs>;
 
 export const criarCompromissoArgs = z.object({
   nome: z.string().trim().min(1).max(120),
@@ -245,6 +257,17 @@ export interface WidgetChecklistItens {
   itens: { nome: string; quantidade: number | null; valorTotal: number | null }[];
 }
 
+export interface WidgetCriarRecorrencia {
+  tipo: "criar_recorrencia";
+  acaoId: string;
+  descricao: string;
+  valor: number;
+  frequenciaLabel: string;
+  tipoTransacao: "despesa" | "receita";
+  categoria: string | null;
+  dataInicio: string;
+}
+
 export interface WidgetDocumento {
   tipo: "documento";
   url: string;
@@ -264,6 +287,7 @@ export type NiaWidget =
   | WidgetCriarMeta
   | WidgetCriarOrcamento
   | WidgetChecklistItens
+  | WidgetCriarRecorrencia
   | WidgetDocumento;
 
 /* ------------------------------------------------------------------ */

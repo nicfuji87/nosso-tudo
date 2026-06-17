@@ -13,6 +13,7 @@ import {
   criarMetaArgs,
   criarOrcamentoArgs,
   criarPessoaArgs,
+  criarRecorrenciaArgs,
   lancarTransacaoArgs,
   lancarTransacaoDetalhadaArgs,
   lembrarFatoArgs,
@@ -256,6 +257,110 @@ export async function confirmarTransacaoDetalhada(
     registroId: res.id,
   });
   return { ok: true, pulados };
+}
+
+/** Avança uma data ISO conforme a frequência da recorrência. */
+function avancarDataRecorrencia(iso: string, freq: string): string {
+  const [y, m, dd] = iso.split("-").map(Number);
+  const base = new Date(Date.UTC(y || 1970, (m || 1) - 1, dd || 1));
+  switch (freq) {
+    case "diaria":
+      base.setUTCDate(base.getUTCDate() + 1);
+      break;
+    case "semanal":
+      base.setUTCDate(base.getUTCDate() + 7);
+      break;
+    case "quinzenal":
+      base.setUTCDate(base.getUTCDate() + 15);
+      break;
+    case "bimestral":
+      base.setUTCMonth(base.getUTCMonth() + 2);
+      break;
+    case "trimestral":
+      base.setUTCMonth(base.getUTCMonth() + 3);
+      break;
+    case "semestral":
+      base.setUTCMonth(base.getUTCMonth() + 6);
+      break;
+    case "anual":
+      base.setUTCFullYear(base.getUTCFullYear() + 1);
+      break;
+    default:
+      base.setUTCMonth(base.getUTCMonth() + 1); // mensal
+  }
+  return base.toISOString().slice(0, 10);
+}
+
+/**
+ * Cria a conta fixa (recorrência) proposta pela Nia e já materializa as
+ * ocorrências vencidas (ex.: "paguei hoje") — o cron diário cuida das futuras.
+ */
+export async function confirmarRecorrencia(acaoId: string): Promise<{ error?: string; ok?: boolean }> {
+  const acao = await carregarAcao(acaoId);
+  if (!acao) return { error: "Ação não encontrada." };
+  if (acao.status !== "proposta") return { error: "Essa ação já foi processada." };
+  if (acao.ferramenta !== "criar_recorrencia") return { error: "Ação não suportada." };
+
+  const parsed = criarRecorrenciaArgs.safeParse(acao.payload_proposto);
+  if (!parsed.success) return { error: "Dados da proposta inválidos." };
+  const d = parsed.data;
+
+  const supabase = createClient();
+  const ws = acao.workspace_id;
+  const hoje = new Date().toISOString().slice(0, 10);
+  const dataInicio = d.data_inicio ?? hoje;
+  const cat = await resolverCategoriaCanonica(supabase, ws, d.categoria);
+
+  const { data: rec, error } = await supabase
+    .from("recorrencias")
+    .insert({
+      workspace_id: ws,
+      descricao: d.descricao,
+      tipo: d.tipo,
+      valor_previsto: d.valor,
+      frequencia: d.frequencia,
+      data_inicio: dataInicio,
+      data_fim: d.data_fim ?? null,
+      categoria_id: cat?.id ?? null,
+      dia_vencimento: Number(dataInicio.slice(8, 10)) || 1,
+      proxima_geracao: dataInicio,
+      ativa: true,
+    })
+    .select("id")
+    .maybeSingle();
+  if (error || !rec) return { error: "Não foi possível criar a conta fixa." };
+  const recId = (rec as { id: string }).id;
+
+  // Materializa as ocorrências já vencidas (idempotente); o cron segue com as futuras.
+  let v = dataInicio;
+  let guard = 0;
+  while (v <= hoje && (!d.data_fim || v <= d.data_fim) && guard < 60) {
+    const { data: existe } = await supabase
+      .from("transacoes")
+      .select("id")
+      .eq("recorrencia_id", recId)
+      .eq("data_transacao", v)
+      .maybeSingle();
+    if (!existe) {
+      await supabase.from("transacoes").insert({
+        workspace_id: ws,
+        tipo: d.tipo,
+        descricao: d.descricao,
+        valor: d.valor,
+        data_transacao: v,
+        categoria_id: cat?.id ?? null,
+        origem: "recorrente",
+        recorrencia_id: recId,
+        status_revisao: "confirmado",
+      });
+    }
+    v = avancarDataRecorrencia(v, d.frequencia);
+    guard++;
+  }
+  await supabase.from("recorrencias").update({ proxima_geracao: v, ultima_geracao: hoje }).eq("id", recId);
+
+  await atualizarAcao(acaoId, { status: "executada", resultado: { ok: true }, registroId: recId });
+  return { ok: true };
 }
 
 /** Cadastra a pessoa/grupo proposto pela Nia. */

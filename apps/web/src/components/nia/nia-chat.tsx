@@ -30,6 +30,7 @@ import {
   confirmarMeta,
   confirmarOrcamento,
   confirmarPessoa,
+  confirmarRecorrencia,
   confirmarTransacao,
   confirmarTransacaoDetalhada,
   desfazerTransacao,
@@ -699,6 +700,20 @@ function WidgetView({
           confirmar={() => confirmarCategoria(widget.acaoId)}
           descartar={() => rejeitarAcao(widget.acaoId)}
           labelFeito="Categoria criada"
+          estadoInicial={estadoInicial}
+        />
+      );
+    case "criar_recorrencia":
+      return (
+        <AcaoCard
+          titulo={widget.descricao}
+          subtitulo={`Conta fixa · ${widget.frequenciaLabel}${
+            widget.categoria ? ` · ${widget.categoria}` : ""
+          }`}
+          valor={widget.valor}
+          confirmar={() => confirmarRecorrencia(widget.acaoId)}
+          descartar={() => rejeitarAcao(widget.acaoId)}
+          labelFeito="Conta fixa criada"
           estadoInicial={estadoInicial}
         />
       );
