@@ -17,7 +17,9 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { TransacaoEditSheet } from "@/components/transacoes/transacao-edit-sheet";
+import { MoneyInput } from "@/components/transacoes/money-input";
 import { formatBRL, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/sonner";
@@ -955,8 +957,19 @@ function ChecklistItensCard({
   const [estado, setEstado] = useState<"idle" | "salvando" | "feito" | "descartado" | "erro">(inicial);
   const [erro, setErro] = useState<string | null>(null);
   const [pulados, setPulados] = useState(0);
+  const [edicoes, setEdicoes] = useState<
+    Record<number, { nome?: string; quantidade?: number; valorTotal?: number }>
+  >({});
+  const [editandoItem, setEditandoItem] = useState<number | null>(null);
 
-  const total = w.itens.reduce((s, it, i) => s + (incluidos[i] && it.valorTotal ? it.valorTotal : 0), 0);
+  const nomeDe = (i: number) => edicoes[i]?.nome ?? w.itens[i]!.nome;
+  const qtdDe = (i: number) => edicoes[i]?.quantidade ?? w.itens[i]!.quantidade;
+  const valorDe = (i: number) => edicoes[i]?.valorTotal ?? w.itens[i]!.valorTotal;
+
+  const total = w.itens.reduce((s, _it, i) => {
+    const v = valorDe(i);
+    return s + (incluidos[i] && v ? v : 0);
+  }, 0);
   const qtd = incluidos.filter(Boolean).length;
   const editavel = estado === "idle" || estado === "salvando" || estado === "erro";
 
@@ -971,10 +984,19 @@ function ChecklistItensCard({
     if (!editavel || estado === "salvando") return;
     setIncluidos(() => w.itens.map(() => !todosMarcados));
   }
+  function setEdit(i: number, patch: { nome?: string; quantidade?: number; valorTotal?: number }) {
+    setEdicoes((prev) => ({ ...prev, [i]: { ...prev[i], ...patch } }));
+  }
   async function confirmar() {
     const indices = incluidos.flatMap((v, i) => (v ? [i] : []));
+    const eds: Record<number, { nome?: string; quantidade?: number; valor_total?: number }> = {};
+    for (const k of Object.keys(edicoes)) {
+      const i = Number(k);
+      const e = edicoes[i]!;
+      eds[i] = { nome: e.nome, quantidade: e.quantidade, valor_total: e.valorTotal };
+    }
     setEstado("salvando");
-    const r = await confirmarTransacaoDetalhada(w.acaoId, indices);
+    const r = await confirmarTransacaoDetalhada(w.acaoId, indices, Object.keys(eds).length ? eds : undefined);
     if (r.error) {
       setErro(r.error);
       setEstado("erro");
@@ -988,11 +1010,15 @@ function ChecklistItensCard({
     setEstado("descartado");
   }
 
+  const subtitulo = [w.estabelecimento, w.pagamento, w.beneficiario ? `para ${w.beneficiario}` : null]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
       <div className="border-b border-border px-4 py-3">
         <p className="font-medium">{w.descricao}</p>
-        {w.estabelecimento && <p className="text-caption text-muted-foreground">{w.estabelecimento}</p>}
+        {subtitulo && <p className="text-caption text-muted-foreground">{subtitulo}</p>}
       </div>
       {editavel && w.itens.length > 1 && (
         <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
@@ -1009,39 +1035,85 @@ function ChecklistItensCard({
           </button>
         </div>
       )}
-      <div className={cn("divide-y divide-border", muitosItens && "max-h-72 overflow-y-auto")}>
-        {w.itens.map((it, i) => (
-          <button
-            key={i}
-            type="button"
-            onClick={() => toggle(i)}
-            disabled={!editavel || estado === "salvando"}
-            className="flex w-full items-center gap-3 px-4 py-2.5 text-left"
-          >
-            <span
-              className={cn(
-                "flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
-                incluidos[i] ? "border-accent bg-accent text-accent-foreground" : "border-border",
-              )}
-            >
-              {incluidos[i] && <Check className="size-3.5" />}
-            </span>
-            <span className={cn("flex-1 text-body-sm", !incluidos[i] && "text-muted-foreground line-through")}>
-              {it.nome}
-              {it.quantidade ? ` · ${it.quantidade}` : ""}
-            </span>
-            {it.valorTotal != null && (
-              <span
-                className={cn(
-                  "font-mono text-body-sm tabular-nums",
-                  !incluidos[i] && "text-muted-foreground line-through",
+      <div className={cn("divide-y divide-border", muitosItens && "max-h-80 overflow-y-auto")}>
+        {w.itens.map((_it, i) => {
+          const v = valorDe(i);
+          return (
+            <div key={i} className="px-4 py-2.5">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => toggle(i)}
+                  disabled={!editavel || estado === "salvando"}
+                  aria-label="Incluir item"
+                  className={cn(
+                    "flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
+                    incluidos[i] ? "border-accent bg-accent text-accent-foreground" : "border-border",
+                  )}
+                >
+                  {incluidos[i] && <Check className="size-3.5" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggle(i)}
+                  disabled={!editavel || estado === "salvando"}
+                  className={cn(
+                    "min-w-0 flex-1 truncate text-left text-body-sm",
+                    !incluidos[i] && "text-muted-foreground line-through",
+                  )}
+                >
+                  {nomeDe(i)}
+                  {qtdDe(i) ? ` · ${qtdDe(i)}` : ""}
+                </button>
+                {v != null && (
+                  <span
+                    className={cn(
+                      "shrink-0 font-mono text-body-sm tabular-nums",
+                      !incluidos[i] && "text-muted-foreground line-through",
+                    )}
+                  >
+                    {formatBRL(v)}
+                  </span>
                 )}
-              >
-                {formatBRL(it.valorTotal)}
-              </span>
-            )}
-          </button>
-        ))}
+                {editavel && (
+                  <button
+                    type="button"
+                    onClick={() => setEditandoItem(editandoItem === i ? null : i)}
+                    aria-label="Editar item"
+                    className="shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-secondary"
+                  >
+                    <SquarePen className="size-4" />
+                  </button>
+                )}
+              </div>
+              {editavel && editandoItem === i && (
+                <div className="mt-2 space-y-2 rounded-xl bg-secondary/40 p-2.5">
+                  <Input
+                    value={nomeDe(i)}
+                    onChange={(e) => setEdit(i, { nome: e.target.value })}
+                    placeholder="Nome do item"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.001"
+                      value={qtdDe(i) ?? ""}
+                      onChange={(e) => setEdit(i, { quantidade: e.target.value === "" ? undefined : Number(e.target.value) })}
+                      placeholder="Qtd"
+                    />
+                    <MoneyInput value={v ?? undefined} onChange={(nv) => setEdit(i, { valorTotal: nv ?? undefined })} />
+                  </div>
+                  <div className="flex justify-end">
+                    <Button size="sm" variant="ghost" onClick={() => setEditandoItem(null)}>
+                      Pronto
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
       <div className="flex items-center justify-between gap-2 border-t border-border bg-secondary/40 px-4 py-3">
         {estado === "feito" ? (

@@ -43,7 +43,7 @@ export default async function HomePage() {
     getGastosPorEssencialidade(workspace.id),
     getGastosPorPessoa(workspace.id),
     getGastosPorContexto(workspace.id),
-    listTransacoes(workspace.id, { limit: 6 }),
+    listTransacoes(workspace.id, { limit: 6, ordenarPor: "criacao" }),
     listCartoes(workspace.id),
     supabase.from("v_colecoes_em_aberto").select("*").eq("workspace_id", workspace.id).limit(4),
   ]);

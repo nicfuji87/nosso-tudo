@@ -249,6 +249,7 @@ export async function confirmarTransacaoComEdicao(
 export async function confirmarTransacaoDetalhada(
   acaoId: string,
   indicesIncluidos: number[],
+  edicoes?: Record<number, { nome?: string; quantidade?: number; valor_total?: number }>,
 ): Promise<{ error?: string; ok?: boolean; pulados?: number }> {
   const acao = await carregarAcao(acaoId);
   if (!acao) return { error: "Ação não encontrada." };
@@ -259,7 +260,19 @@ export async function confirmarTransacaoDetalhada(
   if (!parsed.success) return { error: "Dados da proposta inválidos." };
   const d = parsed.data;
 
-  const selecionados = d.itens.filter((_, i) => indicesIncluidos.includes(i));
+  // Aplica as edições do usuário (por índice) antes de filtrar os incluídos.
+  const ed = edicoes ?? {};
+  const itensComEdits = d.itens.map((it, i) => {
+    const e = ed[i];
+    if (!e) return it;
+    return {
+      ...it,
+      nome: e.nome != null && e.nome.trim() ? e.nome.trim() : it.nome,
+      quantidade: e.quantidade != null ? e.quantidade : it.quantidade,
+      valor_total: e.valor_total != null ? e.valor_total : it.valor_total,
+    };
+  });
+  const selecionados = itensComEdits.filter((_, i) => indicesIncluidos.includes(i));
   if (selecionados.length === 0) return { error: "Selecione ao menos um item." };
 
   const valorItem = (it: (typeof selecionados)[number]): number =>
@@ -293,6 +306,8 @@ export async function confirmarTransacaoDetalhada(
   // Categoria geral da nota, ancorada no padrão (opcional).
   const catTx = await resolverCategoriaCanonica(supabase, ws, d.categoria);
   const categoriaId = catTx?.id;
+  const pag = await resolverPagamento(supabase, ws, d.cartao, d.conta);
+  const beneficiarioId = d.beneficiario ? await resolverEntidade(ws, d.beneficiario) : undefined;
 
   const res = await criarTransacao({
     tipo: "despesa",
@@ -301,6 +316,9 @@ export async function confirmarTransacaoDetalhada(
     data_transacao: data,
     categoria_id: categoriaId,
     meio_pagamento: d.meio_pagamento,
+    cartao_id: pag.cartaoId,
+    conta_id: pag.contaId,
+    beneficiario_id: beneficiarioId,
     estabelecimento: d.estabelecimento,
     contexto: d.contexto,
     tags: [],

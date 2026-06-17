@@ -84,6 +84,9 @@ export const lancarTransacaoDetalhadaArgs = z.object({
   contexto: z.string().trim().max(120).optional(),
   data_transacao: z.string().optional(),
   meio_pagamento: z.enum(MEIOS_PAGAMENTO).optional(),
+  cartao: z.string().trim().max(60).optional(),
+  conta: z.string().trim().max(60).optional(),
+  beneficiario: z.string().trim().max(80).optional(),
   itens: z
     .array(
       z.object({
@@ -263,6 +266,8 @@ export interface WidgetChecklistItens {
   acaoId: string;
   descricao: string;
   estabelecimento: string | null;
+  pagamento: string | null;
+  beneficiario: string | null;
   itens: { nome: string; quantidade: number | null; valorTotal: number | null }[];
 }
 

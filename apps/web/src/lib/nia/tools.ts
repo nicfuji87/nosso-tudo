@@ -325,7 +325,7 @@ const lancarTransacao: NiaTool = {
 const lancarTransacaoDetalhada: NiaTool = {
   nome: "lancar_transacao_detalhada",
   descricao:
-    "Lança uma compra com os ITENS individuais (de uma nota fiscal/recibo). Use quando o usuário enviar a foto ou PDF de uma nota: leia cada item (nome, quantidade, valor) e proponha todos. NÃO grava direto — gera um checklist para o usuário confirmar item a item.",
+    "Lança uma compra com os ITENS individuais (de uma nota fiscal/recibo). Use quando o usuário enviar a foto ou PDF de uma nota: leia cada item (nome, quantidade, valor) e proponha todos. Capture também o meio de pagamento, o cartão/conta e o beneficiário quando aparecerem (ex.: 'Latam Pass' → cartao 'Latam Pass'). NÃO grava direto — gera um checklist para o usuário confirmar item a item.",
   nivel: "confirmar",
   inputSchema: {
     type: "object",
@@ -352,6 +352,12 @@ const lancarTransacaoDetalhada: NiaTool = {
           "cartao_escola",
           "outro",
         ],
+      },
+      cartao: { type: "string", description: "Apelido do cartão usado, se aparecer (ex.: 'Latam Pass')." },
+      conta: { type: "string", description: "Apelido da conta usada, se aparecer." },
+      beneficiario: {
+        type: "string",
+        description: "Quem se beneficiou da compra (pessoa/grupo), se der pra inferir. Ex.: 'Casa' para mercado.",
       },
       itens: {
         type: "array",
@@ -395,6 +401,8 @@ const lancarTransacaoDetalhada: NiaTool = {
       acaoId,
       descricao: d.descricao,
       estabelecimento: d.estabelecimento ?? null,
+      pagamento: d.cartao ?? d.conta ?? null,
+      beneficiario: d.beneficiario ?? null,
       itens: d.itens.map((i) => ({
         nome: i.nome,
         quantidade: i.quantidade ?? null,

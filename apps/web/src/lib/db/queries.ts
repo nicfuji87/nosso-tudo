@@ -164,6 +164,8 @@ export interface TransacaoFilters {
   categoriaId?: string;
   busca?: string;
   limit?: number;
+  /** "data" (padrão, por data da compra) ou "criacao" (último lançado primeiro). */
+  ordenarPor?: "data" | "criacao";
 }
 
 export async function listTransacoes(
@@ -171,13 +173,14 @@ export async function listTransacoes(
   filters: TransacaoFilters = {},
 ): Promise<TransacaoComRelacoes[]> {
   const supabase = createClient();
-  let query = supabase
-    .from("transacoes")
-    .select(TX_SELECT)
-    .eq("workspace_id", workspaceId)
-    .order("data_transacao", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(filters.limit ?? 100);
+  let query = supabase.from("transacoes").select(TX_SELECT).eq("workspace_id", workspaceId);
+  // "criacao" = ordem de lançamento (o que foi registrado por último vem primeiro).
+  if (filters.ordenarPor === "criacao") {
+    query = query.order("created_at", { ascending: false });
+  } else {
+    query = query.order("data_transacao", { ascending: false }).order("created_at", { ascending: false });
+  }
+  query = query.limit(filters.limit ?? 100);
 
   if (filters.tipo) query = query.eq("tipo", filters.tipo);
   if (filters.categoriaId) query = query.eq("categoria_id", filters.categoriaId);

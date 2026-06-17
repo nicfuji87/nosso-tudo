@@ -172,7 +172,10 @@ export function TransacoesView({
                       <TransacaoItem tx={tx} />
                     </div>
                     <DropdownMenu>
-                      <DropdownMenuTrigger className="rounded-full p-2 text-muted-foreground opacity-0 transition-opacity hover:bg-secondary focus-visible:opacity-100 group-hover:opacity-100">
+                      <DropdownMenuTrigger
+                        aria-label="Ações"
+                        className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary focus-visible:bg-secondary"
+                      >
                         <MoreHorizontal className="size-4" />
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
@@ -195,7 +198,7 @@ export function TransacoesView({
                             {it.descricao}
                           </span>
                           {it.categoriaNome && (
-                            <span className="shrink-0 text-muted-foreground">
+                            <span className="hidden shrink-0 text-muted-foreground sm:inline">
                               {it.categoriaIcone ? `${it.categoriaIcone} ` : ""}
                               {it.categoriaNome}
                             </span>
@@ -203,7 +206,7 @@ export function TransacoesView({
                           <Badge variant={ESSENCIALIDADE_VARIANT[it.essencialidade]} size="sm">
                             {LABEL_ESSENCIALIDADE[it.essencialidade]}
                           </Badge>
-                          <span className="tabular w-20 shrink-0 text-right font-medium">
+                          <span className="shrink-0 whitespace-nowrap text-right font-medium tabular-nums">
                             {it.valorTotal != null ? formatBRL(it.valorTotal) : "—"}
                           </span>
                         </li>
