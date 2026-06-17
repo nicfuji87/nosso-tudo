@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
+  ChevronDown,
   CreditCard,
   Landmark,
   Loader2,
@@ -13,6 +14,7 @@ import {
   User,
   Users,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,12 +52,14 @@ import {
 import {
   COMPORTAMENTOS_CATEGORIA,
   LABEL_COMPORTAMENTO,
+  LABEL_ESSENCIALIDADE,
   LABEL_TIPO_CONTA,
   TIPOS_CONTA_BANCARIA,
   type Cartao,
   type Categoria,
   type ContaBancaria,
   type Entidade,
+  type Essencialidade,
 } from "@/lib/types/db";
 import {
   criarCartao,
@@ -88,27 +92,17 @@ export function CadastrosView({
 
       {/* ---- Categorias ---- */}
       <TabsContent value="categorias" className="space-y-3">
-        <Toolbar count={categorias.length}>
+        <Toolbar
+          label={`${categorias.filter((c) => !c.categoria_pai_id).length} categorias · ${
+            categorias.filter((c) => c.categoria_pai_id).length
+          } subcategorias`}
+        >
           <NovaCategoriaDialog />
         </Toolbar>
         {categorias.length === 0 ? (
           <EmptyState icon={Tag} title="Sem categorias" description="Crie categorias para organizar seus lançamentos." />
         ) : (
-          <Card>
-            <CardContent className="divide-y divide-border/70 px-5 py-1">
-              {categorias.map((c) => (
-                <div key={c.id} className="flex items-center gap-3 py-3">
-                  <CategoryIcon icone={c.icone} cor={c.cor} size="sm" />
-                  <span className="flex-1 truncate text-body-sm font-medium">{c.nome}</span>
-                  {c.comportamento !== "basico" && (
-                    <Badge variant="accent" size="sm">
-                      {LABEL_COMPORTAMENTO[c.comportamento]}
-                    </Badge>
-                  )}
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+          <CategoriasLista categorias={categorias} />
         )}
       </TabsContent>
 
@@ -201,18 +195,119 @@ export function CadastrosView({
 /* ------------------------------------------------------------------ */
 function Toolbar({
   count,
+  label,
   children,
 }: {
-  count: number;
+  count?: number;
+  label?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="flex items-center justify-between">
       <p className="text-body-sm text-muted-foreground">
-        {count} {count === 1 ? "item" : "itens"}
+        {label ?? `${count ?? 0} ${count === 1 ? "item" : "itens"}`}
       </p>
       {children}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Lista de categorias — hierárquica (pai → subcategorias)            */
+/* ------------------------------------------------------------------ */
+const ESSENCIALIDADE_VARIANT: Record<
+  Essencialidade,
+  "success" | "default" | "warning" | "tech"
+> = {
+  essencial: "success",
+  necessario: "default",
+  superfluo: "warning",
+  investimento: "tech",
+};
+
+function CategoriasLista({ categorias }: { categorias: Categoria[] }) {
+  const [abertos, setAbertos] = useState<Set<string>>(new Set());
+
+  const pais = categorias
+    .filter((c) => !c.categoria_pai_id)
+    .sort((a, b) => a.ordem - b.ordem || a.nome.localeCompare(b.nome));
+
+  const filhosPorPai = new Map<string, Categoria[]>();
+  for (const c of categorias) {
+    if (!c.categoria_pai_id) continue;
+    const arr = filhosPorPai.get(c.categoria_pai_id) ?? [];
+    arr.push(c);
+    filhosPorPai.set(c.categoria_pai_id, arr);
+  }
+  for (const arr of filhosPorPai.values()) {
+    arr.sort((a, b) => a.ordem - b.ordem || a.nome.localeCompare(b.nome));
+  }
+
+  function toggle(id: string) {
+    setAbertos((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+
+  return (
+    <Card>
+      <CardContent className="divide-y divide-border/70 px-2 py-1 sm:px-4">
+        {pais.map((p) => {
+          const filhos = filhosPorPai.get(p.id) ?? [];
+          const aberto = abertos.has(p.id);
+          return (
+            <div key={p.id}>
+              <button
+                type="button"
+                onClick={() => filhos.length > 0 && toggle(p.id)}
+                className={cn(
+                  "flex w-full items-center gap-3 py-3 text-left",
+                  filhos.length === 0 && "cursor-default",
+                )}
+              >
+                <CategoryIcon icone={p.icone} cor={p.cor} size="sm" />
+                <span className="flex-1 truncate text-body-sm font-semibold">{p.nome}</span>
+                {p.comportamento !== "basico" && (
+                  <Badge variant="accent" size="sm">
+                    {LABEL_COMPORTAMENTO[p.comportamento]}
+                  </Badge>
+                )}
+                {filhos.length > 0 && (
+                  <>
+                    <span className="text-caption text-muted-foreground">{filhos.length}</span>
+                    <ChevronDown
+                      className={cn(
+                        "size-4 shrink-0 text-muted-foreground transition-transform",
+                        aberto && "rotate-180",
+                      )}
+                    />
+                  </>
+                )}
+              </button>
+              {aberto && filhos.length > 0 && (
+                <ul className="mb-2 ml-6 space-y-1 border-l border-border/70 pl-4">
+                  {filhos.map((f) => (
+                    <li key={f.id} className="flex items-center gap-2 py-1.5">
+                      <span className="flex-1 truncate text-body-sm text-muted-foreground">
+                        {f.nome}
+                      </span>
+                      {f.essencialidade_padrao && (
+                        <Badge variant={ESSENCIALIDADE_VARIANT[f.essencialidade_padrao]} size="sm">
+                          {LABEL_ESSENCIALIDADE[f.essencialidade_padrao]}
+                        </Badge>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
   );
 }
 
