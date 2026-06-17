@@ -147,6 +147,8 @@ export const criarCategoriaArgs = z.object({
   nome: z.string().trim().min(1).max(60),
   comportamento: z.enum(COMPORTAMENTOS_CATEGORIA).default("basico"),
   icone: z.string().trim().max(8).optional(),
+  /** Nome do grupo/categoria-pai, quando for uma subcategoria. */
+  categoria_pai: z.string().trim().max(60).optional(),
 });
 export type CriarCategoriaArgs = z.infer<typeof criarCategoriaArgs>;
 
@@ -227,6 +229,8 @@ export interface WidgetCriarCategoria {
   acaoId: string;
   nome: string;
   comportamento: ComportamentoCategoria;
+  /** Grupo-pai, quando a categoria é uma subcategoria. */
+  pai?: string | null;
 }
 
 export interface WidgetCriarConta {

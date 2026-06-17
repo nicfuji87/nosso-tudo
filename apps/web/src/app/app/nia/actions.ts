@@ -249,7 +249,7 @@ export async function confirmarTransacaoComEdicao(
 export async function confirmarTransacaoDetalhada(
   acaoId: string,
   indicesIncluidos: number[],
-  edicoes?: Record<number, { nome?: string; quantidade?: number; valor_total?: number }>,
+  edicoes?: Record<number, { nome?: string; quantidade?: number; valor_total?: number; categoria_id?: string }>,
 ): Promise<{ error?: string; ok?: boolean; pulados?: number }> {
   const acao = await carregarAcao(acaoId);
   if (!acao) return { error: "Ação não encontrada." };
@@ -272,10 +272,13 @@ export async function confirmarTransacaoDetalhada(
       valor_total: e.valor_total != null ? e.valor_total : it.valor_total,
     };
   });
-  const selecionados = itensComEdits.filter((_, i) => indicesIncluidos.includes(i));
-  if (selecionados.length === 0) return { error: "Selecione ao menos um item." };
+  // Mantém o índice original (para aplicar a categoria editada item a item).
+  const selecionadosIdx = itensComEdits
+    .map((it, i) => ({ it, i }))
+    .filter(({ i }) => indicesIncluidos.includes(i));
+  if (selecionadosIdx.length === 0) return { error: "Selecione ao menos um item." };
 
-  const valorItem = (it: (typeof selecionados)[number]): number =>
+  const valorItem = (it: (typeof itensComEdits)[number]): number =>
     it.valor_total ?? (it.valor_unitario != null && it.quantidade != null ? it.valor_unitario * it.quantidade : 0);
 
   const supabase = createClient();
@@ -294,13 +297,13 @@ export async function confirmarTransacaoDetalhada(
         normalizarTexto(p.nome) === normalizarTexto(nome),
     );
 
-  const inclusos = selecionados.filter((it) => !jaLancado(it.nome, valorItem(it)));
-  const pulados = selecionados.length - inclusos.length;
-  if (inclusos.length === 0) {
+  const inclusosIdx = selecionadosIdx.filter(({ it }) => !jaLancado(it.nome, valorItem(it)));
+  const pulados = selecionadosIdx.length - inclusosIdx.length;
+  if (inclusosIdx.length === 0) {
     return { error: "Esses itens já tinham sido lançados nesta conversa." };
   }
 
-  const valor = Number(inclusos.reduce((s, it) => s + valorItem(it), 0).toFixed(2));
+  const valor = Number(inclusosIdx.reduce((s, { it }) => s + valorItem(it), 0).toFixed(2));
   if (valor <= 0) return { error: "Não consegui os valores dos itens. Tente informar o total." };
 
   // Categoria geral da nota, ancorada no padrão (opcional).
@@ -328,7 +331,7 @@ export async function confirmarTransacaoDetalhada(
   if (res.id) {
     const catTotais = new Map<string, number>();
     let ordem = 0;
-    for (const it of inclusos) {
+    for (const { it, i } of inclusosIdx) {
       ordem++;
       const prod = await resolverProduto(supabase, ws, it.nome, null);
       const cls = await classificarItem(
@@ -340,9 +343,11 @@ export async function confirmarTransacaoDetalhada(
         it.tipo ?? null,
         categoriaId ?? null,
       );
+      // Categoria editada pelo usuário no item (vence a classificação automática).
+      const itemCategoriaId = ed[i]?.categoria_id || cls.categoriaId;
       const vTotal = valorItem(it);
-      if (cls.categoriaId && vTotal > 0) {
-        catTotais.set(cls.categoriaId, (catTotais.get(cls.categoriaId) ?? 0) + vTotal);
+      if (itemCategoriaId && vTotal > 0) {
+        catTotais.set(itemCategoriaId, (catTotais.get(itemCategoriaId) ?? 0) + vTotal);
       }
       await supabase.from("itens_transacao").insert({
         workspace_id: ws,
@@ -353,7 +358,7 @@ export async function confirmarTransacaoDetalhada(
         unidade: it.unidade ?? null,
         valor_unitario: it.valor_unitario ?? null,
         valor_total: it.valor_total ?? null,
-        categoria_id: cls.categoriaId,
+        categoria_id: itemCategoriaId,
         essencialidade: cls.essencialidade ?? undefined,
         tipo_item: cls.tipo,
         ordem_na_nota: ordem,
@@ -378,7 +383,7 @@ export async function confirmarTransacaoDetalhada(
 
   await atualizarAcao(acaoId, {
     status: "executada",
-    resultado: { ok: true, itens: inclusos.length, pulados },
+    resultado: { ok: true, itens: inclusosIdx.length, pulados },
     registroId: res.id,
   });
   return { ok: true, pulados };
@@ -598,10 +603,28 @@ export async function confirmarCategoria(acaoId: string): Promise<{ error?: stri
 
   const parsed = criarCategoriaArgs.safeParse(acao.payload_proposto);
   if (!parsed.success) return { error: "Dados da proposta inválidos." };
-
-  // Ancora no padrão canônico: se já existe categoria equivalente, reusa (não duplica).
+  const d = parsed.data;
   const supabase = createClient();
-  const existente = await resolverCategoriaCanonica(supabase, acao.workspace_id, parsed.data.nome, 0.6);
+
+  // Subcategoria: resolve (ou cria) o grupo-pai e cria a categoria dentro dele.
+  if (d.categoria_pai) {
+    const paiId = await resolverOuCriarCategoria(supabase, acao.workspace_id, d.categoria_pai);
+    const slug = `${normalizarTexto(d.nome).replace(/ /g, "-")}-${Date.now().toString(36)}`;
+    const { error } = await supabase.from("categorias").insert({
+      workspace_id: acao.workspace_id,
+      nome: d.nome,
+      slug,
+      comportamento: d.comportamento,
+      icone: d.icone ?? null,
+      categoria_pai_id: paiId ?? null,
+    });
+    if (error) return { error: "Não foi possível criar a subcategoria." };
+    await atualizarAcao(acaoId, { status: "executada", resultado: { ok: true } });
+    return { ok: true };
+  }
+
+  // Sem pai: ancora no padrão canônico — se já existe equivalente, reusa (não duplica).
+  const existente = await resolverCategoriaCanonica(supabase, acao.workspace_id, d.nome, 0.6);
   if (existente) {
     await atualizarAcao(acaoId, {
       status: "executada",
@@ -611,15 +634,28 @@ export async function confirmarCategoria(acaoId: string): Promise<{ error?: stri
     return { ok: true };
   }
 
-  const res = await criarCategoria({
-    nome: parsed.data.nome,
-    comportamento: parsed.data.comportamento,
-    icone: parsed.data.icone,
-  });
+  const res = await criarCategoria({ nome: d.nome, comportamento: d.comportamento, icone: d.icone });
   if (res.error) return { error: res.error };
 
   await atualizarAcao(acaoId, { status: "executada", resultado: { ok: true } });
   return { ok: true };
+}
+
+/** Resolve uma categoria pelo nome (ancorada no padrão) ou cria como grupo básico. */
+async function resolverOuCriarCategoria(
+  supabase: ReturnType<typeof createClient>,
+  workspaceId: string,
+  nome: string,
+): Promise<string | undefined> {
+  const existente = await resolverCategoriaCanonica(supabase, workspaceId, nome, 0.6);
+  if (existente) return existente.id;
+  const slug = `${normalizarTexto(nome).replace(/ /g, "-")}-${Date.now().toString(36)}`;
+  const { data } = await supabase
+    .from("categorias")
+    .insert({ workspace_id: workspaceId, nome, slug, comportamento: "basico" })
+    .select("id")
+    .maybeSingle();
+  return (data as { id: string } | null)?.id;
 }
 
 /** Cadastra a conta bancária proposta pela Nia (resolve o titular por nome). */

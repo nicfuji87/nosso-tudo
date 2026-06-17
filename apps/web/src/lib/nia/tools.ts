@@ -566,7 +566,7 @@ const lembrarFato: NiaTool = {
 const criarCategoria: NiaTool = {
   nome: "criar_categoria",
   descricao:
-    "Propõe cadastrar uma nova categoria de gastos/receitas. Comportamento: 'basico' (padrão), 'projeto' (viagem/reforma) ou 'compromisso' (compra coletiva). Gera cartão de confirmação.",
+    "Propõe cadastrar uma nova categoria de gastos/receitas. Comportamento: 'basico' (padrão), 'projeto' (viagem/reforma) ou 'compromisso' (compra coletiva). Para criar uma SUBCATEGORIA dentro de um grupo (ex.: o usuário pede 'Atividade física > Acessório'), use nome='Acessório' e categoria_pai='Atividade física' (o grupo-pai é criado automaticamente se não existir). Gera cartão de confirmação.",
   nivel: "confirmar_estrutural",
   inputSchema: {
     type: "object",
@@ -574,6 +574,11 @@ const criarCategoria: NiaTool = {
       nome: { type: "string" },
       comportamento: { type: "string", enum: ["basico", "projeto", "compromisso"] },
       icone: { type: "string", description: "Emoji opcional." },
+      categoria_pai: {
+        type: "string",
+        description:
+          "Nome do grupo/categoria-pai quando for uma subcategoria (ex.: 'Atividade física'). Criado se não existir.",
+      },
     },
     required: ["nome"],
   },
@@ -593,6 +598,7 @@ const criarCategoria: NiaTool = {
       acaoId,
       nome: d.nome,
       comportamento: d.comportamento,
+      pai: d.categoria_pai ?? null,
     };
     return { texto: `Preparei a categoria "${d.nome}" para confirmar.`, widget };
   },

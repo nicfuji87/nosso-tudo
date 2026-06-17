@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TransacaoEditSheet } from "@/components/transacoes/transacao-edit-sheet";
 import { MoneyInput } from "@/components/transacoes/money-input";
+import { CategoriaPicker } from "@/components/transacoes/categoria-picker";
 import { formatBRL, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/sonner";
@@ -45,6 +46,7 @@ import {
   LABEL_MEIO_PAGAMENTO,
   LABEL_TIPO_ENTIDADE,
   LABEL_TIPO_TRANSACAO,
+  type Categoria,
 } from "@/lib/types/db";
 import type {
   NiaWidget,
@@ -530,7 +532,7 @@ export function NiaChat({
               enviar();
             }
           }}
-          rows={2}
+          rows={1}
           placeholder="Fale com a Nia…"
           className="max-h-40 w-full resize-none bg-transparent px-2 py-1.5 text-body outline-none placeholder:text-muted-foreground"
         />
@@ -714,7 +716,11 @@ function WidgetView({
       return (
         <AcaoCard
           titulo={widget.nome}
-          subtitulo={`Categoria ${LABEL_COMPORTAMENTO[widget.comportamento].toLowerCase()}`}
+          subtitulo={
+            widget.pai
+              ? `Subcategoria de ${widget.pai}`
+              : `Categoria ${LABEL_COMPORTAMENTO[widget.comportamento].toLowerCase()}`
+          }
           confirmar={() => confirmarCategoria(widget.acaoId)}
           descartar={() => rejeitarAcao(widget.acaoId)}
           labelFeito="Categoria criada"
@@ -958,9 +964,26 @@ function ChecklistItensCard({
   const [erro, setErro] = useState<string | null>(null);
   const [pulados, setPulados] = useState(0);
   const [edicoes, setEdicoes] = useState<
-    Record<number, { nome?: string; quantidade?: number; valorTotal?: number }>
+    Record<number, { nome?: string; quantidade?: number; valorTotal?: number; categoriaId?: string }>
   >({});
   const [editandoItem, setEditandoItem] = useState<number | null>(null);
+  const [cats, setCats] = useState<Categoria[]>([]);
+
+  useEffect(() => {
+    if (editandoItem === null || cats.length > 0) return;
+    let vivo = true;
+    createClient()
+      .from("categorias")
+      .select("*")
+      .eq("ativa", true)
+      .order("ordem")
+      .then(({ data }) => {
+        if (vivo) setCats((data as Categoria[] | null) ?? []);
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [editandoItem, cats.length]);
 
   const nomeDe = (i: number) => edicoes[i]?.nome ?? w.itens[i]!.nome;
   const qtdDe = (i: number) => edicoes[i]?.quantidade ?? w.itens[i]!.quantidade;
@@ -984,16 +1007,16 @@ function ChecklistItensCard({
     if (!editavel || estado === "salvando") return;
     setIncluidos(() => w.itens.map(() => !todosMarcados));
   }
-  function setEdit(i: number, patch: { nome?: string; quantidade?: number; valorTotal?: number }) {
+  function setEdit(i: number, patch: { nome?: string; quantidade?: number; valorTotal?: number; categoriaId?: string }) {
     setEdicoes((prev) => ({ ...prev, [i]: { ...prev[i], ...patch } }));
   }
   async function confirmar() {
     const indices = incluidos.flatMap((v, i) => (v ? [i] : []));
-    const eds: Record<number, { nome?: string; quantidade?: number; valor_total?: number }> = {};
+    const eds: Record<number, { nome?: string; quantidade?: number; valor_total?: number; categoria_id?: string }> = {};
     for (const k of Object.keys(edicoes)) {
       const i = Number(k);
       const e = edicoes[i]!;
-      eds[i] = { nome: e.nome, quantidade: e.quantidade, valor_total: e.valorTotal };
+      eds[i] = { nome: e.nome, quantidade: e.quantidade, valor_total: e.valorTotal, categoria_id: e.categoriaId };
     }
     setEstado("salvando");
     const r = await confirmarTransacaoDetalhada(w.acaoId, indices, Object.keys(eds).length ? eds : undefined);
@@ -1104,6 +1127,12 @@ function ChecklistItensCard({
                     />
                     <MoneyInput value={v ?? undefined} onChange={(nv) => setEdit(i, { valorTotal: nv ?? undefined })} />
                   </div>
+                  <CategoriaPicker
+                    categorias={cats}
+                    value={edicoes[i]?.categoriaId}
+                    onChange={(cid) => setEdit(i, { categoriaId: cid })}
+                    placeholder="Categoria (opcional)"
+                  />
                   <div className="flex justify-end">
                     <Button size="sm" variant="ghost" onClick={() => setEditandoItem(null)}>
                       Pronto

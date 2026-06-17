@@ -112,11 +112,20 @@ export async function transacoesPorCategoria(categoriaId: string): Promise<Categ
   inicio.setDate(1);
   const mesRef = inicio.toISOString().slice(0, 10);
 
-  const { data: cat } = await supabase.from("categorias").select("nome").eq("id", categoriaId).maybeSingle();
+  // O donut agrupa por categoria-pai, então `categoriaId` costuma ser um pai:
+  // inclui a própria categoria e suas subcategorias (taxonomia de 2 níveis).
+  const { data: cats } = await supabase
+    .from("categorias")
+    .select("id, nome")
+    .or(`id.eq.${categoriaId},categoria_pai_id.eq.${categoriaId}`);
+  const lista = (cats as { id: string; nome: string }[] | null) ?? [];
+  const ids = lista.length > 0 ? lista.map((c) => c.id) : [categoriaId];
+  const nome = lista.find((c) => c.id === categoriaId)?.nome ?? "Categoria";
+
   const { data } = await supabase
     .from("transacoes")
     .select("id, descricao, valor, data_transacao, estabelecimento:estabelecimentos(nome)")
-    .eq("categoria_id", categoriaId)
+    .in("categoria_id", ids)
     .eq("tipo", "despesa")
     .eq("status_revisao", "confirmado")
     .gte("data_transacao", mesRef)
@@ -133,7 +142,7 @@ export async function transacoesPorCategoria(categoriaId: string): Promise<Categ
     };
   });
   const total = transacoes.reduce((s, t) => s + t.valor, 0);
-  return { nome: String((cat as { nome: string } | null)?.nome ?? "Categoria"), total, transacoes };
+  return { nome, total, transacoes };
 }
 
 export interface ContextoTransacao {
