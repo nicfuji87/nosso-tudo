@@ -229,7 +229,7 @@ const consultarAlertas: NiaTool = {
 const lancarTransacao: NiaTool = {
   nome: "lancar_transacao",
   descricao:
-    "Propõe o lançamento de uma despesa ou receita. NÃO grava direto: gera um cartão de confirmação para o usuário aprovar. Use quando o usuário relatar um gasto ou recebimento. Capture também o meio de pagamento e o cartão/conta quando o usuário mencionar (ex.: 'paguei no Latam Pass', 'saiu do Itaú').",
+    "Propõe o lançamento de uma despesa ou receita. NÃO grava direto: gera um cartão de confirmação para o usuário aprovar. Use quando o usuário relatar um gasto ou recebimento. Capture também o meio de pagamento e o cartão/conta quando o usuário mencionar (ex.: 'paguei no Latam Pass', 'saiu do Itaú'). E o BENEFICIÁRIO (quem se beneficiou), inferindo do contexto: 'Henrique cortou o cabelo' → beneficiario 'Henrique'; 'Bruna comprou roupas' → 'Bruna'; mercado/contas da casa → o grupo da família (ex.: 'Casa'). Independe de quem pagou.",
   nivel: "confirmar",
   inputSchema: {
     type: "object",
@@ -272,6 +272,11 @@ const lancarTransacao: NiaTool = {
         type: "string",
         description: "Apelido da conta usada, se o usuário citar (ex.: 'Itaú Bruna').",
       },
+      beneficiario: {
+        type: "string",
+        description:
+          "Quem se beneficiou da compra (nome de pessoa/grupo já cadastrado). Ex.: corte de cabelo do Henrique → 'Henrique'; mercado da casa → 'Casa'. Independe de quem pagou.",
+      },
     },
     required: ["descricao", "valor"],
   },
@@ -308,6 +313,7 @@ const lancarTransacao: NiaTool = {
       estabelecimento: d.estabelecimento ?? null,
       meioPagamento: d.meio_pagamento ?? null,
       pagamento: d.cartao ?? d.conta ?? null,
+      beneficiario: d.beneficiario ?? null,
       data,
       match: match ? { sugestao: match.sugestao, score: match.score } : null,
     };

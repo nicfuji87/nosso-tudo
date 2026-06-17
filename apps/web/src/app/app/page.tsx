@@ -103,7 +103,7 @@ export default async function HomePage() {
         <Card>
           <CardContent className="p-5">
             <p className="text-body-sm font-medium">Gasto por pessoa</p>
-            <p className="mb-4 text-caption text-muted-foreground">Despesas do mês por responsável</p>
+            <p className="mb-4 text-caption text-muted-foreground">Quem se beneficiou — despesas do mês</p>
             <GastoPorPessoa dados={pessoas} />
           </CardContent>
         </Card>

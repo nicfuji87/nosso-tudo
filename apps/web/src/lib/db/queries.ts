@@ -205,7 +205,7 @@ export interface GastoPessoa {
   total: number;
 }
 
-/** Despesas confirmadas do mês agrupadas por responsável (pagador). */
+/** Despesas confirmadas do mês agrupadas por quem se BENEFICIOU (beneficiário). */
 export async function getGastosPorPessoa(workspaceId: string): Promise<GastoPessoa[]> {
   const supabase = createClient();
   const inicio = new Date();
@@ -213,17 +213,17 @@ export async function getGastosPorPessoa(workspaceId: string): Promise<GastoPess
   const mesRef = inicio.toISOString().slice(0, 10);
   const { data } = await supabase
     .from("transacoes")
-    .select("valor, pagador:entidades!transacoes_pagador_id_fkey(id, nome)")
+    .select("valor, beneficiario:entidades!transacoes_beneficiario_id_fkey(id, nome)")
     .eq("workspace_id", workspaceId)
     .eq("tipo", "despesa")
     .eq("status_revisao", "confirmado")
     .gte("data_transacao", mesRef);
   const rows =
-    (data as { valor: number; pagador: { id: string; nome: string } | null }[] | null) ?? [];
+    (data as { valor: number; beneficiario: { id: string; nome: string } | null }[] | null) ?? [];
   const map = new Map<string, { nome: string; total: number }>();
   for (const r of rows) {
-    const key = r.pagador?.id ?? "—";
-    const atual = map.get(key) ?? { nome: r.pagador?.nome ?? "Sem responsável", total: 0 };
+    const key = r.beneficiario?.id ?? "—";
+    const atual = map.get(key) ?? { nome: r.beneficiario?.nome ?? "Não atribuído", total: 0 };
     atual.total += Number(r.valor);
     map.set(key, atual);
   }

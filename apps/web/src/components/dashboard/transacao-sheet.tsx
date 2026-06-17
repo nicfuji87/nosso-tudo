@@ -81,7 +81,7 @@ export function TransacaoSheet({ id, onClose }: { id: string | null; onClose: ()
                 <Linha rotulo={det.cartao ? "Cartão" : "Conta"} valor={(det.cartao ?? det.conta)!} />
               )}
               {det.estabelecimento && <Linha rotulo="Onde" valor={det.estabelecimento} />}
-              {det.pagador && <Linha rotulo="Quem pagou" valor={det.pagador} />}
+              {det.beneficiario && <Linha rotulo="Para quem" valor={det.beneficiario} />}
               {det.contexto && <Linha rotulo="Evento" valor={det.contexto} />}
               <Linha rotulo="Data" valor={formatDate(det.data)} />
               {det.observacoes && <Linha rotulo="Notas" valor={det.observacoes} />}

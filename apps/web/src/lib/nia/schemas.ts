@@ -73,6 +73,7 @@ export const lancarTransacaoArgs = z.object({
   meio_pagamento: z.enum(MEIOS_PAGAMENTO).optional(),
   cartao: z.string().trim().max(60).optional(),
   conta: z.string().trim().max(60).optional(),
+  beneficiario: z.string().trim().max(80).optional(),
 });
 export type LancarTransacaoArgs = z.infer<typeof lancarTransacaoArgs>;
 
@@ -190,6 +191,8 @@ export interface WidgetConfirmarTransacao {
   meioPagamento: MeioPagamento | null;
   /** Conta/cartão informado (apelido), para o usuário conferir onde foi pago. */
   pagamento: string | null;
+  /** Quem se beneficiou da compra (nome da pessoa/grupo). */
+  beneficiario: string | null;
   data: string;
   /** Dúvida de estabelecimento (zona cinza): a Nia achou um parecido. */
   match?: { sugestao: string; score: number } | null;

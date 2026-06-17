@@ -28,7 +28,7 @@ export interface TransacaoDetalhe {
   estabelecimento: string | null;
   conta: string | null;
   cartao: string | null;
-  pagador: string | null;
+  beneficiario: string | null;
   contexto: string | null;
   itens: ItemDetalhe[];
 }
@@ -42,7 +42,7 @@ export async function detalheTransacao(id: string): Promise<TransacaoDetalhe | n
       "id, descricao, valor, tipo, data_transacao, meio_pagamento, status_revisao, observacoes, " +
         "categoria:categorias(nome,icone,cor), estabelecimento:estabelecimentos(nome), " +
         "conta:contas_bancarias(apelido), cartao:cartoes(apelido), " +
-        "pagador:entidades!transacoes_pagador_id_fkey(nome), contexto:contextos(nome)",
+        "beneficiario:entidades!transacoes_beneficiario_id_fkey(nome), contexto:contextos(nome)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -86,7 +86,7 @@ export async function detalheTransacao(id: string): Promise<TransacaoDetalhe | n
     estabelecimento: rel("estabelecimento", "nome"),
     conta: rel("conta", "apelido"),
     cartao: rel("cartao", "apelido"),
-    pagador: rel("pagador", "nome"),
+    beneficiario: rel("beneficiario", "nome"),
     contexto: rel("contexto", "nome"),
     itens,
   };

@@ -183,7 +183,7 @@ export function NovaTransacaoDialog({ trigger }: { trigger: React.ReactNode }) {
             />
           </div>
 
-          {/* Meio + (Cartão | Pagador) */}
+          {/* Meio de pagamento + quem se beneficiou */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Meio de pagamento</Label>
@@ -207,48 +207,51 @@ export function NovaTransacaoDialog({ trigger }: { trigger: React.ReactNode }) {
               />
             </div>
             <div className="space-y-1.5">
-              <Label>{mostraCartao ? "Cartão" : "Quem pagou"}</Label>
-              {mostraCartao ? (
-                <Controller
-                  control={control}
-                  name="cartao_id"
-                  render={({ field }) => (
-                    <Select value={field.value ?? ""} onValueChange={field.onChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecionar" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {cartoes.map((c) => (
-                          <SelectItem key={c.id} value={c.id}>
-                            {c.apelido}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-              ) : (
-                <Controller
-                  control={control}
-                  name="pagador_id"
-                  render={({ field }) => (
-                    <Select value={field.value ?? ""} onValueChange={field.onChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecionar" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {entidades.map((e) => (
-                          <SelectItem key={e.id} value={e.id}>
-                            {e.nome}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-              )}
+              <Label>Quem se beneficiou</Label>
+              <Controller
+                control={control}
+                name="beneficiario_id"
+                render={({ field }) => (
+                  <Select value={field.value ?? ""} onValueChange={field.onChange}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Opcional" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {entidades.map((e) => (
+                        <SelectItem key={e.id} value={e.id}>
+                          {e.nome}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
             </div>
           </div>
+
+          {mostraCartao && (
+            <div className="space-y-1.5">
+              <Label>Cartão</Label>
+              <Controller
+                control={control}
+                name="cartao_id"
+                render={({ field }) => (
+                  <Select value={field.value ?? ""} onValueChange={field.onChange}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecionar cartão" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {cartoes.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.apelido}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            </div>
+          )}
 
           {/* Parcelamento (só despesa) */}
           {tipo === "despesa" && (

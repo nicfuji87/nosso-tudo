@@ -159,6 +159,9 @@ export async function confirmarTransacao(
   }
 
   const pag = await resolverPagamento(supabaseTx, acao.workspace_id, d.cartao, d.conta);
+  const beneficiarioId = d.beneficiario
+    ? await resolverEntidade(acao.workspace_id, d.beneficiario)
+    : undefined;
 
   const res = await criarTransacao({
     tipo: d.tipo,
@@ -169,6 +172,7 @@ export async function confirmarTransacao(
     meio_pagamento: d.meio_pagamento,
     cartao_id: pag.cartaoId,
     conta_id: pag.contaId,
+    beneficiario_id: beneficiarioId,
     estabelecimento,
     contexto: d.contexto,
     tags: [],

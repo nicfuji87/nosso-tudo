@@ -780,7 +780,9 @@ function ConfirmarTransacaoCard({
   const pagamento = [w.meioPagamento ? LABEL_MEIO_PAGAMENTO[w.meioPagamento] : null, w.pagamento]
     .filter(Boolean)
     .join(" · ");
-  const linha2 = [pagamento, w.data ? formatDate(w.data) : null].filter(Boolean).join(" · ");
+  const linha2 = [pagamento, w.beneficiario ? `para ${w.beneficiario}` : null, w.data ? formatDate(w.data) : null]
+    .filter(Boolean)
+    .join(" · ");
 
   async function confirmar() {
     setEstado("salvando");
