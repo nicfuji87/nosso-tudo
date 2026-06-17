@@ -432,6 +432,7 @@ export async function getAlertas(workspaceId: string): Promise<Alerta[]> {
       .select("cartao_id, valor")
       .eq("workspace_id", workspaceId)
       .eq("tipo", "despesa")
+      .eq("status_revisao", "confirmado")
       .gte("data_transacao", mesRef)
       .not("cartao_id", "is", null);
     const uso = new Map<string, number>();

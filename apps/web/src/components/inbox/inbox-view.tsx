@@ -2,14 +2,20 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, X, Loader2, Store, Package, Tag, FileText, Sparkles } from "lucide-react";
+import { Check, X, Loader2, Store, Package, Tag, FileText, Pencil, Repeat, Sparkles } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { MoneyInput } from "@/components/transacoes/money-input";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { toast } from "@/components/ui/sonner";
 import { formatBRL } from "@/lib/format";
-import { resolverSugestao } from "@/app/app/inbox/actions";
+import {
+  ajustarEConfirmarTransacao,
+  confirmarTransacaoRevisao,
+  descartarTransacaoRevisao,
+  resolverSugestao,
+} from "@/app/app/inbox/actions";
 
 export interface InboxItem {
   tipo_item: "sugestao_match" | "transacao_revisao" | "fatura_pendente";
@@ -111,6 +117,80 @@ function SugestaoCard({ item }: { item: InboxItem }) {
   );
 }
 
+function TransacaoRevisaoCard({ item }: { item: InboxItem }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [editando, setEditando] = useState(false);
+  const [valor, setValor] = useState<number>(item.valor != null ? Number(item.valor) : 0);
+  const ehRecorrente = item.origem === "recorrente";
+
+  function run(fn: () => Promise<{ error?: string }>, ok: string) {
+    startTransition(async () => {
+      const res = await fn();
+      if (res.error) {
+        toast.error("Erro", { description: res.error });
+        return;
+      }
+      toast.success(ok);
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card px-4 py-3">
+      <div className="flex items-center gap-3">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-muted-foreground">
+          {ehRecorrente ? <Repeat className="size-4" /> : <Sparkles className="size-4" />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-body-sm font-medium">{item.texto}</p>
+          <p className="text-caption text-muted-foreground">
+            {ehRecorrente ? "Conta fixa" : "Capturado pela IA"}
+            {item.data_referencia ? ` · ${item.data_referencia}` : ""}
+          </p>
+        </div>
+        {!editando && item.valor != null && (
+          <p className="tabular shrink-0 text-body-sm font-medium">{formatBRL(Number(item.valor))}</p>
+        )}
+      </div>
+
+      {editando ? (
+        <div className="mt-3 flex items-end gap-2">
+          <div className="flex-1">
+            <MoneyInput value={valor} onChange={(v) => setValor(v ?? 0)} autoFocus />
+          </div>
+          <Button size="sm" onClick={() => run(() => ajustarEConfirmarTransacao(item.item_id, valor), "Confirmado")} disabled={pending}>
+            {pending ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+            Salvar e confirmar
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setEditando(false)} disabled={pending}>
+            Cancelar
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-3 flex gap-2">
+          <Button size="sm" onClick={() => run(() => confirmarTransacaoRevisao(item.item_id), "Confirmado")} disabled={pending}>
+            {pending ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+            Confirmar
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => setEditando(true)} disabled={pending}>
+            <Pencil className="size-4" /> Editar valor
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => run(() => descartarTransacaoRevisao(item.item_id), "Descartado")}
+            disabled={pending}
+            aria-label="Descartar"
+          >
+            <X className="size-4" />
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function InfoRow({ item, icon: Icon }: { item: InboxItem; icon: typeof Store }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3">
@@ -167,10 +247,16 @@ export function InboxView({ itens }: { itens: InboxItem[] }) {
 
       {novos.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-h4 font-semibold tracking-tight">Novos a confirmar</h2>
+          <h2 className="text-h4 font-semibold tracking-tight">
+            Contas a confirmar
+            <span className="ml-2 text-body-sm font-normal text-muted-foreground">{novos.length}</span>
+          </h2>
+          <p className="text-body-sm text-muted-foreground">
+            Contas fixas e lançamentos capturados pela IA. Só entram no saldo depois de confirmados.
+          </p>
           <div className="space-y-2">
             {novos.map((n) => (
-              <InfoRow key={n.item_id} item={n} icon={Sparkles} />
+              <TransacaoRevisaoCard key={n.item_id} item={n} />
             ))}
           </div>
         </section>
