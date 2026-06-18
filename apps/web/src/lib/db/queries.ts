@@ -29,20 +29,27 @@ export interface GastoCategoria {
   total: number;
 }
 
-export async function getResumoMes(workspaceId: string): Promise<ResumoMes> {
+/** `mesRef` = 1º dia do mês (YYYY-MM-DD); omitido = mês atual. */
+export async function getResumoMes(workspaceId: string, mesRef?: string): Promise<ResumoMes> {
   const supabase = createClient();
-  const { data } = await supabase.rpc("resumo_mes", { p_workspace_id: workspaceId });
+  const { data } = await supabase.rpc("resumo_mes", {
+    p_workspace_id: workspaceId,
+    ...(mesRef ? { p_mes: mesRef } : {}),
+  });
   const row = (data as ResumoMes[] | null)?.[0];
   return (
     row ?? { receitas: 0, despesas: 0, saldo: 0, total_transacoes: 0 }
   );
 }
 
-export async function getGastosPorCategoria(workspaceId: string): Promise<GastoCategoria[]> {
+export async function getGastosPorCategoria(workspaceId: string, mesRef?: string): Promise<GastoCategoria[]> {
   const supabase = createClient();
   // v2: soma pelos itens quando a nota está itemizada; cai na categoria da
   // transação quando não está (sem contagem dupla). Ver migration 0013.
-  const { data } = await supabase.rpc("gastos_por_categoria_v2", { p_workspace_id: workspaceId });
+  const { data } = await supabase.rpc("gastos_por_categoria_v2", {
+    p_workspace_id: workspaceId,
+    ...(mesRef ? { p_mes: mesRef } : {}),
+  });
   return (data as GastoCategoria[] | null) ?? [];
 }
 
@@ -60,6 +67,8 @@ export interface CategoriaComparada {
 export interface Comparativo {
   /** dia do mês usado como corte (compara 1..diaCorte de cada mês) */
   diaCorte: number;
+  /** true = mês corrente (janela parcial até hoje); false = mês fechado */
+  parcial: boolean;
   totalAtual: number;
   totalAnterior: number;
   /** categorias ordenadas por |delta| desc */
@@ -67,22 +76,27 @@ export interface Comparativo {
 }
 
 /**
- * Comparativo "mesmo período": 1..hoje deste mês × 1..mesmo-dia do mês anterior.
- * Compara janelas iguais para a leitura mid-month ser justa (jun não parece
- * "menor" só por estar pela metade). Usa a RPC gastos_por_categoria_periodo (0021).
+ * Comparativo de um mês × o anterior, por categoria. Para o mês corrente compara
+ * "mesmo período" (1..hoje × 1..mesmo-dia do mês passado), para a leitura
+ * mid-month ser justa; para um mês fechado compara o mês inteiro × o anterior
+ * inteiro. `mesRef` = 1º dia do mês (YYYY-MM-DD); omitido = mês atual.
+ * Usa a RPC gastos_por_categoria_periodo (0021).
  */
-export async function getComparativoMes(workspaceId: string): Promise<Comparativo> {
+export async function getComparativoMes(workspaceId: string, mesRef?: string): Promise<Comparativo> {
   const supabase = createClient();
   const hoje = new Date();
-  const diaCorte = hoje.getDate();
+  const ref = mesRef ? new Date(`${mesRef.slice(0, 7)}-01T00:00:00`) : new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+  const parcial = ref.getFullYear() === hoje.getFullYear() && ref.getMonth() === hoje.getMonth();
+  // mês corrente: corta em hoje; mês fechado: usa o mês inteiro.
+  const diaCorte = parcial ? hoje.getDate() : new Date(ref.getFullYear(), ref.getMonth() + 1, 0).getDate();
   const fmt = (d: Date) =>
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-  const inicioAtual = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
-  const fimAtual = new Date(hoje.getFullYear(), hoje.getMonth(), diaCorte + 1); // exclusivo → inclui hoje
-  const inicioAnterior = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
-  let fimAnterior = new Date(hoje.getFullYear(), hoje.getMonth() - 1, diaCorte + 1);
-  if (fimAnterior > inicioAtual) fimAnterior = inicioAtual; // não vaza p/ o mês atual (meses curtos)
+  const inicioAtual = new Date(ref.getFullYear(), ref.getMonth(), 1);
+  const fimAtual = new Date(ref.getFullYear(), ref.getMonth(), diaCorte + 1); // exclusivo → inclui o dia de corte
+  const inicioAnterior = new Date(ref.getFullYear(), ref.getMonth() - 1, 1);
+  let fimAnterior = new Date(ref.getFullYear(), ref.getMonth() - 1, diaCorte + 1);
+  if (fimAnterior > inicioAtual) fimAnterior = inicioAtual; // não vaza p/ o mês de referência (meses curtos)
 
   type Row = { categoria_id: string; categoria_nome: string; cor: string | null; icone: string | null; total: number };
   const [atualRes, antRes] = await Promise.all([
@@ -139,6 +153,7 @@ export async function getComparativoMes(workspaceId: string): Promise<Comparativ
 
   return {
     diaCorte,
+    parcial,
     totalAtual: atual.reduce((s, r) => s + Number(r.total), 0),
     totalAnterior: anterior.reduce((s, r) => s + Number(r.total), 0),
     categorias,
@@ -152,9 +167,13 @@ export interface GastoEssencialidade {
 
 export async function getGastosPorEssencialidade(
   workspaceId: string,
+  mesRef?: string,
 ): Promise<GastoEssencialidade[]> {
   const supabase = createClient();
-  const { data } = await supabase.rpc("gastos_por_essencialidade", { p_workspace_id: workspaceId });
+  const { data } = await supabase.rpc("gastos_por_essencialidade", {
+    p_workspace_id: workspaceId,
+    ...(mesRef ? { p_mes: mesRef } : {}),
+  });
   return ((data as { essencialidade: Essencialidade; total: number }[] | null) ?? []).map((r) => ({
     essencialidade: r.essencialidade,
     total: Number(r.total),

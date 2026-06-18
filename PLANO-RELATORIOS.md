@@ -165,8 +165,10 @@ descobertas em profundidade + exploração livre com esses filtros.
    intervalo de datas) + `getComparativoMes()` + `ComparativoCard` no Início e em
    Relatórios. Compara 1..hoje × 1..mesmo-dia do mês anterior (leitura mid-month justa).
    _É a base do filtro de período (Fase 0.1)._
-3. **Filtro de período/pessoa/categoria** — `PeriodoFilter` (client, estado em URL)
-   reaproveitando a RPC por intervalo. Falta só a UI + propagar para as outras RPCs.
+3. ✅ **Filtro de mês em Relatórios** — `PeriodoFilter` (client, estado em URL
+   `?mes=YYYY-MM`) + `mesRef` propagado para `resumo_mes`, `gastos_por_categoria_v2`,
+   `gastos_por_essencialidade` e o comparativo (mês fechado × anterior). _(falta:
+   filtro por pessoa/categoria e ranges multi-mês "últimos 3 meses")._
 4. **Previsão de Sufoco** — RPC `previsao_mes` (receita prevista − gastos − contas
    futuras − fatura aberta) → semáforo no herói do Início.
 5. Plugar `getDescobertas()` no **`nia-alertas-cron`** para virarem mensagem proativa da Nia.

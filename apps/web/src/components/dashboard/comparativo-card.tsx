@@ -33,7 +33,7 @@ function Variacao({ c }: { c: CategoriaComparada }) {
  * mid-month ser justa. Mostra os maiores movimentos por categoria.
  */
 export function ComparativoCard({ comparativo }: { comparativo: Comparativo }) {
-  const { diaCorte, totalAtual, totalAnterior, categorias } = comparativo;
+  const { diaCorte, parcial, totalAtual, totalAnterior, categorias } = comparativo;
   // Sem base de comparação ainda (primeiro mês com dados) → não mostra.
   if (totalAnterior <= 0) return null;
 
@@ -44,8 +44,12 @@ export function ComparativoCard({ comparativo }: { comparativo: Comparativo }) {
   return (
     <section className="space-y-3">
       <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-h4 font-semibold tracking-tight">Este mês × anterior</h2>
-        <span className="text-caption text-muted-foreground">mesmo período · até dia {diaCorte}</span>
+        <h2 className="text-h4 font-semibold tracking-tight">
+          {parcial ? "Este mês × anterior" : "Mês × anterior"}
+        </h2>
+        <span className="text-caption text-muted-foreground">
+          {parcial ? `mesmo período · até dia ${diaCorte}` : "mês fechado"}
+        </span>
       </div>
 
       <Card>
@@ -53,11 +57,15 @@ export function ComparativoCard({ comparativo }: { comparativo: Comparativo }) {
           {/* Resumo de despesas no período comparável */}
           <div className="flex items-end justify-between gap-3">
             <div>
-              <p className="text-caption text-muted-foreground">Despesas até agora</p>
+              <p className="text-caption text-muted-foreground">
+                {parcial ? "Despesas até agora" : "Despesas no mês"}
+              </p>
               <p className="text-h4 font-semibold tabular-nums">{formatBRL(totalAtual)}</p>
             </div>
             <div className="text-right">
-              <p className="text-caption text-muted-foreground">No mês passado, até o dia {diaCorte}</p>
+              <p className="text-caption text-muted-foreground">
+                {parcial ? `No mês passado, até o dia ${diaCorte}` : "No mês anterior"}
+              </p>
               <p className="flex items-center justify-end gap-1.5 text-body-sm">
                 <span className="tabular-nums text-muted-foreground">{formatBRL(totalAnterior)}</span>
                 <span className="tabular-nums font-medium" style={{ color: tom(deltaTotal) }}>
