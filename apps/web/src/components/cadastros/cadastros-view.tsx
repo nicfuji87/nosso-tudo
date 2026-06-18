@@ -1148,6 +1148,7 @@ function RecorrenciasSection({
                     {LABEL_FREQUENCIA[r.frequencia]} · {formatBRL(r.valor_previsto)}
                     {catNome(r.categoria_id) ? ` · ${catNome(r.categoria_id)}` : ""}
                     {r.ativa && r.proxima_geracao ? ` · próx. ${formatDate(r.proxima_geracao)}` : ""}
+                    {r.data_fim ? ` · até ${formatDate(r.data_fim)}` : " · sem término"}
                   </p>
                 </div>
                 {r.tipo === "receita" && (
@@ -1244,11 +1245,15 @@ function RecorrenciaDialog({
       meio_pagamento: recorrencia?.meio_pagamento ?? undefined,
       cartao_id: recorrencia?.cartao_id ?? undefined,
       conta_id: recorrencia?.conta_id ?? undefined,
+      retroativo: false,
     });
   }, [open, recorrencia, form]);
 
   const meio = form.watch("meio_pagamento");
   const mostraCartao = meio === "cartao_credito" || meio === "cartao_debito";
+  const dataInicio = form.watch("data_inicio");
+  // Só faz sentido oferecer "lançar passadas" ao criar algo que começou no passado.
+  const inicioNoPassado = !edit && !!dataInicio && dataInicio < new Date().toISOString().slice(0, 10);
 
   async function onSubmit(v: RecorrenciaInput) {
     // Mantém só o vínculo coerente com o meio (cartão XOR conta).
@@ -1413,6 +1418,28 @@ function RecorrenciaDialog({
               )}
             </div>
           </div>
+          {inicioNoPassado && (
+            <Controller
+              control={form.control}
+              name="retroativo"
+              render={({ field }) => (
+                <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-secondary/40 p-3">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="rec-retro">Lançar ocorrências passadas</Label>
+                    <p className="text-caption text-muted-foreground">
+                      Cria também os lançamentos desde a data de início. Desligado, a conta fixa
+                      vale só daqui pra frente.
+                    </p>
+                  </div>
+                  <Switch
+                    id="rec-retro"
+                    checked={!!field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </div>
+              )}
+            />
+          )}
           <SubmitRow submitting={form.formState.isSubmitting} onCancel={() => onOpenChange(false)} />
         </form>
       </DialogContent>

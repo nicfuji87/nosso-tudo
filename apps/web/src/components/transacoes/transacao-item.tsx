@@ -1,3 +1,4 @@
+import { Repeat } from "lucide-react";
 import { CategoryIcon } from "@/components/patterns/category-icon";
 import { Badge } from "@/components/ui/badge";
 import { formatBRL, formatDate } from "@/lib/format";
@@ -7,6 +8,7 @@ import type { TransacaoComRelacoes } from "@/lib/types/db";
 export function TransacaoItem({ tx }: { tx: TransacaoComRelacoes }) {
   const isCredito = tx.tipo === "receita" || tx.tipo === "investimento_resgate";
   const pendente = tx.status_revisao !== "confirmado";
+  const ehFixa = tx.origem === "recorrente";
   const subtitle =
     [tx.estabelecimento?.nome, tx.categoria?.nome].filter(Boolean).join(" · ") || "Sem categoria";
 
@@ -15,6 +17,12 @@ export function TransacaoItem({ tx }: { tx: TransacaoComRelacoes }) {
       <CategoryIcon icone={tx.categoria?.icone} cor={tx.categoria?.cor} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
+          {ehFixa && (
+            <Repeat
+              className="size-3.5 shrink-0 text-muted-foreground"
+              aria-label="Conta fixa"
+            />
+          )}
           <p className="truncate text-body-sm font-medium">{tx.descricao}</p>
           {pendente && (
             <Badge variant="warning" size="sm">

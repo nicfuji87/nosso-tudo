@@ -15,6 +15,7 @@ import {
   criarCategoriaArgs,
   criarCompromissoArgs,
   criarContaArgs,
+  criarEventoArgs,
   criarMetaArgs,
   criarOrcamentoArgs,
   criarPessoaArgs,
@@ -22,13 +23,16 @@ import {
   lancarTransacaoArgs,
   lancarTransacaoDetalhadaArgs,
   lembrarFatoArgs,
+  marcarEventoArgs,
 } from "@/lib/nia/schemas";
 import { atualizarAcao, votar } from "@/lib/nia/store";
+import { avancarDataRecorrencia, primeiraGeracao } from "@/lib/recorrencias";
 import { normalizarTexto } from "@/lib/normalize";
 import {
   classificarItem,
   registrarCompraProduto,
   resolverCategoriaCanonica,
+  resolverContexto,
   resolverProduto,
 } from "@/lib/classificacao";
 
@@ -389,41 +393,12 @@ export async function confirmarTransacaoDetalhada(
   return { ok: true, pulados };
 }
 
-/** Avança uma data ISO conforme a frequência da recorrência. */
-function avancarDataRecorrencia(iso: string, freq: string): string {
-  const [y, m, dd] = iso.split("-").map(Number);
-  const base = new Date(Date.UTC(y || 1970, (m || 1) - 1, dd || 1));
-  switch (freq) {
-    case "diaria":
-      base.setUTCDate(base.getUTCDate() + 1);
-      break;
-    case "semanal":
-      base.setUTCDate(base.getUTCDate() + 7);
-      break;
-    case "quinzenal":
-      base.setUTCDate(base.getUTCDate() + 15);
-      break;
-    case "bimestral":
-      base.setUTCMonth(base.getUTCMonth() + 2);
-      break;
-    case "trimestral":
-      base.setUTCMonth(base.getUTCMonth() + 3);
-      break;
-    case "semestral":
-      base.setUTCMonth(base.getUTCMonth() + 6);
-      break;
-    case "anual":
-      base.setUTCFullYear(base.getUTCFullYear() + 1);
-      break;
-    default:
-      base.setUTCMonth(base.getUTCMonth() + 1); // mensal
-  }
-  return base.toISOString().slice(0, 10);
-}
-
 /**
- * Cria a conta fixa (recorrência) proposta pela Nia e já materializa as
- * ocorrências vencidas (ex.: "paguei hoje") — o cron diário cuida das futuras.
+ * Cria a conta fixa (recorrência) proposta pela Nia. Por padrão NÃO recria o
+ * passado: a geração começa na próxima data >= hoje (mantendo o ciclo ancorado
+ * em data_inicio); só materializa "hoje" se a 1ª ocorrência for hoje ("paguei
+ * hoje"). Quando o usuário pede explicitamente o retroativo, materializa todo o
+ * histórico desde data_inicio. O cron diário cuida das futuras.
  */
 export async function confirmarRecorrencia(acaoId: string): Promise<{ error?: string; ok?: boolean }> {
   const acao = await carregarAcao(acaoId);
@@ -440,6 +415,8 @@ export async function confirmarRecorrencia(acaoId: string): Promise<{ error?: st
   const hoje = new Date().toISOString().slice(0, 10);
   const dataInicio = d.data_inicio ?? hoje;
   const cat = await resolverCategoriaCanonica(supabase, ws, d.categoria);
+  // Onde a geração começa: retroativo → desde o início; senão, 1ª data >= hoje.
+  const inicioGeracao = primeiraGeracao(d.frequencia, dataInicio, hoje, d.retroativo ?? false);
 
   const { data: rec, error } = await supabase
     .from("recorrencias")
@@ -453,7 +430,7 @@ export async function confirmarRecorrencia(acaoId: string): Promise<{ error?: st
       data_fim: d.data_fim ?? null,
       categoria_id: cat?.id ?? null,
       dia_vencimento: Number(dataInicio.slice(8, 10)) || 1,
-      proxima_geracao: dataInicio,
+      proxima_geracao: inicioGeracao,
       ativa: true,
     })
     .select("id")
@@ -461,8 +438,9 @@ export async function confirmarRecorrencia(acaoId: string): Promise<{ error?: st
   if (error || !rec) return { error: "Não foi possível criar a conta fixa." };
   const recId = (rec as { id: string }).id;
 
-  // Materializa as ocorrências já vencidas (idempotente); o cron segue com as futuras.
-  let v = dataInicio;
+  // Materializa só o que já venceu a partir do início da geração (idempotente);
+  // o cron segue com as futuras. Sem retroativo, isso é no máximo a ocorrência de hoje.
+  let v = inicioGeracao;
   let guard = 0;
   while (v <= hoje && (!d.data_fim || v <= d.data_fim) && guard < 60) {
     const { data: existe } = await supabase
@@ -656,6 +634,62 @@ async function resolverOuCriarCategoria(
     .select("id")
     .maybeSingle();
   return (data as { id: string } | null)?.id;
+}
+
+/** Cria o evento/contexto proposto pela Nia (idempotente: reusa se já existir). */
+export async function confirmarEvento(acaoId: string): Promise<{ error?: string; ok?: boolean }> {
+  const acao = await carregarAcao(acaoId);
+  if (!acao) return { error: "Ação não encontrada." };
+  if (acao.status !== "proposta") return { error: "Essa ação já foi processada." };
+  if (acao.ferramenta !== "criar_evento") return { error: "Ação não suportada." };
+
+  const parsed = criarEventoArgs.safeParse(acao.payload_proposto);
+  if (!parsed.success) return { error: "Dados da proposta inválidos." };
+  const d = parsed.data;
+
+  const supabase = createClient();
+  const contextoId = await resolverContexto(
+    supabase,
+    acao.workspace_id,
+    d.nome,
+    d.tipo ?? null,
+    d.data_referencia ?? null,
+  );
+  if (!contextoId) return { error: "Não foi possível criar o evento." };
+
+  await atualizarAcao(acaoId, { status: "executada", resultado: { ok: true }, registroId: contextoId });
+  return { ok: true };
+}
+
+/** Liga lançamentos já existentes (na janela do payload) a um evento, sem mudar categorias. */
+export async function confirmarMarcarEvento(acaoId: string): Promise<{ error?: string; ok?: boolean }> {
+  const acao = await carregarAcao(acaoId);
+  if (!acao) return { error: "Ação não encontrada." };
+  if (acao.status !== "proposta") return { error: "Essa ação já foi processada." };
+  if (acao.ferramenta !== "marcar_evento") return { error: "Ação não suportada." };
+
+  const parsed = marcarEventoArgs.safeParse(acao.payload_proposto);
+  if (!parsed.success) return { error: "Dados da proposta inválidos." };
+  const d = parsed.data;
+
+  const supabase = createClient();
+  const contextoId = await resolverContexto(supabase, acao.workspace_id, d.evento);
+  if (!contextoId) return { error: "Não foi possível criar o evento." };
+
+  // Re-resolve a mesma janela mostrada na proposta e marca tudo com o evento.
+  let query = supabase
+    .from("transacoes")
+    .update({ contexto_id: contextoId })
+    .eq("workspace_id", acao.workspace_id)
+    .eq("tipo", "despesa")
+    .gte("data_transacao", d.data_inicio)
+    .lte("data_transacao", d.data_fim);
+  if (d.busca) query = query.ilike("descricao", `%${d.busca}%`);
+  const { error } = await query;
+  if (error) return { error: "Não foi possível marcar os lançamentos." };
+
+  await atualizarAcao(acaoId, { status: "executada", resultado: { ok: true }, registroId: contextoId });
+  return { ok: true };
 }
 
 /** Cadastra a conta bancária proposta pela Nia (resolve o titular por nome). */

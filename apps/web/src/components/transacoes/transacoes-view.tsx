@@ -67,6 +67,8 @@ export function TransacoesView({
   const [busca, setBusca] = useState("");
   const [tipo, setTipo] = useState("todos");
   const [categoria, setCategoria] = useState("todas");
+  // "avulsos" (padrão) esconde as contas fixas geradas para não poluir a lista.
+  const [origem, setOrigem] = useState("avulsos");
   const [excluindo, setExcluindo] = useState<TransacaoComRelacoes | null>(null);
   const [editando, setEditando] = useState<string | null>(null);
   const [editandoItens, setEditandoItens] = useState<string | null>(null);
@@ -75,12 +77,20 @@ export function TransacoesView({
 
   const filtradas = useMemo(() => {
     return transacoes.filter((t) => {
+      const ehFixa = t.origem === "recorrente";
+      if (origem === "avulsos" && ehFixa) return false;
+      if (origem === "fixas" && !ehFixa) return false;
       if (tipo !== "todos" && t.tipo !== tipo) return false;
       if (categoria !== "todas" && t.categoria_id !== categoria) return false;
       if (busca && !t.descricao.toLowerCase().includes(busca.toLowerCase())) return false;
       return true;
     });
-  }, [transacoes, tipo, categoria, busca]);
+  }, [transacoes, origem, tipo, categoria, busca]);
+
+  const totalFixas = useMemo(
+    () => transacoes.filter((t) => t.origem === "recorrente").length,
+    [transacoes],
+  );
 
   async function confirmarExclusao() {
     if (!excluindo) return;
@@ -133,6 +143,18 @@ export function TransacoesView({
             ))}
           </SelectContent>
         </Select>
+        {totalFixas > 0 && (
+          <Select value={origem} onValueChange={setOrigem}>
+            <SelectTrigger className="sm:w-44">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="avulsos">Avulsos</SelectItem>
+              <SelectItem value="fixas">Contas fixas</SelectItem>
+              <SelectItem value="todos">Todos</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
       {/* Lista */}

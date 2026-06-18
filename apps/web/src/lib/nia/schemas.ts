@@ -119,6 +119,8 @@ export const criarRecorrenciaArgs = z.object({
   data_inicio: z.string().optional(),
   data_fim: z.string().optional(),
   categoria: z.string().trim().max(120).optional(),
+  /** Só quando o usuário pedir para lançar também as ocorrências passadas. */
+  retroativo: z.boolean().optional(),
 });
 export type CriarRecorrenciaArgs = z.infer<typeof criarRecorrenciaArgs>;
 
@@ -151,6 +153,32 @@ export const criarCategoriaArgs = z.object({
   categoria_pai: z.string().trim().max(60).optional(),
 });
 export type CriarCategoriaArgs = z.infer<typeof criarCategoriaArgs>;
+
+export const TIPOS_EVENTO = [
+  "viagem",
+  "passeio",
+  "festa",
+  "reforma",
+  "trabalho",
+  "compra_mes",
+  "outro",
+] as const;
+
+export const criarEventoArgs = z.object({
+  nome: z.string().trim().min(1).max(120),
+  tipo: z.enum(TIPOS_EVENTO).optional(),
+  data_referencia: z.string().optional(),
+  descricao: z.string().trim().max(300).optional(),
+});
+export type CriarEventoArgs = z.infer<typeof criarEventoArgs>;
+
+export const marcarEventoArgs = z.object({
+  evento: z.string().trim().min(1).max(120),
+  data_inicio: z.string(),
+  data_fim: z.string(),
+  busca: z.string().trim().max(100).optional(),
+});
+export type MarcarEventoArgs = z.infer<typeof marcarEventoArgs>;
 
 export const criarContaArgs = z.object({
   apelido: z.string().trim().min(1).max(60),
@@ -293,6 +321,23 @@ export interface WidgetDocumento {
   ehImagem: boolean;
 }
 
+export interface WidgetCriarEvento {
+  tipo: "criar_evento";
+  acaoId: string;
+  nome: string;
+  tipoLabel: string | null;
+  dataReferencia: string | null;
+}
+
+export interface WidgetMarcarEvento {
+  tipo: "marcar_evento";
+  acaoId: string;
+  evento: string;
+  quantidade: number;
+  total: number;
+  amostra: string[];
+}
+
 export type NiaWidget =
   | WidgetResumoPeriodo
   | WidgetConfirmarTransacao
@@ -306,6 +351,8 @@ export type NiaWidget =
   | WidgetCriarOrcamento
   | WidgetChecklistItens
   | WidgetCriarRecorrencia
+  | WidgetCriarEvento
+  | WidgetMarcarEvento
   | WidgetDocumento;
 
 /* ------------------------------------------------------------------ */

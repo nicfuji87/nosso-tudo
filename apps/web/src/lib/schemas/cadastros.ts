@@ -86,5 +86,7 @@ export const recorrenciaSchema = z.object({
   meio_pagamento: z.enum(MEIOS_PAGAMENTO).optional(),
   cartao_id: uuidOpt,
   conta_id: uuidOpt,
+  /** Lançar também as ocorrências passadas (desde a data de início). Padrão: só daqui pra frente. */
+  retroativo: z.boolean().optional(),
 });
 export type RecorrenciaInput = z.infer<typeof recorrenciaSchema>;

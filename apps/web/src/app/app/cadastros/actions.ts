@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { resolveWorkspaceId } from "@/lib/auth";
 import { normalizarTexto } from "@/lib/normalize";
+import { primeiraGeracao } from "@/lib/recorrencias";
 import {
   cartaoSchema,
   categoriaSchema,
@@ -313,8 +314,14 @@ export async function criarRecorrencia(input: RecorrenciaInput): Promise<{ error
     cartao_id: d.cartao_id ?? null,
     conta_id: d.conta_id ?? null,
     dia_vencimento: diaDe(d.data_inicio),
-    // 1ª geração na data de início; o job avança a partir daí (mantém o dia do vencimento).
-    proxima_geracao: d.data_inicio,
+    // Por padrão não recria o passado: 1ª geração na próxima data >= hoje (mantém o
+    // dia do vencimento). Só desce até a data de início quando o usuário pede retroativo.
+    proxima_geracao: primeiraGeracao(
+      d.frequencia,
+      d.data_inicio,
+      new Date().toISOString().slice(0, 10),
+      d.retroativo ?? false,
+    ),
     ativa: true,
   });
   if (error) return { error: "Não foi possível salvar a conta fixa." };
@@ -347,7 +354,8 @@ export async function atualizarRecorrencia(
       cartao_id: d.cartao_id ?? null,
       conta_id: d.conta_id ?? null,
       dia_vencimento: diaDe(d.data_inicio),
-      proxima_geracao: d.data_inicio,
+      // NÃO mexer em proxima_geracao aqui: reeditar não pode ressuscitar o backfill
+      // nem recriar ocorrências já apagadas. Editar valor/categoria vale só pras próximas.
     })
     .eq("id", id)
     .eq("workspace_id", ctx.workspaceId);

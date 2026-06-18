@@ -30,7 +30,9 @@ import {
   confirmarCategoria,
   confirmarCompromisso,
   confirmarConta,
+  confirmarEvento,
   confirmarFato,
+  confirmarMarcarEvento,
   confirmarMeta,
   confirmarOrcamento,
   confirmarPessoa,
@@ -530,13 +532,14 @@ export function NiaChat({
             ajustarAltura();
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            // Enter quebra linha; envia só no Shift+Enter (PC) ou no botão (celular).
+            if (e.key === "Enter" && e.shiftKey) {
               e.preventDefault();
               enviar();
             }
           }}
           rows={1}
-          placeholder="Fale com a Nia…"
+          placeholder="Fale com a Nia…  (Shift+Enter envia)"
           className="max-h-40 w-full resize-none bg-transparent px-2 py-1.5 text-body outline-none placeholder:text-muted-foreground"
         />
         <div className="mt-1 flex items-center justify-between">
@@ -741,6 +744,33 @@ function WidgetView({
           confirmar={() => confirmarRecorrencia(widget.acaoId)}
           descartar={() => rejeitarAcao(widget.acaoId)}
           labelFeito="Conta fixa criada"
+          estadoInicial={estadoInicial}
+        />
+      );
+    case "criar_evento":
+      return (
+        <AcaoCard
+          titulo={widget.nome}
+          subtitulo={`Evento${widget.tipoLabel ? ` · ${widget.tipoLabel}` : ""}${
+            widget.dataReferencia ? ` · ${formatDate(widget.dataReferencia)}` : ""
+          }`}
+          confirmar={() => confirmarEvento(widget.acaoId)}
+          descartar={() => rejeitarAcao(widget.acaoId)}
+          labelFeito="Evento criado"
+          estadoInicial={estadoInicial}
+        />
+      );
+    case "marcar_evento":
+      return (
+        <AcaoCard
+          titulo={`Marcar como “${widget.evento}”`}
+          subtitulo={`${widget.quantidade} lançamento${widget.quantidade === 1 ? "" : "s"}${
+            widget.amostra.length ? ` · ${widget.amostra.join(", ")}` : ""
+          }`}
+          valor={widget.total}
+          confirmar={() => confirmarMarcarEvento(widget.acaoId)}
+          descartar={() => rejeitarAcao(widget.acaoId)}
+          labelFeito="Lançamentos marcados"
           estadoInicial={estadoInicial}
         />
       );
