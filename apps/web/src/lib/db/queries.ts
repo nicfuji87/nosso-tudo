@@ -295,6 +295,36 @@ export async function getGastosPorContexto(workspaceId: string): Promise<GastoCo
   }));
 }
 
+export interface EventoCadastro {
+  id: string;
+  nome: string;
+  tipo: string | null;
+  dataReferencia: string | null;
+}
+
+/**
+ * Lista TODOS os eventos/contextos cadastrados (mesmo os sem gastos ainda) —
+ * para a Nia conferir se um evento já existe antes de propor criar outro.
+ * Diferente de getGastosPorContexto, que só traz eventos com despesa.
+ */
+export async function listarEventos(workspaceId: string): Promise<EventoCadastro[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("contextos")
+    .select("id, nome, tipo, data_referencia")
+    .eq("workspace_id", workspaceId)
+    .eq("arquivado", false)
+    .order("created_at", { ascending: false });
+  return ((data as
+    | { id: string; nome: string; tipo: string | null; data_referencia: string | null }[]
+    | null) ?? []).map((c) => ({
+    id: c.id,
+    nome: c.nome,
+    tipo: c.tipo,
+    dataReferencia: c.data_referencia,
+  }));
+}
+
 export interface ItemDeTransacao {
   id: string;
   transacaoId: string;

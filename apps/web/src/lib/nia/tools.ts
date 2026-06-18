@@ -19,6 +19,7 @@ import {
   listMetas,
   listOrcamentos,
   listTransacoes,
+  listarEventos,
 } from "@/lib/db/queries";
 import { formatBRL, formatDate } from "@/lib/format";
 import { FREQUENCIAS_RECORRENCIA, LABEL_ESSENCIALIDADE, LABEL_FREQUENCIA } from "@/lib/types/db";
@@ -622,10 +623,29 @@ const LABEL_TIPO_EVENTO: Record<string, string> = {
   outro: "Evento",
 };
 
+const consultarEventos: NiaTool = {
+  nome: "consultar_eventos",
+  descricao:
+    "Lista os EVENTOS/CONTEXTOS já cadastrados (viagens, passeios, festas, reformas, compra do mês), inclusive os que ainda não têm gasto. SEMPRE consulte antes de propor criar_evento ou marcar_evento: se já existir um evento com o mesmo sentido, reaproveite-o (não crie outro igual). Use também para 'quais eventos eu tenho?'.",
+  nivel: "auto",
+  inputSchema: { type: "object", properties: {} },
+  async executar(_args, ctx) {
+    const eventos = await listarEventos(ctx.workspaceId);
+    if (eventos.length === 0) return { texto: "Nenhum evento cadastrado ainda." };
+    const linhas = eventos.map(
+      (e) =>
+        `${e.nome}${e.tipo ? ` (${LABEL_TIPO_EVENTO[e.tipo] ?? e.tipo})` : ""}${
+          e.dataReferencia ? ` — ${formatDate(e.dataReferencia)}` : ""
+        }`,
+    );
+    return { texto: `${eventos.length} evento(s):\n${linhas.join("\n")}` };
+  },
+};
+
 const criarEvento: NiaTool = {
   nome: "criar_evento",
   descricao:
-    "Propõe criar um EVENTO/CONTEXTO da vida da família (o 'por quê' de um conjunto de gastos): uma viagem, um passeio, uma festa, uma reforma, a compra do mês. NÃO é categoria — categoria é o 'o quê' (Transporte, Alimentação, Hospedagem). Use quando o usuário pedir 'cria um evento', 'cria a viagem da Argentina', 'quero agrupar os gastos do aniversário'. Depois, os gastos da viagem continuam em suas categorias naturais (uber→Transporte, hotel→Hospedagem) e ficam ligados a este evento. Gera cartão de confirmação.",
+    "Propõe criar um EVENTO/CONTEXTO da vida da família (o 'por quê' de um conjunto de gastos): uma viagem, um passeio, uma festa, uma reforma, a compra do mês. NÃO é categoria — categoria é o 'o quê' (Transporte, Alimentação, Hospedagem). Use quando o usuário pedir 'cria um evento', 'cria a viagem da Argentina', 'quero agrupar os gastos do aniversário'. ANTES de criar, confira com consultar_eventos se já existe um evento equivalente — se existir, reaproveite (não duplique). Depois, os gastos da viagem continuam em suas categorias naturais (uber→Transporte, hotel→Hospedagem) e ficam ligados a este evento. Gera cartão de confirmação.",
   nivel: "confirmar",
   inputSchema: {
     type: "object",
@@ -643,6 +663,22 @@ const criarEvento: NiaTool = {
   },
   async executar(args, ctx) {
     const d = valida(criarEventoArgs, args);
+
+    // Dedupe: confere os eventos existentes para avisar (e não duplicar) — o
+    // salvar já reaproveita por nome idêntico, aqui é só para o card informar.
+    const existentes = await listarEventos(ctx.workspaceId);
+    const alvo = normalizarTexto(d.nome);
+    const jaExiste = existentes.some((e) => normalizarTexto(e.nome) === alvo);
+    const similares = jaExiste
+      ? []
+      : existentes
+          .filter((e) => {
+            const n = normalizarTexto(e.nome);
+            return n.includes(alvo) || alvo.includes(n);
+          })
+          .map((e) => e.nome)
+          .slice(0, 3);
+
     const acaoId = await registrarAcao({
       workspaceId: ctx.workspaceId,
       profileId: ctx.profileId,
@@ -658,15 +694,20 @@ const criarEvento: NiaTool = {
       nome: d.nome,
       tipoLabel: d.tipo ? (LABEL_TIPO_EVENTO[d.tipo] ?? null) : null,
       dataReferencia: d.data_referencia ?? null,
+      jaExiste,
+      similares: similares.length ? similares : undefined,
     };
-    return { texto: `Preparei o evento "${d.nome}" para o usuário confirmar.`, widget };
+    const texto = jaExiste
+      ? `O evento "${d.nome}" já existe — ao confirmar, vou usar o que você já tem.`
+      : `Preparei o evento "${d.nome}" para o usuário confirmar.`;
+    return { texto, widget };
   },
 };
 
 const marcarEvento: NiaTool = {
   nome: "marcar_evento",
   descricao:
-    "Agrupa lançamentos JÁ EXISTENTES sob um evento/contexto, mantendo a categoria de cada um. Use quando o usuário quiser juntar os gastos de uma viagem/passeio que já foram lançados (ex.: 'marca tudo da viagem da Argentina, de 10 a 17 de maio'). Informe a janela de datas do evento (data_inicio/data_fim) e, opcionalmente, um termo de busca. Cria o evento se ainda não existir. NÃO muda a categoria dos gastos — só os liga ao evento. Gera cartão de confirmação mostrando quantos lançamentos serão marcados.",
+    "Agrupa lançamentos JÁ EXISTENTES sob um evento/contexto, mantendo a categoria de cada um. Use quando o usuário quiser juntar os gastos de uma viagem/passeio que já foram lançados (ex.: 'marca tudo da viagem da Argentina, de 10 a 17 de maio'). Informe a janela de datas do evento (data_inicio/data_fim) e, opcionalmente, um termo de busca. Antes, confira com consultar_eventos se o evento já existe (reaproveita); cria só se não existir. NÃO muda a categoria dos gastos — só os liga ao evento. Gera um cartão com a LISTA dos lançamentos: o usuário marca/desmarca quais entram antes de confirmar. Responda com UMA frase curta; a lista já mostra tudo.",
   nivel: "confirmar",
   inputSchema: {
     type: "object",
@@ -683,14 +724,16 @@ const marcarEvento: NiaTool = {
     const supabase = createClient();
     let query = supabase
       .from("transacoes")
-      .select("descricao, valor")
+      .select("id, descricao, valor, data_transacao")
       .eq("workspace_id", ctx.workspaceId)
       .eq("tipo", "despesa")
       .gte("data_transacao", d.data_inicio)
-      .lte("data_transacao", d.data_fim);
+      .lte("data_transacao", d.data_fim)
+      .order("data_transacao", { ascending: true });
     if (d.busca) query = query.ilike("descricao", `%${d.busca}%`);
     const { data } = await query;
-    const rows = (data as { descricao: string; valor: number }[] | null) ?? [];
+    const rows =
+      (data as { id: string; descricao: string; valor: number; data_transacao: string }[] | null) ?? [];
     if (rows.length === 0) {
       return {
         texto: `Nenhum lançamento de despesa encontrado entre ${formatDate(d.data_inicio)} e ${formatDate(
@@ -698,28 +741,33 @@ const marcarEvento: NiaTool = {
         )}${d.busca ? ` com "${d.busca}"` : ""}.`,
       };
     }
-    const total = rows.reduce((s, r) => s + Number(r.valor), 0);
+    const lancamentos = rows.map((r) => ({
+      transacaoId: r.id,
+      descricao: r.descricao,
+      valor: Number(r.valor),
+      data: r.data_transacao ?? null,
+    }));
+    const total = lancamentos.reduce((s, l) => s + l.valor, 0);
     const acaoId = await registrarAcao({
       workspaceId: ctx.workspaceId,
       profileId: ctx.profileId,
       conversaId: ctx.conversaId,
       ferramenta: "marcar_evento",
       nivel: "confirmar",
-      payloadProposto: d,
+      payloadProposto: { evento: d.evento, lancamentos },
     });
     if (!acaoId) throw new Error("Não consegui preparar a marcação do evento.");
     const widget: NiaWidget = {
       tipo: "marcar_evento",
       acaoId,
       evento: d.evento,
-      quantidade: rows.length,
       total,
-      amostra: rows.slice(0, 4).map((r) => r.descricao),
+      lancamentos,
     };
     return {
-      texto: `Preparei para marcar ${rows.length} lançamento(s) (${formatBRL(
+      texto: `Separei ${lancamentos.length} lançamento(s) (${formatBRL(
         total,
-      )}) como "${d.evento}". Aguardando confirmação.`,
+      )}) para marcar como "${d.evento}". Confira a lista abaixo 👇`,
       widget,
     };
   },
@@ -1213,6 +1261,7 @@ export const NIA_TOOLS: NiaTool[] = [
   consultarAlertas,
   consultarEssencialidade,
   consultarContexto,
+  consultarEventos,
   listarTransacoes,
   lancarTransacao,
   lancarTransacaoDetalhada,

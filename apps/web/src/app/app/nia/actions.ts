@@ -25,7 +25,7 @@ import {
   lancarTransacaoArgs,
   lancarTransacaoDetalhadaArgs,
   lembrarFatoArgs,
-  marcarEventoArgs,
+  marcarEventoPayload,
 } from "@/lib/nia/schemas";
 import { atualizarAcao, votar } from "@/lib/nia/store";
 import { avancarDataRecorrencia, primeiraGeracao } from "@/lib/recorrencias";
@@ -770,35 +770,49 @@ export async function confirmarEvento(acaoId: string): Promise<{ error?: string;
   return { ok: true };
 }
 
-/** Liga lançamentos já existentes (na janela do payload) a um evento, sem mudar categorias. */
-export async function confirmarMarcarEvento(acaoId: string): Promise<{ error?: string; ok?: boolean }> {
+/**
+ * Liga ao evento APENAS os lançamentos que o usuário deixou marcados (índices da
+ * lista proposta), sem mudar categorias. Os IDs vêm do payload — não re-roda a
+ * busca por data, que poderia ter mudado desde a proposta.
+ */
+export async function confirmarMarcarEvento(
+  acaoId: string,
+  indicesIncluidos: number[],
+): Promise<{ error?: string; ok?: boolean; marcados?: number }> {
   const acao = await carregarAcao(acaoId);
   if (!acao) return { error: "Ação não encontrada." };
   if (acao.status !== "proposta") return { error: "Essa ação já foi processada." };
   if (acao.ferramenta !== "marcar_evento") return { error: "Ação não suportada." };
 
-  const parsed = marcarEventoArgs.safeParse(acao.payload_proposto);
+  const parsed = marcarEventoPayload.safeParse(acao.payload_proposto);
   if (!parsed.success) return { error: "Dados da proposta inválidos." };
-  const d = parsed.data;
+  const p = parsed.data;
+
+  const ids = indicesIncluidos
+    .map((i) => p.lancamentos[i]?.transacaoId)
+    .filter((x): x is string => !!x);
+  if (ids.length === 0) return { error: "Selecione ao menos um lançamento." };
 
   const supabase = createClient();
-  const contextoId = await resolverContexto(supabase, acao.workspace_id, d.evento);
+  const contextoId = await resolverContexto(supabase, acao.workspace_id, p.evento);
   if (!contextoId) return { error: "Não foi possível criar o evento." };
 
-  // Re-resolve a mesma janela mostrada na proposta e marca tudo com o evento.
-  let query = supabase
+  const { error } = await supabase
     .from("transacoes")
     .update({ contexto_id: contextoId })
-    .eq("workspace_id", acao.workspace_id)
-    .eq("tipo", "despesa")
-    .gte("data_transacao", d.data_inicio)
-    .lte("data_transacao", d.data_fim);
-  if (d.busca) query = query.ilike("descricao", `%${d.busca}%`);
-  const { error } = await query;
+    .in("id", ids)
+    .eq("workspace_id", acao.workspace_id);
   if (error) return { error: "Não foi possível marcar os lançamentos." };
 
-  await atualizarAcao(acaoId, { status: "executada", resultado: { ok: true }, registroId: contextoId });
-  return { ok: true };
+  revalidatePath("/app");
+  revalidatePath("/app/relatorios");
+
+  await atualizarAcao(acaoId, {
+    status: "executada",
+    resultado: { ok: true, marcados: ids.length },
+    registroId: contextoId,
+  });
+  return { ok: true, marcados: ids.length };
 }
 
 /** Cadastra a conta bancária proposta pela Nia (resolve o titular por nome). */

@@ -180,6 +180,24 @@ export const marcarEventoArgs = z.object({
 });
 export type MarcarEventoArgs = z.infer<typeof marcarEventoArgs>;
 
+/**
+ * Payload enriquecido (gravado em nia_acoes) com os lançamentos JÁ resolvidos
+ * na janela proposta — assim a confirmação marca exatamente os que o usuário
+ * deixou selecionados, sem re-rodar a busca por data (que poderia mudar).
+ */
+export const marcarEventoPayload = z.object({
+  evento: z.string(),
+  lancamentos: z.array(
+    z.object({
+      transacaoId: z.string().uuid(),
+      descricao: z.string(),
+      valor: z.number(),
+      data: z.string().nullable(),
+    }),
+  ),
+});
+export type MarcarEventoPayload = z.infer<typeof marcarEventoPayload>;
+
 export const conciliarFaturaArgs = z.object({
   /** Apelido do cartão da fatura (ex.: "Santander"), para casar com o cadastro. */
   cartao: z.string().trim().max(60).optional(),
@@ -382,15 +400,19 @@ export interface WidgetCriarEvento {
   nome: string;
   tipoLabel: string | null;
   dataReferencia: string | null;
+  /** Já existe um evento com o mesmo nome — ao confirmar, o atual é reaproveitado. */
+  jaExiste?: boolean;
+  /** Eventos com nome parecido (aviso para evitar duplicar). */
+  similares?: string[];
 }
 
 export interface WidgetMarcarEvento {
   tipo: "marcar_evento";
   acaoId: string;
   evento: string;
-  quantidade: number;
   total: number;
-  amostra: string[];
+  /** Lançamentos da janela proposta; o usuário marca/desmarca quais entram no evento. */
+  lancamentos: { transacaoId: string; descricao: string; valor: number; data: string | null }[];
 }
 
 export interface WidgetConciliacaoFatura {

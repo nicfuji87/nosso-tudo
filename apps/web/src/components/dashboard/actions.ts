@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { Essencialidade, MeioPagamento, StatusRevisao, TipoTransacao } from "@/lib/types/db";
 
@@ -293,4 +294,45 @@ export async function transacoesDoContexto(contextoId: string): Promise<Contexto
   });
   const total = transacoes.reduce((s, t) => s + t.valor, 0);
   return { nome: String((ctx as { nome: string }).nome), total, transacoes };
+}
+
+/** Renomeia um evento/contexto já criado (RLS garante o workspace). */
+export async function renomearEvento(
+  contextoId: string,
+  nome: string,
+): Promise<{ error?: string; ok?: boolean }> {
+  const n = nome.trim();
+  if (!n) return { error: "Informe um nome." };
+  if (n.length > 120) return { error: "Nome muito longo." };
+  const supabase = createClient();
+  const { error } = await supabase.from("contextos").update({ nome: n }).eq("id", contextoId);
+  if (error) return { error: "Não foi possível renomear o evento." };
+  revalidatePath("/app");
+  revalidatePath("/app/relatorios");
+  return { ok: true };
+}
+
+/**
+ * Tira um lançamento de um evento (desfaz o agrupamento), sem apagar a transação.
+ * Também desliga itens que tinham esse contexto explicitamente (não herdado).
+ */
+export async function removerLancamentoDoEvento(
+  contextoId: string,
+  transacaoId: string,
+): Promise<{ error?: string; ok?: boolean }> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("transacoes")
+    .update({ contexto_id: null })
+    .eq("id", transacaoId)
+    .eq("contexto_id", contextoId);
+  if (error) return { error: "Não foi possível remover o lançamento do evento." };
+  await supabase
+    .from("itens_transacao")
+    .update({ contexto_id: null })
+    .eq("transacao_id", transacaoId)
+    .eq("contexto_id", contextoId);
+  revalidatePath("/app");
+  revalidatePath("/app/relatorios");
+  return { ok: true };
 }

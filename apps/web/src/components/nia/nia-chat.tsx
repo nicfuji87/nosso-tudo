@@ -57,6 +57,7 @@ import type {
   WidgetConciliacaoFatura,
   WidgetConfirmarTransacao,
   WidgetDocumento,
+  WidgetMarcarEvento,
   WidgetResumoPeriodo,
 } from "@/lib/nia/schemas";
 
@@ -751,33 +752,28 @@ function WidgetView({
           estadoInicial={estadoInicial}
         />
       );
-    case "criar_evento":
+    case "criar_evento": {
+      const base = `Evento${widget.tipoLabel ? ` · ${widget.tipoLabel}` : ""}${
+        widget.dataReferencia ? ` · ${formatDate(widget.dataReferencia)}` : ""
+      }`;
+      const subtitulo = widget.jaExiste
+        ? "Já existe — vou usar o evento atual"
+        : widget.similares?.length
+          ? `${base} · parecido com: ${widget.similares.join(", ")}`
+          : base;
       return (
         <AcaoCard
           titulo={widget.nome}
-          subtitulo={`Evento${widget.tipoLabel ? ` · ${widget.tipoLabel}` : ""}${
-            widget.dataReferencia ? ` · ${formatDate(widget.dataReferencia)}` : ""
-          }`}
+          subtitulo={subtitulo}
           confirmar={() => confirmarEvento(widget.acaoId)}
           descartar={() => rejeitarAcao(widget.acaoId)}
-          labelFeito="Evento criado"
+          labelFeito={widget.jaExiste ? "Evento reaproveitado" : "Evento criado"}
           estadoInicial={estadoInicial}
         />
       );
+    }
     case "marcar_evento":
-      return (
-        <AcaoCard
-          titulo={`Marcar como “${widget.evento}”`}
-          subtitulo={`${widget.quantidade} lançamento${widget.quantidade === 1 ? "" : "s"}${
-            widget.amostra.length ? ` · ${widget.amostra.join(", ")}` : ""
-          }`}
-          valor={widget.total}
-          confirmar={() => confirmarMarcarEvento(widget.acaoId)}
-          descartar={() => rejeitarAcao(widget.acaoId)}
-          labelFeito="Lançamentos marcados"
-          estadoInicial={estadoInicial}
-        />
-      );
+      return <MarcarEventoCard w={widget} estadoInicial={estadoInicial} />;
     case "criar_conta":
       return (
         <AcaoCard
@@ -1430,6 +1426,158 @@ function ConciliacaoFaturaCard({
               >
                 {estado === "salvando" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
                 Conciliar
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={descartar}
+                disabled={estado === "salvando"}
+                aria-label="Descartar"
+              >
+                <X className="size-4" />
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
+      {estado === "erro" && <p className="px-4 pb-3 text-body-sm text-destructive">{erro}</p>}
+    </div>
+  );
+}
+
+function MarcarEventoCard({
+  w,
+  estadoInicial = "idle",
+}: {
+  w: WidgetMarcarEvento;
+  estadoInicial?: EstadoAcao;
+}) {
+  // Cards antigos do histórico não têm a lista (shape anterior): degrada pra vazio.
+  const lancamentos = w.lancamentos ?? [];
+  const inicial =
+    estadoInicial === "feito" || estadoInicial === "desfeito"
+      ? "feito"
+      : estadoInicial === "descartado"
+        ? "descartado"
+        : "idle";
+  const [incluidos, setIncluidos] = useState<boolean[]>(() => lancamentos.map(() => true));
+  const [estado, setEstado] = useState<"idle" | "salvando" | "feito" | "descartado" | "erro">(inicial);
+  const [erro, setErro] = useState<string | null>(null);
+  const [marcados, setMarcados] = useState(0);
+
+  const editavel = estado === "idle" || estado === "erro";
+  const qtd = incluidos.filter(Boolean).length;
+  const total = lancamentos.reduce((s, l, i) => s + (incluidos[i] ? l.valor : 0), 0);
+  const todosMarcados = qtd === lancamentos.length;
+  const muitos = lancamentos.length > 8;
+
+  function toggle(i: number) {
+    if (!editavel) return;
+    setIncluidos((prev) => prev.map((v, j) => (j === i ? !v : v)));
+  }
+  function toggleTodos() {
+    if (!editavel) return;
+    setIncluidos(() => lancamentos.map(() => !todosMarcados));
+  }
+  async function confirmar() {
+    const indices = incluidos.flatMap((v, i) => (v ? [i] : []));
+    setEstado("salvando");
+    const r = await confirmarMarcarEvento(w.acaoId, indices);
+    if (r.error) {
+      setErro(r.error);
+      setEstado("erro");
+    } else {
+      setMarcados(r.marcados ?? indices.length);
+      setEstado("feito");
+    }
+  }
+  async function descartar() {
+    await rejeitarAcao(w.acaoId);
+    setEstado("descartado");
+  }
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
+      <div className="border-b border-border px-4 py-3">
+        <p className="font-medium">Marcar como “{w.evento}”</p>
+        <p className="text-caption text-muted-foreground">
+          {lancamentos.length} {lancamentos.length === 1 ? "lançamento" : "lançamentos"} na janela
+        </p>
+      </div>
+
+      {estado === "feito" ? (
+        <p className="flex items-center gap-1.5 px-4 py-3 text-body-sm text-accent">
+          <Check className="size-4" />{" "}
+          {marcados > 0
+            ? `${marcados} ${marcados === 1 ? "lançamento marcado" : "lançamentos marcados"}.`
+            : "Lançamentos marcados."}
+        </p>
+      ) : estado === "descartado" ? (
+        <p className="px-4 py-3 text-body-sm text-muted-foreground">Descartado.</p>
+      ) : (
+        <>
+          {lancamentos.length > 1 && (
+            <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
+              <span className="text-caption text-muted-foreground">
+                {qtd} de {lancamentos.length} selecionados
+              </span>
+              <button
+                type="button"
+                onClick={toggleTodos}
+                disabled={estado === "salvando"}
+                className="text-caption font-medium text-accent underline-offset-2 hover:underline"
+              >
+                {todosMarcados ? "Limpar" : "Selecionar todos"}
+              </button>
+            </div>
+          )}
+          <div className={cn("divide-y divide-border", muitos && "max-h-80 overflow-y-auto")}>
+            {lancamentos.map((l, i) => (
+              <div key={l.transacaoId} className="flex items-center gap-3 px-4 py-2.5">
+                <button
+                  type="button"
+                  onClick={() => toggle(i)}
+                  disabled={!editavel}
+                  aria-label="Incluir no evento"
+                  className={cn(
+                    "flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
+                    incluidos[i] ? "border-accent bg-accent text-accent-foreground" : "border-border",
+                  )}
+                >
+                  {incluidos[i] && <Check className="size-3.5" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggle(i)}
+                  disabled={!editavel}
+                  className={cn(
+                    "min-w-0 flex-1 truncate text-left text-body-sm",
+                    !incluidos[i] && "text-muted-foreground line-through",
+                  )}
+                >
+                  {l.descricao}
+                  {l.data ? <span className="text-muted-foreground"> · {formatDate(l.data)}</span> : null}
+                </button>
+                <span
+                  className={cn(
+                    "shrink-0 font-mono text-body-sm tabular-nums",
+                    !incluidos[i] && "text-muted-foreground line-through",
+                  )}
+                >
+                  {formatBRL(l.valor)}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-between gap-2 border-t border-border bg-secondary/40 px-4 py-3">
+            <div className="text-body-sm text-muted-foreground">
+              {qtd} {qtd === 1 ? "lançamento" : "lançamentos"} ·{" "}
+              <span className="font-mono tabular-nums text-foreground">{formatBRL(total)}</span>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={confirmar} disabled={estado === "salvando" || qtd === 0}>
+                {estado === "salvando" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+                Marcar
               </Button>
               <Button
                 size="sm"
