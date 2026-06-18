@@ -398,7 +398,8 @@ export function NiaChat({
       // Stream fechou sem 'done'/'error' (ex.: timeout da função no meio): não
       // deixa a mensagem pendurada — avisa e deixa o usuário tentar de novo.
       if (!finalizado) {
-        const aviso = "⚠️ A resposta foi interrompida antes de terminar. Pode mandar de novo?";
+        const aviso =
+          "⚠️ A resposta demorou demais e foi interrompida. Se eram várias imagens (ex.: fatura), tente enviar uma de cada vez — ou me diga os itens.";
         patch((x) => ({ ...x, texto: acc ? `${acc}\n\n${aviso}` : aviso }));
       }
     } catch {

@@ -36,11 +36,15 @@ export interface NiaProviderInput {
 /** Conteúdo da 1ª mensagem do usuário no formato Anthropic (texto + imagem/documento). */
 function anthropicUserContent(userMessage: string, anexos?: AnexoConteudo[]): string | unknown[] {
   if (!anexos || anexos.length === 0) return userMessage;
-  const blocks: unknown[] = anexos.map((a) =>
+  const blocks: Record<string, unknown>[] = anexos.map((a) =>
     a.tipo === "imagem"
       ? { type: "image", source: { type: "base64", media_type: a.mimeType, data: a.base64 } }
       : { type: "document", source: { type: "base64", media_type: "application/pdf", data: a.base64 } },
   );
+  // Cacheia as imagens/PDFs (parte pesada): em fluxos multi-turn (guardar doc →
+  // itemizar) elas não são reprocessadas a cada turno, cortando muito a latência.
+  const ultimaMidia = blocks[blocks.length - 1];
+  if (ultimaMidia) ultimaMidia.cache_control = { type: "ephemeral" };
   if (userMessage) blocks.push({ type: "text", text: userMessage });
   return blocks;
 }
