@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 import { getWorkspaceContext } from "@/lib/auth";
 import {
-  getComparativoMes,
-  getGastosPorCategoria,
+  getComparativoPeriodo,
+  getGastosPorCategoriaPeriodo,
   getGastosPorContexto,
-  getGastosPorEssencialidade,
-  getResumoMes,
+  getGastosPorEssencialidadePeriodo,
+  getResumoPeriodo,
   listBeneficiarios,
 } from "@/lib/db/queries";
+import { PERIODO_PRESETS, resolverPeriodo, type PeriodoPreset } from "@/lib/periodo";
 import { PageHeader } from "@/components/patterns/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/patterns/empty-state";
@@ -25,19 +26,15 @@ const PALETTE = ["#3D6D84", "#8FA993", "#FF7043", "#7E57C2", "#EC407A", "#C4B8B0
 export default async function RelatoriosPage({
   searchParams,
 }: {
-  searchParams: { mes?: string; pessoa?: string };
+  searchParams: { periodo?: string; de?: string; ate?: string; pessoa?: string };
 }) {
   const { workspace } = await getWorkspaceContext();
 
-  // Mês de referência via URL (?mes=YYYY-MM); inválido/ausente = mês atual.
-  const hoje = new Date();
-  const valido = typeof searchParams.mes === "string" && /^\d{4}-\d{2}$/.test(searchParams.mes);
-  const ref = valido
-    ? new Date(`${searchParams.mes}-01T00:00:00`)
-    : new Date(hoje.getFullYear(), hoje.getMonth(), 1);
-  const mesUI = `${ref.getFullYear()}-${String(ref.getMonth() + 1).padStart(2, "0")}`;
-  const mesRef = `${mesUI}-01`;
-  const ehMesAtual = ref.getFullYear() === hoje.getFullYear() && ref.getMonth() === hoje.getMonth();
+  // Filtro de tempo via URL (?periodo=… &de=&ate=); ausente/ inválido = mês atual.
+  const periodo = resolverPeriodo(searchParams);
+  const presetUI: PeriodoPreset = (PERIODO_PRESETS as readonly string[]).includes(searchParams.periodo ?? "")
+    ? (searchParams.periodo as PeriodoPreset)
+    : "mes-atual";
 
   // Filtro por pessoa (?pessoa=<id>) — validado contra quem tem despesa.
   const pessoas = await listBeneficiarios(workspace.id);
@@ -45,11 +42,11 @@ export default async function RelatoriosPage({
   const beneficiarioId = pessoaSel?.id;
 
   const [resumo, categorias, essenc, eventos, comparativo] = await Promise.all([
-    getResumoMes(workspace.id, mesRef),
-    getGastosPorCategoria(workspace.id, mesRef, beneficiarioId),
-    getGastosPorEssencialidade(workspace.id, mesRef, beneficiarioId),
+    getResumoPeriodo(workspace.id, periodo.inicio, periodo.fim),
+    getGastosPorCategoriaPeriodo(workspace.id, periodo.inicio, periodo.fim, beneficiarioId),
+    getGastosPorEssencialidadePeriodo(workspace.id, periodo.inicio, periodo.fim, beneficiarioId),
     getGastosPorContexto(workspace.id),
-    getComparativoMes(workspace.id, mesRef, beneficiarioId),
+    getComparativoPeriodo(workspace.id, periodo, beneficiarioId),
   ]);
 
   const totalCat = categorias.reduce((s, c) => s + Number(c.total), 0);
@@ -67,7 +64,7 @@ export default async function RelatoriosPage({
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        <PeriodoFilter mes={mesUI} ehMesAtual={ehMesAtual} />
+        <PeriodoFilter preset={presetUI} de={searchParams.de ?? null} ate={searchParams.ate ?? null} />
         <PessoaFilter pessoas={pessoas} pessoaId={pessoaSel?.id ?? null} />
       </div>
 

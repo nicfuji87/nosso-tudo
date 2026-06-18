@@ -70,56 +70,51 @@ export interface CategoriaComparada {
   deltaPct: number | null;
 }
 export interface Comparativo {
-  /** dia do mês usado como corte (compara 1..diaCorte de cada mês) */
-  diaCorte: number;
-  /** true = mês corrente (janela parcial até hoje); false = mês fechado */
-  parcial: boolean;
   totalAtual: number;
   totalAnterior: number;
   /** categorias ordenadas por |delta| desc */
   categorias: CategoriaComparada[];
+  /** rótulos vindos do período resolvido (ver lib/periodo.ts) */
+  titulo: string;
+  rotuloAtual: string;
+  rotuloAnterior: string;
+}
+
+/** Janela já resolvida (lib/periodo) — atual + comparação + rótulos. */
+export interface JanelaComparativo {
+  inicio: string;
+  fim: string;
+  compInicio: string;
+  compFim: string;
+  titulo: string;
+  rotuloAtual: string;
+  rotuloAnterior: string;
 }
 
 /**
- * Comparativo de um mês × o anterior, por categoria. Para o mês corrente compara
- * "mesmo período" (1..hoje × 1..mesmo-dia do mês passado), para a leitura
- * mid-month ser justa; para um mês fechado compara o mês inteiro × o anterior
- * inteiro. `mesRef` = 1º dia do mês (YYYY-MM-DD); omitido = mês atual.
- * Usa a RPC gastos_por_categoria_periodo (0021).
+ * Comparativo por categoria de uma janela × a janela de comparação (período
+ * anterior). As janelas e rótulos vêm de `resolverPeriodo`, então isto só roda
+ * a RPC gastos_por_categoria_periodo (0021/0022) duas vezes e calcula os deltas.
  */
-export async function getComparativoMes(
+export async function getComparativoPeriodo(
   workspaceId: string,
-  mesRef?: string,
+  janela: JanelaComparativo,
   beneficiarioId?: string,
 ): Promise<Comparativo> {
   const supabase = createClient();
-  const hoje = new Date();
-  const ref = mesRef ? new Date(`${mesRef.slice(0, 7)}-01T00:00:00`) : new Date(hoje.getFullYear(), hoje.getMonth(), 1);
-  const parcial = ref.getFullYear() === hoje.getFullYear() && ref.getMonth() === hoje.getMonth();
-  // mês corrente: corta em hoje; mês fechado: usa o mês inteiro.
-  const diaCorte = parcial ? hoje.getDate() : new Date(ref.getFullYear(), ref.getMonth() + 1, 0).getDate();
-  const fmt = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
-  const inicioAtual = new Date(ref.getFullYear(), ref.getMonth(), 1);
-  const fimAtual = new Date(ref.getFullYear(), ref.getMonth(), diaCorte + 1); // exclusivo → inclui o dia de corte
-  const inicioAnterior = new Date(ref.getFullYear(), ref.getMonth() - 1, 1);
-  let fimAnterior = new Date(ref.getFullYear(), ref.getMonth() - 1, diaCorte + 1);
-  if (fimAnterior > inicioAtual) fimAnterior = inicioAtual; // não vaza p/ o mês de referência (meses curtos)
-
   type Row = { categoria_id: string; categoria_nome: string; cor: string | null; icone: string | null; total: number };
   const filtroPessoa = beneficiarioId ? { p_beneficiario: beneficiarioId } : {};
   const [atualRes, antRes] = await Promise.all([
     supabase.rpc("gastos_por_categoria_periodo", {
       p_workspace_id: workspaceId,
-      p_inicio: fmt(inicioAtual),
-      p_fim: fmt(fimAtual),
+      p_inicio: janela.inicio,
+      p_fim: janela.fim,
       ...filtroPessoa,
     }),
     supabase.rpc("gastos_por_categoria_periodo", {
       p_workspace_id: workspaceId,
-      p_inicio: fmt(inicioAnterior),
-      p_fim: fmt(fimAnterior),
+      p_inicio: janela.compInicio,
+      p_fim: janela.compFim,
       ...filtroPessoa,
     }),
   ]);
@@ -164,12 +159,41 @@ export async function getComparativoMes(
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
 
   return {
-    diaCorte,
-    parcial,
     totalAtual: atual.reduce((s, r) => s + Number(r.total), 0),
     totalAnterior: anterior.reduce((s, r) => s + Number(r.total), 0),
     categorias,
+    titulo: janela.titulo,
+    rotuloAtual: janela.rotuloAtual,
+    rotuloAnterior: janela.rotuloAnterior,
   };
+}
+
+/** Resumo (receitas/despesas/saldo) num intervalo arbitrário — RPC resumo_periodo (0023). */
+export async function getResumoPeriodo(workspaceId: string, inicio: string, fim: string): Promise<ResumoMes> {
+  const supabase = createClient();
+  const { data } = await supabase.rpc("resumo_periodo", {
+    p_workspace_id: workspaceId,
+    p_inicio: inicio,
+    p_fim: fim,
+  });
+  return (data as ResumoMes[] | null)?.[0] ?? { receitas: 0, despesas: 0, saldo: 0, total_transacoes: 0 };
+}
+
+/** Gastos por categoria num intervalo (filtro de tempo completo) — RPC 0021/0022. */
+export async function getGastosPorCategoriaPeriodo(
+  workspaceId: string,
+  inicio: string,
+  fim: string,
+  beneficiarioId?: string,
+): Promise<GastoCategoria[]> {
+  const supabase = createClient();
+  const { data } = await supabase.rpc("gastos_por_categoria_periodo", {
+    p_workspace_id: workspaceId,
+    p_inicio: inicio,
+    p_fim: fim,
+    ...(beneficiarioId ? { p_beneficiario: beneficiarioId } : {}),
+  });
+  return (data as GastoCategoria[] | null) ?? [];
 }
 
 export interface GastoEssencialidade {
@@ -186,6 +210,26 @@ export async function getGastosPorEssencialidade(
   const { data } = await supabase.rpc("gastos_por_essencialidade", {
     p_workspace_id: workspaceId,
     ...(mesRef ? { p_mes: mesRef } : {}),
+    ...(beneficiarioId ? { p_beneficiario: beneficiarioId } : {}),
+  });
+  return ((data as { essencialidade: Essencialidade; total: number }[] | null) ?? []).map((r) => ({
+    essencialidade: r.essencialidade,
+    total: Number(r.total),
+  }));
+}
+
+/** Essencial × supérfluo num intervalo arbitrário — RPC gastos_por_essencialidade_periodo (0023). */
+export async function getGastosPorEssencialidadePeriodo(
+  workspaceId: string,
+  inicio: string,
+  fim: string,
+  beneficiarioId?: string,
+): Promise<GastoEssencialidade[]> {
+  const supabase = createClient();
+  const { data } = await supabase.rpc("gastos_por_essencialidade_periodo", {
+    p_workspace_id: workspaceId,
+    p_inicio: inicio,
+    p_fim: fim,
     ...(beneficiarioId ? { p_beneficiario: beneficiarioId } : {}),
   });
   return ((data as { essencialidade: Essencialidade; total: number }[] | null) ?? []).map((r) => ({

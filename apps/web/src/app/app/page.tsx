@@ -3,7 +3,7 @@ import { ArrowRight, Sparkles, Wallet } from "lucide-react";
 import { getWorkspaceContext } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import {
-  getComparativoMes,
+  getComparativoPeriodo,
   getGastosPorCategoria,
   getGastosPorContexto,
   getGastosPorEssencialidade,
@@ -11,6 +11,7 @@ import {
   getResumoMes,
   listTransacoes,
 } from "@/lib/db/queries";
+import { resolverPeriodo } from "@/lib/periodo";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -42,7 +43,7 @@ export default async function HomePage() {
     getGastosPorContexto(workspace.id),
     listTransacoes(workspace.id, { limit: 6, ordenarPor: "criacao" }),
     getDescobertas(workspace.id),
-    getComparativoMes(workspace.id),
+    getComparativoPeriodo(workspace.id, resolverPeriodo({})),
     supabase.from("v_colecoes_em_aberto").select("*").eq("workspace_id", workspace.id).limit(4),
   ]);
 
