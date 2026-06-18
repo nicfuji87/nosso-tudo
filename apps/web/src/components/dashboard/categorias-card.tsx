@@ -27,8 +27,13 @@ export function CategoriasCard({ categorias, total }: { categorias: CategoriaRes
     );
   }
 
-  const top = categorias.slice(0, 5);
-  const resto = categorias.slice(5);
+  const MAX = 5;
+  // Só agrupa em "Outros" quando sobra MAIS de uma categoria. Uma categoria
+  // nomeada (ex.: Educação) nunca deve se esconder atrás de um "Outros (1)" —
+  // se ela é a única no rabo, aparece direto pelo próprio nome.
+  const agrupar = categorias.length > MAX + 1;
+  const top = agrupar ? categorias.slice(0, MAX) : categorias;
+  const resto = agrupar ? categorias.slice(MAX) : [];
   const restoTotal = resto.reduce((s, c) => s + c.total, 0);
 
   const donut: DonutDatum[] = top.map((c) => ({ nome: c.nome, valor: c.total, cor: c.cor }));

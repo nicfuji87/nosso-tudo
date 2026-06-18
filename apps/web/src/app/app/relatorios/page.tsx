@@ -11,18 +11,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { BarChart3 } from "lucide-react";
 import { formatBRL } from "@/lib/format";
-import { LABEL_ESSENCIALIDADE, type Essencialidade } from "@/lib/types/db";
+import { EssencialidadeCard } from "@/components/dashboard/essencialidade-card";
 
 export const metadata: Metadata = { title: "Relatórios" };
 
 const PALETTE = ["#3D6D84", "#8FA993", "#FF7043", "#7E57C2", "#EC407A", "#C4B8B0"];
-
-const COR_ESSENCIALIDADE: Record<Essencialidade, string> = {
-  essencial: "#8FA993",
-  necessario: "#3D6D84",
-  superfluo: "#E08A4B",
-  investimento: "#7E57C2",
-};
 
 export default async function RelatoriosPage() {
   const { workspace } = await getWorkspaceContext();
@@ -132,33 +125,11 @@ export default async function RelatoriosPage() {
             <Card>
               <CardContent className="p-5">
                 <p className="text-body-sm font-medium">Essencial × Supérfluo</p>
-                <p className="text-caption text-muted-foreground">Por natureza do gasto</p>
-                <div className="mt-4 flex h-3 w-full overflow-hidden rounded-full bg-secondary">
-                  {essenc.map((e) => (
-                    <div
-                      key={e.essencialidade}
-                      style={{
-                        width: `${(e.total / totalEssenc) * 100}%`,
-                        backgroundColor: COR_ESSENCIALIDADE[e.essencialidade],
-                      }}
-                    />
-                  ))}
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  {essenc.map((e) => (
-                    <div key={e.essencialidade} className="flex items-center gap-2">
-                      <span
-                        className="size-2.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: COR_ESSENCIALIDADE[e.essencialidade] }}
-                      />
-                      <div className="min-w-0">
-                        <p className="truncate text-caption text-muted-foreground">
-                          {LABEL_ESSENCIALIDADE[e.essencialidade]}
-                        </p>
-                        <p className="tabular text-body-sm font-medium">{formatBRL(e.total)}</p>
-                      </div>
-                    </div>
-                  ))}
+                <p className="text-caption text-muted-foreground">
+                  Por natureza do gasto — toque para ver o que entra em cada
+                </p>
+                <div className="mt-4">
+                  <EssencialidadeCard data={essenc} />
                 </div>
               </CardContent>
             </Card>

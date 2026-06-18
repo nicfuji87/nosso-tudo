@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Layers, Sparkles, Wallet } from "lucide-react";
+import { ArrowRight, Sparkles, Wallet } from "lucide-react";
 import { getWorkspaceContext } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -8,7 +8,6 @@ import {
   getGastosPorEssencialidade,
   getGastosPorPessoa,
   getResumoMes,
-  listCartoes,
   listTransacoes,
 } from "@/lib/db/queries";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,33 +17,25 @@ import { EmptyState } from "@/components/patterns/empty-state";
 import { BalanceCard } from "@/components/dashboard/balance-card";
 import { CategoriasCard } from "@/components/dashboard/categorias-card";
 import { CollapsibleCard } from "@/components/dashboard/collapsible-card";
+import { EssencialidadeCard } from "@/components/dashboard/essencialidade-card";
 import { GastoPorPessoa } from "@/components/dashboard/gasto-por-pessoa";
 import { AtividadeRecente } from "@/components/dashboard/atividade-recente";
 import { EventosLista } from "@/components/dashboard/eventos-lista";
 import { greeting, formatBRL, formatDate } from "@/lib/format";
-import { LABEL_ESSENCIALIDADE, type Essencialidade } from "@/lib/types/db";
 
 const PALETTE = ["#3D6D84", "#8FA993", "#FF7043", "#7E57C2", "#EC407A", "#C4B8B0"];
-
-const COR_ESSENCIALIDADE: Record<Essencialidade, string> = {
-  essencial: "#8FA993",
-  necessario: "#3D6D84",
-  superfluo: "#E08A4B",
-  investimento: "#7E57C2",
-};
 
 export default async function HomePage() {
   const { profile, workspace, plan } = await getWorkspaceContext();
   const supabase = createClient();
 
-  const [resumo, gastos, essenc, pessoas, eventos, recentes, cartoes, colecoesRes] = await Promise.all([
+  const [resumo, gastos, essenc, pessoas, eventos, recentes, colecoesRes] = await Promise.all([
     getResumoMes(workspace.id),
     getGastosPorCategoria(workspace.id),
     getGastosPorEssencialidade(workspace.id),
     getGastosPorPessoa(workspace.id),
     getGastosPorContexto(workspace.id),
     listTransacoes(workspace.id, { limit: 6, ordenarPor: "criacao" }),
-    listCartoes(workspace.id),
     supabase.from("v_colecoes_em_aberto").select("*").eq("workspace_id", workspace.id).limit(4),
   ]);
 
@@ -108,42 +99,14 @@ export default async function HomePage() {
         </CollapsibleCard>
       )}
 
-      {/* Essencial × Supérfluo — recolhível */}
+      {/* Essencial × Supérfluo — recolhível e clicável */}
       {totalEssenc > 0 && (
         <CollapsibleCard
           id="essencialidade"
           titulo="Essencial × Supérfluo"
-          subtitulo="Para onde o dinheiro vai por natureza do gasto"
+          subtitulo="Toque numa faixa para ver o que entra nela"
         >
-          <div className="flex h-3 w-full overflow-hidden rounded-full bg-secondary">
-            {essenc.map((e) => (
-              <div
-                key={e.essencialidade}
-                style={{
-                  width: `${(e.total / totalEssenc) * 100}%`,
-                  backgroundColor: COR_ESSENCIALIDADE[e.essencialidade],
-                }}
-              />
-            ))}
-          </div>
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {essenc.map((e) => (
-              <div key={e.essencialidade} className="flex items-center gap-2">
-                <span
-                  className="size-2.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: COR_ESSENCIALIDADE[e.essencialidade] }}
-                />
-                <div className="min-w-0">
-                  <p className="truncate text-caption text-muted-foreground">
-                    {LABEL_ESSENCIALIDADE[e.essencialidade]}
-                  </p>
-                  <p className="text-body-sm font-medium tabular-nums">
-                    {Math.round((e.total / totalEssenc) * 100)}%
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
+          <EssencialidadeCard data={essenc} />
         </CollapsibleCard>
       )}
 
@@ -214,32 +177,6 @@ export default async function HomePage() {
           <AtividadeRecente transacoes={recentes} />
         )}
       </section>
-
-      {/* Atalho cartões */}
-      {cartoes.length > 0 && (
-        <section className="space-y-3">
-          <h2 className="text-h4 font-semibold tracking-tight">Seus cartões</h2>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {cartoes.map((c) => (
-              <Card key={c.id}>
-                <CardContent className="p-5">
-                  <div className="flex items-center justify-between">
-                    <p className="text-body-sm font-medium">{c.apelido}</p>
-                    <Layers className="size-4 text-muted-foreground" />
-                  </div>
-                  <p className="text-caption text-muted-foreground">
-                    {c.banco}
-                    {c.ultimos_digitos ? ` ·· ${c.ultimos_digitos}` : ""}
-                  </p>
-                  {c.limite != null && (
-                    <p className="mt-3 text-body-sm tabular-nums">Limite {formatBRL(c.limite)}</p>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </section>
-      )}
     </div>
   );
 }

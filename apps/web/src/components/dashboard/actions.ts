@@ -145,6 +145,115 @@ export async function transacoesPorCategoria(categoriaId: string): Promise<Categ
   return { nome, total, transacoes };
 }
 
+export interface EssencialidadeLinha {
+  /** id da transação de origem (para abrir/linkar, se quiser) */
+  id: string;
+  descricao: string;
+  estabelecimento: string | null;
+  data: string;
+  valor: number;
+  /** "item" = linha de nota; "transacao" = caiu no padrão da categoria */
+  origem: "item" | "transacao";
+}
+export interface EssencialidadeDrill {
+  total: number;
+  linhas: EssencialidadeLinha[];
+}
+
+/**
+ * O que entra em cada natureza de gasto (essencial / supérfluo / …) no mês.
+ * Espelha a RPC `gastos_por_essencialidade` (0019): soma item a item quando a
+ * nota está itemizada e cai no `essencialidade_padrao` da categoria para o
+ * resto não-itemizado — para o total bater com a barra do relatório.
+ */
+export async function transacoesPorEssencialidade(
+  essencialidade: Essencialidade,
+): Promise<EssencialidadeDrill> {
+  const supabase = createClient();
+  const inicio = new Date();
+  inicio.setDate(1);
+  const mesRef = inicio.toISOString().slice(0, 10);
+
+  const { data: txData } = await supabase
+    .from("transacoes")
+    .select("id, descricao, valor, data_transacao, categoria_id, estabelecimento:estabelecimentos(nome)")
+    .eq("tipo", "despesa")
+    .eq("status_revisao", "confirmado")
+    .gte("data_transacao", mesRef);
+  const txs = ((txData as unknown as Record<string, unknown>[] | null) ?? []).map((r) => {
+    const estab = r.estabelecimento as { nome?: string } | null;
+    return {
+      id: String(r.id),
+      descricao: String(r.descricao ?? ""),
+      valor: Number(r.valor ?? 0),
+      data: String(r.data_transacao ?? ""),
+      categoriaId: (r.categoria_id as string | null) ?? null,
+      estabelecimento: estab?.nome ?? null,
+    };
+  });
+  if (txs.length === 0) return { total: 0, linhas: [] };
+  const txById = new Map(txs.map((t) => [t.id, t]));
+
+  const { data: itData } = await supabase
+    .from("itens_transacao")
+    .select("transacao_id, descricao_original, valor_total, essencialidade")
+    .in("transacao_id", txs.map((t) => t.id));
+  const itens =
+    (itData as
+      | { transacao_id: string; descricao_original: string; valor_total: number | null; essencialidade: Essencialidade | null }[]
+      | null) ?? [];
+
+  const catIds = [...new Set(txs.map((t) => t.categoriaId).filter(Boolean))] as string[];
+  const { data: catData } = catIds.length
+    ? await supabase.from("categorias").select("id, essencialidade_padrao").in("id", catIds)
+    : { data: [] as { id: string; essencialidade_padrao: Essencialidade | null }[] };
+  const catPad = new Map(
+    ((catData as { id: string; essencialidade_padrao: Essencialidade | null }[] | null) ?? []).map(
+      (c) => [c.id, (c.essencialidade_padrao ?? "necessario") as Essencialidade],
+    ),
+  );
+
+  const somaItens = new Map<string, number>();
+  for (const i of itens) somaItens.set(i.transacao_id, (somaItens.get(i.transacao_id) ?? 0) + Number(i.valor_total ?? 0));
+
+  const linhas: EssencialidadeLinha[] = [];
+  // 1) Itens cuja essencialidade própria casa com a buscada.
+  for (const i of itens) {
+    const v = Number(i.valor_total ?? 0);
+    if (i.essencialidade === essencialidade && v > 0) {
+      const tx = txById.get(i.transacao_id);
+      linhas.push({
+        id: i.transacao_id,
+        descricao: i.descricao_original,
+        estabelecimento: tx?.estabelecimento ?? null,
+        data: tx?.data ?? "",
+        valor: v,
+        origem: "item",
+      });
+    }
+  }
+  // 2) Parte não-itemizada → padrão da categoria.
+  for (const t of txs) {
+    const padrao = (t.categoriaId && catPad.get(t.categoriaId)) || "necessario";
+    if (padrao !== essencialidade) continue;
+    const soma = somaItens.get(t.id);
+    const valor = soma == null ? t.valor : t.valor - soma;
+    if (valor > 0.005) {
+      linhas.push({
+        id: t.id,
+        descricao: t.descricao,
+        estabelecimento: t.estabelecimento,
+        data: t.data,
+        valor,
+        origem: "transacao",
+      });
+    }
+  }
+  linhas.sort((a, b) => b.valor - a.valor);
+  const total = linhas.reduce((s, l) => s + l.valor, 0);
+  return { total, linhas };
+}
+
 export interface ContextoTransacao {
   id: string;
   descricao: string;
