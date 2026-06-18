@@ -108,53 +108,68 @@ export async function processarAnexos(
   anexos: NiaAnexoInput[],
 ): Promise<AnexoProcessado> {
   const supabase = createClient();
-  const conteudos: AnexoProcessado["conteudos"] = [];
-  const midias: MidiaProcessada[] = [];
-  const transcricoes: string[] = [];
 
-  for (const a of anexos) {
-    const { data: blob } = await supabase.storage.from("nia-anexos").download(a.storagePath);
-    if (!blob) continue;
+  // Processa os anexos EM PARALELO — a leitura de cada imagem/PDF é uma chamada
+  // de visão (~10-20s); em série, 3 imagens de uma fatura já estouravam o tempo.
+  type Resultado = {
+    conteudo: AnexoProcessado["conteudos"][number] | null;
+    transcricao: string | null;
+    midia: MidiaProcessada | null;
+  };
+  const resultados = await Promise.all(
+    anexos.map<Promise<Resultado>>(async (a) => {
+      const { data: blob } = await supabase.storage.from("nia-anexos").download(a.storagePath);
+      if (!blob) return { conteudo: null, transcricao: null, midia: null };
 
-    let textoExtraido: string | null = null;
-    let leitura: string | null = null;
-    if (a.tipo === "audio") {
-      const t = await transcrever(blob, a.nomeOriginal ?? "audio");
-      if (t) {
-        transcricoes.push(t);
-        textoExtraido = t;
+      let textoExtraido: string | null = null;
+      let leitura: string | null = null;
+      let transcricao: string | null = null;
+      let conteudo: AnexoProcessado["conteudos"][number] | null = null;
+      if (a.tipo === "audio") {
+        const t = await transcrever(blob, a.nomeOriginal ?? "audio");
+        if (t) {
+          transcricao = t;
+          textoExtraido = t;
+        }
+      } else {
+        const base64 = await blobParaBase64(blob);
+        conteudo = { tipo: a.tipo, mimeType: a.mimeType, base64 };
+        const lida = await lerDocumento(base64, a.mimeType, a.tipo);
+        if (lida) {
+          textoExtraido = lida;
+          leitura = lida;
+        }
       }
-    } else {
-      const base64 = await blobParaBase64(blob);
-      conteudos.push({ tipo: a.tipo, mimeType: a.mimeType, base64 });
-      // Leitura textual (imagem/PDF) para o histórico invisível e a busca de documentos.
-      const lida = await lerDocumento(base64, a.mimeType, a.tipo);
-      if (lida) {
-        textoExtraido = lida;
-        leitura = lida;
-      }
-    }
 
-    const { data: midia } = await supabase
-      .from("midias")
-      .insert({
-        workspace_id: workspaceId,
-        bucket: "nia-anexos",
-        storage_path: a.storagePath,
-        tipo: a.tipo,
-        nome_original: a.nomeOriginal ?? null,
-        mime_type: a.mimeType,
-        tamanho_bytes: a.tamanho ?? null,
-        origem: "app",
-        enviado_por: profileId,
-        texto_extraido: textoExtraido,
-        processado: true,
-      })
-      .select("id")
-      .maybeSingle();
-    const id = (midia as { id: string } | null)?.id;
-    if (id) midias.push({ id, tipo: a.tipo, nome: a.nomeOriginal ?? null, storagePath: a.storagePath, leitura });
-  }
+      const { data: midia } = await supabase
+        .from("midias")
+        .insert({
+          workspace_id: workspaceId,
+          bucket: "nia-anexos",
+          storage_path: a.storagePath,
+          tipo: a.tipo,
+          nome_original: a.nomeOriginal ?? null,
+          mime_type: a.mimeType,
+          tamanho_bytes: a.tamanho ?? null,
+          origem: "app",
+          enviado_por: profileId,
+          texto_extraido: textoExtraido,
+          processado: true,
+        })
+        .select("id")
+        .maybeSingle();
+      const id = (midia as { id: string } | null)?.id;
+      return {
+        conteudo,
+        transcricao,
+        midia: id ? { id, tipo: a.tipo, nome: a.nomeOriginal ?? null, storagePath: a.storagePath, leitura } : null,
+      };
+    }),
+  );
+
+  const conteudos = resultados.map((r) => r.conteudo).filter((c): c is NonNullable<typeof c> => c !== null);
+  const midias = resultados.map((r) => r.midia).filter((m): m is MidiaProcessada => m !== null);
+  const transcricoes = resultados.map((r) => r.transcricao).filter((t): t is string => t !== null);
 
   return { textoTranscrito: transcricoes.join("\n").trim(), conteudos, midias };
 }
