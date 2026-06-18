@@ -19,6 +19,11 @@
   reaproveitado no Início e em Relatórios.
 - **"Seus cartões" saiu do Início** — cartões continuam em Cadastros; o espaço nobre
   do Início fica para descobertas.
+- **Engine de Descobertas (Fase 1) no ar** — `lib/insights/` com tipo `Descoberta` e
+  card **"Descobertas"** no Início (logo abaixo do herói). Primeiras regras
+  determinísticas: **Assinaturas Fantasma** (recorrências supérfluas → custo anual) e
+  **Gastos Invisíveis** (compras < R$ 35 no mês). Cada linha leva ao lugar de agir.
+  Pronto para a Nia proativa reaproveitar.
 
 ---
 
@@ -154,13 +159,15 @@ descobertas em profundidade + exploração livre com esses filtros.
 
 ## 7. Próximos passos concretos
 
-1. **Fase 0.1** — RPCs por intervalo + componente `PeriodoFilter` (client) com estado em URL.
-2. **`lib/insights/`** — tipo `Descoberta` + 3 regras (assinatura fantasma, gasto
-   invisível, pico de categoria) e card `DescobertasCard` no Início.
+1. ✅ **`lib/insights/`** — tipo `Descoberta` + card `DescobertasCard` no Início.
+   Regras no ar: assinatura fantasma, gastos invisíveis. _(falta: pico de categoria —
+   depende da janela histórica da Fase 0.3)._
+2. **Fase 0.1** — RPCs por intervalo + componente `PeriodoFilter` (client) com estado
+   em URL. Destrava comparativo mês a mês e Relatórios filtrável.
 3. **Previsão de Sufoco** — RPC `previsao_mes` (receita prevista − gastos − contas
-   futuras − fatura aberta) → semáforo.
+   futuras − fatura aberta) → semáforo no herói do Início.
 4. **Radar de Preço Injusto** — RPC `desvio_preco_produto` (preço pago × média 90d do
-   produto) → card + drill por produto.
-5. Plugar as descobertas no **`nia-alertas-cron`** para virarem mensagem proativa da Nia.
+   produto) → vira mais uma regra de Descoberta + drill por produto.
+5. Plugar `getDescobertas()` no **`nia-alertas-cron`** para virarem mensagem proativa da Nia.
 
 _Cada item acima é uma PR pequena e isolada; a Fase 0 é a única dependência cruzada._
