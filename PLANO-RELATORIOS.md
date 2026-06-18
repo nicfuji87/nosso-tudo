@@ -180,9 +180,12 @@ descobertas em profundidade + exploração livre com esses filtros.
    `gastos_por_subcategoria_periodo` (migration 0024): escolher um pai mostra o
    **detalhe em subcategorias** (ex.: Alimentação em casa → Carnes, Hortifruti…),
    combinável com tempo e pessoa. **Trio de filtros completo.**
-7. **Previsão de Sufoco** — RPC `previsao_mes` (receita prevista − gastos − contas
+7. ✅ **Descobertas na Nia proativa** — tipos de alerta `assinaturas_fantasma` e
+   `gastos_invisiveis` na Edge Function `nia-alertas-cron` (migration 0025 libera o
+   CHECK; admin cria/agenda em Admin → Alertas). Mesma regra das Descobertas, agora
+   por WhatsApp.
+8. **Previsão de Sufoco** — RPC `previsao_mes` (receita prevista − gastos − contas
    futuras − fatura aberta) → semáforo no herói do Início.
-8. Plugar `getDescobertas()` no **`nia-alertas-cron`** para virarem mensagem proativa da Nia.
 
 > **Reprioritização (evidência de dados, jun/2026):** os relatórios de preço (Radar,
 > Cesta, Inflação) ficam para depois — só 4 produtos têm recompra e 0 recorrências

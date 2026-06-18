@@ -60,6 +60,8 @@ const TIPO_LABEL: Record<TipoAlerta, string> = {
   resumo_semanal: "Resumo semanal",
   resumo_mensal: "Resumo mensal",
   personalizado: "Mensagem personalizada",
+  assinaturas_fantasma: "Assinaturas fantasma",
+  gastos_invisiveis: "Gastos invisíveis",
 };
 
 const TIPO_DESC: Record<TipoAlerta, string> = {
@@ -70,6 +72,8 @@ const TIPO_DESC: Record<TipoAlerta, string> = {
   resumo_semanal: "Manda um resumo de receitas/despesas da semana.",
   resumo_mensal: "Manda um resumo de receitas/despesas do mês.",
   personalizado: "Você escreve a mensagem; a Nia só dispara no agendamento.",
+  assinaturas_fantasma: "Recorrências supérfluas que pesam no ano — vale rever.",
+  gastos_invisiveis: "Soma das compras pequenas (< R$ 35) que vazam no mês.",
 };
 
 const FREQ_LABEL: Record<FrequenciaAlerta, string> = {
@@ -101,12 +105,14 @@ const TIPOS: TipoAlerta[] = [
   "cartao_limite",
   "resumo_semanal",
   "resumo_mensal",
+  "assinaturas_fantasma",
+  "gastos_invisiveis",
   "personalizado",
 ];
 const TIPOS_COM_LIMIAR: TipoAlerta[] = ["orcamento_perto", "cartao_limite"];
 
 const PLACEHOLDERS =
-  "{nome} {espaco} {saldo} {receitas} {despesas} {categoria} {gasto} {planejado} {pct} {cartao} {limite} {periodo}";
+  "{nome} {espaco} {saldo} {receitas} {despesas} {categoria} {gasto} {planejado} {pct} {cartao} {limite} {periodo} {qtd} {total} {itens}";
 
 interface FormState {
   id?: string;

@@ -71,6 +71,8 @@ export const alertaSchema = z
       "resumo_semanal",
       "resumo_mensal",
       "personalizado",
+      "assinaturas_fantasma",
+      "gastos_invisiveis",
     ]),
     ativo: z.boolean().default(false),
     frequencia: z.enum(["imediato", "diario", "semanal", "mensal"]),

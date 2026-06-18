@@ -16,6 +16,8 @@ export const TIPOS_ALERTA = [
   "resumo_semanal",
   "resumo_mensal",
   "personalizado",
+  "assinaturas_fantasma",
+  "gastos_invisiveis",
 ] as const;
 export type TipoAlerta = (typeof TIPOS_ALERTA)[number];
 

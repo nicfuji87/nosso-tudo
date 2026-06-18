@@ -137,7 +137,23 @@ const TEMPLATES: Record<string, string> = {
     "📊 {nome}, resumo da semana em *{espaco}*: {despesas} em despesas e {receitas} em receitas. Saldo: {saldo}.",
   resumo_mensal:
     "📅 {nome}, resumo do mês em *{espaco}*: {despesas} em despesas e {receitas} em receitas. Saldo: {saldo}.",
+  assinaturas_fantasma:
+    "👻 {nome}, em *{espaco}* há {qtd} assinatura(s) de baixa prioridade — cerca de {total}/ano. Vale rever: {itens}.",
+  gastos_invisiveis:
+    "💧 {nome}, em *{espaco}* já são {total} em {qtd} compras pequenas este mês. Os “gastos invisíveis” somam — bora ficar de olho?",
   personalizado: "{mensagem}",
+};
+
+/** Quantas vezes por ano cada frequência de recorrência cobra (p/ anualizar). */
+const FATOR_ANUAL: Record<string, number> = {
+  diaria: 365,
+  semanal: 52,
+  quinzenal: 26,
+  mensal: 12,
+  bimestral: 6,
+  trimestral: 4,
+  semestral: 2,
+  anual: 1,
 };
 
 function render(alerta: Alerta, dest: Destinatario, alvo: Alvo, vars: Record<string, string>): string {
@@ -348,6 +364,58 @@ async function avaliarRegra(
             saldo: moeda(saldo),
             periodo: a.tipo === "resumo_semanal" ? "últimos 7 dias" : "mês",
           },
+        },
+      ];
+    }
+    case "assinaturas_fantasma": {
+      // Recorrências ativas de despesa cuja categoria é supérflua → custo anual.
+      const { data } = await admin
+        .from("recorrencias")
+        .select("descricao, valor_previsto, frequencia, categoria:categorias(essencialidade_padrao)")
+        .eq("workspace_id", workspaceId)
+        .eq("ativa", true)
+        .eq("tipo", "despesa");
+      const rows =
+        (data as
+          | {
+              descricao: string;
+              valor_previsto: number;
+              frequencia: string;
+              categoria: { essencialidade_padrao: string | null } | null;
+            }[]
+          | null) ?? [];
+      const fantasmas = rows.filter((r) => r.categoria?.essencialidade_padrao === "superfluo");
+      if (fantasmas.length === 0) return [];
+      const totalAno = fantasmas.reduce(
+        (s, r) => s + Number(r.valor_previsto) * (FATOR_ANUAL[r.frequencia] ?? 12),
+        0,
+      );
+      const itens = fantasmas.slice(0, 3).map((r) => r.descricao).join(", ");
+      return [
+        {
+          disc: "fantasma",
+          vars: { qtd: String(fantasmas.length), total: moeda(totalAno), itens },
+        },
+      ];
+    }
+    case "gastos_invisiveis": {
+      const limite = Number((a.parametros?.["valor_max"] as number) ?? 35);
+      const { data } = await admin
+        .from("transacoes")
+        .select("valor")
+        .eq("workspace_id", workspaceId)
+        .eq("tipo", "despesa")
+        .eq("status_revisao", "confirmado")
+        .gte("data_transacao", t.primeiroDiaMes)
+        .gt("valor", 0)
+        .lt("valor", limite);
+      const rows = (data as { valor: number }[] | null) ?? [];
+      if (rows.length < 3) return []; // poucas compras: ainda não é um padrão
+      const total = rows.reduce((s, r) => s + Number(r.valor), 0);
+      return [
+        {
+          disc: "invisiveis",
+          vars: { qtd: String(rows.length), total: moeda(total), limite: moeda(limite) },
         },
       ];
     }
