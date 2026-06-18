@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
-import type { FrequenciaRecorrencia } from "@/lib/types/db";
+import { formatDate } from "@/lib/format";
+import { LABEL_FREQUENCIA, type FrequenciaRecorrencia } from "@/lib/types/db";
 
 /**
  * Engine de DESCOBERTAS (determinística, sem LLM).
@@ -11,6 +12,14 @@ import type { FrequenciaRecorrencia } from "@/lib/types/db";
 
 export type SeveridadeDescoberta = "oportunidade" | "atencao" | "risco";
 
+/** Uma linha do drill da descoberta (qual gasto/assinatura entrou na conta). */
+export interface DescobertaItem {
+  descricao: string;
+  /** apoio: estabelecimento · data, ou frequência */
+  sub: string | null;
+  valor: number | null;
+}
+
 export interface Descoberta {
   /** chave estável (tipo) — uma descoberta por regra */
   tipo: "assinatura_fantasma" | "gastos_invisiveis";
@@ -21,6 +30,8 @@ export interface Descoberta {
   /** valor em destaque (R$); null quando não se aplica */
   valor: number | null;
   href: string;
+  /** quando presente, o card abre um detalhamento (em vez de só navegar) */
+  itens?: DescobertaItem[];
 }
 
 /** Quantas vezes por ano cada frequência cobra — p/ anualizar recorrências. */
@@ -74,7 +85,6 @@ async function assinaturasFantasma(workspaceId: string): Promise<Descoberta | nu
     (s, r) => s + Number(r.valor_previsto) * (FATOR_ANUAL[r.frequencia] ?? 12),
     0,
   );
-  const nomes = fantasmas.slice(0, 3).map((r) => r.descricao).join(", ");
 
   return {
     tipo: "assinatura_fantasma",
@@ -84,9 +94,16 @@ async function assinaturasFantasma(workspaceId: string): Promise<Descoberta | nu
       fantasmas.length === 1
         ? "1 assinatura de baixa prioridade"
         : `${fantasmas.length} assinaturas de baixa prioridade`,
-    detalhe: `${nomes}${fantasmas.length > 3 ? "…" : ""} — vale rever`,
+    detalhe: "supérfluas e recorrentes — toque para ver",
     valor: totalAnual,
     href: "/app/cadastros",
+    itens: fantasmas
+      .sort((a, b) => Number(b.valor_previsto) - Number(a.valor_previsto))
+      .map((r) => ({
+        descricao: r.descricao,
+        sub: LABEL_FREQUENCIA[r.frequencia] ?? r.frequencia,
+        valor: Number(r.valor_previsto),
+      })),
   };
 }
 
@@ -96,30 +113,42 @@ async function assinaturasFantasma(workspaceId: string): Promise<Descoberta | nu
  */
 async function gastosInvisiveis(workspaceId: string): Promise<Descoberta | null> {
   const supabase = createClient();
+  // Cada "compra pequena" é uma transação inteira abaixo do limite (padaria,
+  // café, app…). Itens dentro de uma compra grande não contam — esses são
+  // gastos planejados, não vazamentos avulsos.
   const { data } = await supabase
     .from("transacoes")
-    .select("valor")
+    .select("descricao, valor, data_transacao, estabelecimento:estabelecimentos(nome)")
     .eq("workspace_id", workspaceId)
     .eq("tipo", "despesa")
     .eq("status_revisao", "confirmado")
     .gte("data_transacao", inicioDoMes())
     .gt("valor", 0)
-    .lt("valor", LIMITE_INVISIVEL);
-  const rows = (data as { valor: number }[] | null) ?? [];
+    .lt("valor", LIMITE_INVISIVEL)
+    .order("valor", { ascending: false });
+  const rows =
+    (data as
+      | { descricao: string; valor: number; data_transacao: string; estabelecimento: { nome: string } | null }[]
+      | null) ?? [];
   if (rows.length < 3) return null; // poucas compras: ainda não é um padrão
 
   const total = rows.reduce((s, r) => s + Number(r.valor), 0);
+  const limiteFmt = LIMITE_INVISIVEL.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   return {
     tipo: "gastos_invisiveis",
     severidade: "atencao",
     emoji: "💧",
     titulo: "Gastos invisíveis somam",
-    detalhe: `${rows.length} compras abaixo de ${LIMITE_INVISIVEL.toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    })} este mês`,
+    detalhe: `${rows.length} compras abaixo de ${limiteFmt} este mês — toque para ver`,
     valor: total,
     href: "/app/transacoes",
+    itens: rows.map((r) => ({
+      descricao: r.descricao || r.estabelecimento?.nome || "Compra",
+      sub: [r.estabelecimento?.nome, r.data_transacao ? formatDate(r.data_transacao) : null]
+        .filter(Boolean)
+        .join(" · ") || null,
+      valor: Number(r.valor),
+    })),
   };
 }
 
