@@ -180,6 +180,61 @@ export const marcarEventoArgs = z.object({
 });
 export type MarcarEventoArgs = z.infer<typeof marcarEventoArgs>;
 
+export const conciliarFaturaArgs = z.object({
+  /** Apelido do cartão da fatura (ex.: "Santander"), para casar com o cadastro. */
+  cartao: z.string().trim().max(60).optional(),
+  /** Mês de referência da fatura, ISO YYYY-MM-DD (1º dia do mês). Opcional. */
+  mes_referencia: z.string().optional(),
+  /** Vencimento da fatura, ISO YYYY-MM-DD. Opcional. */
+  vencimento: z.string().optional(),
+  /** Total a pagar da fatura, em reais. Opcional. */
+  total: z.number().nonnegative().optional(),
+  /** Cada lançamento (linha) da fatura. Créditos/pagamentos (valor ≤ 0) são ignorados. */
+  linhas: z
+    .array(
+      z.object({
+        /** Data da compra, ISO YYYY-MM-DD. */
+        data: z.string().optional(),
+        descricao: z.string().trim().min(1).max(200),
+        valor: z.number(),
+        /** Parcela, ex.: "3/10". Opcional. */
+        parcela: z.string().trim().max(12).optional(),
+        /** Categoria do padrão inferida da descrição (ex.: Uber → Transporte). Opcional. */
+        categoria: z.string().trim().max(120).optional(),
+      }),
+    )
+    .min(1)
+    .max(200),
+});
+export type ConciliarFaturaArgs = z.infer<typeof conciliarFaturaArgs>;
+
+/** Payload enriquecido (com o matching já calculado) gravado em nia_acoes. */
+export const conciliarFaturaPayload = z.object({
+  cartaoApelido: z.string().nullable(),
+  cartaoId: z.string().uuid().nullable(),
+  mesReferencia: z.string().nullable(),
+  vencimento: z.string().nullable(),
+  total: z.number().nullable(),
+  casados: z.array(
+    z.object({
+      data: z.string().nullable(),
+      descricao: z.string(),
+      valor: z.number(),
+      transacaoId: z.string().uuid(),
+      transacaoDescricao: z.string(),
+    }),
+  ),
+  faltando: z.array(
+    z.object({
+      data: z.string().nullable(),
+      descricao: z.string(),
+      valor: z.number(),
+      categoria: z.string().nullable(),
+    }),
+  ),
+});
+export type ConciliarFaturaPayload = z.infer<typeof conciliarFaturaPayload>;
+
 export const criarContaArgs = z.object({
   apelido: z.string().trim().min(1).max(60),
   banco: z.string().trim().min(1).max(60),
@@ -338,6 +393,22 @@ export interface WidgetMarcarEvento {
   amostra: string[];
 }
 
+export interface WidgetConciliacaoFatura {
+  tipo: "conciliacao_fatura";
+  acaoId: string;
+  /** Apelido do cartão resolvido (ou o que a Nia leu, se não casou com cadastro). */
+  cartao: string | null;
+  mesReferencia: string | null;
+  vencimento: string | null;
+  totalFatura: number | null;
+  /** Linhas que já têm lançamento (serão só marcadas como conferidas). */
+  casados: { data: string | null; descricao: string; valor: number; transacaoDescricao: string }[];
+  /** Linhas sem lançamento (serão criadas, se o usuário aceitar). */
+  faltando: { data: string | null; descricao: string; valor: number; categoria: string | null }[];
+  /** Lançamentos do cartão no período que NÃO estão na fatura (só informativo). */
+  sobrando: { data: string | null; descricao: string; valor: number }[];
+}
+
 export type NiaWidget =
   | WidgetResumoPeriodo
   | WidgetConfirmarTransacao
@@ -353,6 +424,7 @@ export type NiaWidget =
   | WidgetCriarRecorrencia
   | WidgetCriarEvento
   | WidgetMarcarEvento
+  | WidgetConciliacaoFatura
   | WidgetDocumento;
 
 /* ------------------------------------------------------------------ */

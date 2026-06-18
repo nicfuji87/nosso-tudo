@@ -29,6 +29,7 @@ import {
   confirmarCartao,
   confirmarCategoria,
   confirmarCompromisso,
+  confirmarConciliacao,
   confirmarConta,
   confirmarEvento,
   confirmarFato,
@@ -53,6 +54,7 @@ import {
 import type {
   NiaWidget,
   WidgetChecklistItens,
+  WidgetConciliacaoFatura,
   WidgetConfirmarTransacao,
   WidgetDocumento,
   WidgetResumoPeriodo,
@@ -656,6 +658,8 @@ function WidgetView({
       return <ConfirmarTransacaoCard w={widget} estadoInicial={estadoInicial} historico={historico} />;
     case "checklist_itens":
       return <ChecklistItensCard w={widget} estadoInicial={estadoInicial} />;
+    case "conciliacao_fatura":
+      return <ConciliacaoFaturaCard w={widget} estadoInicial={estadoInicial} />;
     case "documento":
       return <DocumentoCard w={widget} />;
     case "criar_pessoa":
@@ -1207,6 +1211,239 @@ function ChecklistItensCard({
           </>
         )}
       </div>
+      {estado === "erro" && <p className="px-4 pb-3 text-body-sm text-destructive">{erro}</p>}
+    </div>
+  );
+}
+
+/** Rótulo "junho de 2026" a partir de um ISO YYYY-MM-DD. */
+function rotuloMes(iso: string | null): string | null {
+  if (!iso) return null;
+  const [y, m] = iso.split("-").map(Number);
+  if (!y || !m) return null;
+  return new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(
+    new Date(Date.UTC(y, m - 1, 1)),
+  );
+}
+
+function ConciliacaoFaturaCard({
+  w,
+  estadoInicial = "idle",
+}: {
+  w: WidgetConciliacaoFatura;
+  estadoInicial?: EstadoAcao;
+}) {
+  const inicial =
+    estadoInicial === "feito" || estadoInicial === "desfeito"
+      ? "feito"
+      : estadoInicial === "descartado"
+        ? "descartado"
+        : "idle";
+  const [linkar, setLinkar] = useState<boolean[]>(() => w.casados.map(() => true));
+  const [criar, setCriar] = useState<boolean[]>(() => w.faltando.map(() => true));
+  const [estado, setEstado] = useState<"idle" | "salvando" | "feito" | "descartado" | "erro">(inicial);
+  const [erro, setErro] = useState<string | null>(null);
+  const [res, setRes] = useState<{ conferidos: number; lancados: number } | null>(null);
+  const [verSobrando, setVerSobrando] = useState(false);
+  const editavel = estado === "idle" || estado === "erro";
+
+  const nConferir = linkar.filter(Boolean).length;
+  const nLancar = criar.filter(Boolean).length;
+  const somaLancar = w.faltando.reduce((s, f, i) => s + (criar[i] ? f.valor : 0), 0);
+
+  function toggleLinkar(i: number) {
+    if (!editavel) return;
+    setLinkar((prev) => prev.map((v, j) => (j === i ? !v : v)));
+  }
+  function toggleCriar(i: number) {
+    if (!editavel) return;
+    setCriar((prev) => prev.map((v, j) => (j === i ? !v : v)));
+  }
+  async function confirmar() {
+    const li = linkar.flatMap((v, i) => (v ? [i] : []));
+    const ci = criar.flatMap((v, i) => (v ? [i] : []));
+    setEstado("salvando");
+    const r = await confirmarConciliacao(w.acaoId, li, ci);
+    if (r.error) {
+      setErro(r.error);
+      setEstado("erro");
+    } else {
+      setRes({ conferidos: r.conferidos ?? 0, lancados: r.lancados ?? 0 });
+      setEstado("feito");
+    }
+  }
+  async function descartar() {
+    await rejeitarAcao(w.acaoId);
+    setEstado("descartado");
+  }
+
+  const mes = rotuloMes(w.mesReferencia);
+  const subtitulo = [
+    mes ? `Fatura de ${mes}` : null,
+    w.vencimento ? `venc. ${formatDate(w.vencimento)}` : null,
+    w.totalFatura != null ? `total ${formatBRL(w.totalFatura)}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
+      <div className="border-b border-border px-4 py-3">
+        <p className="font-medium">Conciliar fatura{w.cartao ? ` · ${w.cartao}` : ""}</p>
+        {subtitulo && <p className="text-caption text-muted-foreground">{subtitulo}</p>}
+      </div>
+
+      {estado === "feito" ? (
+        <div className="flex items-center gap-1.5 px-4 py-3 text-body-sm text-accent">
+          <Check className="size-4" /> {res?.conferidos ?? 0} conferido(s)
+          {(res?.lancados ?? 0) > 0 && ` · ${res?.lancados} novo(s) lançado(s)`}.
+        </div>
+      ) : estado === "descartado" ? (
+        <p className="px-4 py-3 text-body-sm text-muted-foreground">Descartado.</p>
+      ) : (
+        <>
+          {w.casados.length > 0 && (
+            <div>
+              <p className="bg-secondary/40 px-4 py-1.5 text-caption font-medium text-muted-foreground">
+                Já lançado — vou só marcar como conferido ({w.casados.length})
+              </p>
+              <div className="divide-y divide-border">
+                {w.casados.map((c, i) => (
+                  <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+                    <button
+                      type="button"
+                      onClick={() => toggleLinkar(i)}
+                      disabled={!editavel}
+                      aria-label="Conferir lançamento"
+                      className={cn(
+                        "flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
+                        linkar[i] ? "border-accent bg-accent text-accent-foreground" : "border-border",
+                      )}
+                    >
+                      {linkar[i] && <Check className="size-3.5" />}
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <p className={cn("truncate text-body-sm", !linkar[i] && "text-muted-foreground line-through")}>
+                        {c.descricao}
+                      </p>
+                      <p className="truncate text-caption text-muted-foreground">
+                        ↔ {c.transacaoDescricao}
+                        {c.data ? ` · ${formatDate(c.data)}` : ""}
+                      </p>
+                    </div>
+                    <span className="shrink-0 font-mono text-body-sm tabular-nums text-muted-foreground">
+                      {formatBRL(c.valor)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {w.faltando.length > 0 && (
+            <div>
+              <p className="bg-secondary/40 px-4 py-1.5 text-caption font-medium text-muted-foreground">
+                Faltando — não estava lançado, vou lançar ({w.faltando.length})
+              </p>
+              <div className="divide-y divide-border">
+                {w.faltando.map((f, i) => (
+                  <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+                    <button
+                      type="button"
+                      onClick={() => toggleCriar(i)}
+                      disabled={!editavel}
+                      aria-label="Lançar"
+                      className={cn(
+                        "flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
+                        criar[i] ? "border-accent bg-accent text-accent-foreground" : "border-border",
+                      )}
+                    >
+                      {criar[i] && <Check className="size-3.5" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleCriar(i)}
+                      disabled={!editavel}
+                      className={cn(
+                        "min-w-0 flex-1 truncate text-left text-body-sm",
+                        !criar[i] && "text-muted-foreground line-through",
+                      )}
+                    >
+                      {f.descricao}
+                      {f.categoria ? <span className="text-muted-foreground"> · {f.categoria}</span> : null}
+                      {f.data ? <span className="text-muted-foreground"> · {formatDate(f.data)}</span> : null}
+                    </button>
+                    <span
+                      className={cn(
+                        "shrink-0 font-mono text-body-sm tabular-nums",
+                        !criar[i] && "text-muted-foreground line-through",
+                      )}
+                    >
+                      {formatBRL(f.valor)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {w.sobrando.length > 0 && (
+            <div className="border-t border-border">
+              <button
+                type="button"
+                onClick={() => setVerSobrando((v) => !v)}
+                className="w-full px-4 py-2 text-left text-caption font-medium text-muted-foreground hover:bg-secondary/40"
+              >
+                No app, mas fora desta fatura ({w.sobrando.length}) — confira se não é erro ▾
+              </button>
+              {verSobrando && (
+                <div className="divide-y divide-border">
+                  {w.sobrando.map((s, i) => (
+                    <div key={i} className="flex items-center gap-3 px-4 py-2 text-muted-foreground">
+                      <span className="min-w-0 flex-1 truncate text-body-sm">
+                        {s.descricao}
+                        {s.data ? ` · ${formatDate(s.data)}` : ""}
+                      </span>
+                      <span className="shrink-0 font-mono text-body-sm tabular-nums">{formatBRL(s.valor)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-2 border-t border-border bg-secondary/40 px-4 py-3">
+            <div className="text-body-sm text-muted-foreground">
+              {nConferir} conferir
+              {nLancar > 0 && (
+                <>
+                  {" · "}
+                  {nLancar} lançar (<span className="font-mono tabular-nums text-foreground">{formatBRL(somaLancar)}</span>)
+                </>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                onClick={confirmar}
+                disabled={estado === "salvando" || (nConferir === 0 && nLancar === 0)}
+              >
+                {estado === "salvando" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+                Conciliar
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={descartar}
+                disabled={estado === "salvando"}
+                aria-label="Descartar"
+              >
+                <X className="size-4" />
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
       {estado === "erro" && <p className="px-4 pb-3 text-body-sm text-destructive">{erro}</p>}
     </div>
   );

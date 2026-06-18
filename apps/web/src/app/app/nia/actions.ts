@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { resolveWorkspaceId } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -11,6 +12,7 @@ import { transacaoSchema, type TransacaoInput } from "@/lib/schemas/transacao";
 import { criarCartao, criarConta, criarCategoria, criarEntidade } from "@/app/app/cadastros/actions";
 import { listCategorias, listEntidades } from "@/lib/db/queries";
 import {
+  conciliarFaturaPayload,
   criarCartaoArgs,
   criarCategoriaArgs,
   criarCompromissoArgs,
@@ -391,6 +393,113 @@ export async function confirmarTransacaoDetalhada(
     registroId: res.id,
   });
   return { ok: true, pulados };
+}
+
+/**
+ * Concilia uma fatura de cartão: marca como conferidos os lançamentos que já
+ * existiam (casados[linkarIdx]) — vinculando à fatura/cartão SEM mexer em valor
+ * ou categoria — e lança só o que faltava (faltando[criarIdx]). Não duplica: as
+ * linhas que já têm lançamento nunca viram transação nova.
+ */
+export async function confirmarConciliacao(
+  acaoId: string,
+  linkarIdx: number[],
+  criarIdx: number[],
+): Promise<{ error?: string; ok?: boolean; conferidos?: number; lancados?: number }> {
+  const acao = await carregarAcao(acaoId);
+  if (!acao) return { error: "Ação não encontrada." };
+  if (acao.status !== "proposta") return { error: "Essa ação já foi processada." };
+  if (acao.ferramenta !== "conciliar_fatura") return { error: "Ação não suportada." };
+
+  const parsed = conciliarFaturaPayload.safeParse(acao.payload_proposto);
+  if (!parsed.success) return { error: "Dados da proposta inválidos." };
+  const p = parsed.data;
+
+  const supabase = createClient();
+  const ws = acao.workspace_id;
+
+  // Fatura: só dá pra registrar a linha com cartão + mês de referência (NOT NULL +
+  // UNIQUE). Sem cartão resolvido, segue sem fatura_id (só marca conciliado).
+  let faturaId: string | null = null;
+  if (p.cartaoId && p.mesReferencia) {
+    const { data: fat } = await supabase
+      .from("faturas_cartao")
+      .upsert(
+        {
+          workspace_id: ws,
+          cartao_id: p.cartaoId,
+          mes_referencia: p.mesReferencia,
+          data_vencimento: p.vencimento,
+          valor_total: p.total,
+          status: "fechada",
+        },
+        { onConflict: "cartao_id,mes_referencia" },
+      )
+      .select("id")
+      .maybeSingle();
+    faturaId = (fat as { id: string } | null)?.id ?? null;
+  }
+
+  // Casados → conferidos: vincula fatura + marca conciliado, sem tocar valor/categoria.
+  let conferidos = 0;
+  for (const i of linkarIdx) {
+    const c = p.casados[i];
+    if (!c) continue;
+    const patch: Record<string, unknown> = { status_conciliacao: "conciliado" };
+    if (faturaId) patch.fatura_id = faturaId;
+    const { error } = await supabase
+      .from("transacoes")
+      .update(patch)
+      .eq("id", c.transacaoId)
+      .eq("workspace_id", ws);
+    if (error) continue;
+    conferidos++;
+    // Preenche o cartão só quando estiver vazio (não sobrescreve um cartão correto).
+    if (p.cartaoId) {
+      await supabase
+        .from("transacoes")
+        .update({ cartao_id: p.cartaoId })
+        .eq("id", c.transacaoId)
+        .eq("workspace_id", ws)
+        .is("cartao_id", null);
+    }
+  }
+
+  // Faltando → lança como despesa de crédito, já conciliada e ligada à fatura.
+  let lancados = 0;
+  const hoje = new Date().toISOString().slice(0, 10);
+  for (const i of criarIdx) {
+    const f = p.faltando[i];
+    if (!f) continue;
+    // Categoria ancorada no padrão canônico (se a Nia inferiu uma).
+    const cat = f.categoria ? await resolverCategoriaCanonica(supabase, ws, f.categoria) : null;
+    const { error } = await supabase.from("transacoes").insert({
+      workspace_id: ws,
+      tipo: "despesa",
+      descricao: f.descricao,
+      valor: f.valor,
+      data_transacao: f.data ?? hoje,
+      categoria_id: cat?.id ?? null,
+      meio_pagamento: "cartao_credito",
+      cartao_id: p.cartaoId,
+      origem: "fatura_cartao",
+      fatura_id: faturaId,
+      status_conciliacao: "conciliado",
+      status_revisao: "confirmado",
+    });
+    if (!error) lancados++;
+  }
+
+  revalidatePath("/app");
+  revalidatePath("/app/transacoes");
+  revalidatePath("/app/relatorios");
+
+  await atualizarAcao(acaoId, {
+    status: "executada",
+    resultado: { ok: true, conferidos, lancados },
+    registroId: faturaId,
+  });
+  return { ok: true, conferidos, lancados };
 }
 
 /**

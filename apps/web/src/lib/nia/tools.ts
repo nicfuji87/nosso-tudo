@@ -26,6 +26,7 @@ import { normalizarTexto } from "@/lib/normalize";
 import {
   buscarDocumentosArgs,
   buscarItensArgs,
+  conciliarFaturaArgs,
   consultarCadastrosArgs,
   consultarGastosArgs,
   criarCartaoArgs,
@@ -327,7 +328,7 @@ const lancarTransacao: NiaTool = {
 const lancarTransacaoDetalhada: NiaTool = {
   nome: "lancar_transacao_detalhada",
   descricao:
-    "Lança uma compra com os ITENS individuais (de uma nota fiscal/recibo). Use quando o usuário enviar a foto ou PDF de uma nota: leia cada item (nome, quantidade, valor) e proponha todos. Capture também o meio de pagamento, o cartão/conta e o beneficiário quando aparecerem (ex.: 'Latam Pass' → cartao 'Latam Pass'). NÃO grava direto — gera um checklist para o usuário confirmar item a item. IMPORTANTE: ao chamar esta ferramenta, responda com UMA frase curta (ex.: 'Separei os itens, confira abaixo 👇') e NÃO repita os itens em texto nem em tabela — o checklist interativo já mostra tudo.",
+    "Lança uma compra com os ITENS individuais (de uma nota fiscal/recibo de UMA única compra). Use quando o usuário enviar a foto ou PDF de uma nota: leia cada item (nome, quantidade, valor) e proponha todos. NÃO use para FATURA/EXTRATO de cartão de crédito (várias compras do mês) — nesse caso use conciliar_fatura, que casa com o que já foi lançado em vez de duplicar. Capture também o meio de pagamento, o cartão/conta e o beneficiário quando aparecerem (ex.: 'Latam Pass' → cartao 'Latam Pass'). NÃO grava direto — gera um checklist para o usuário confirmar item a item. IMPORTANTE: ao chamar esta ferramenta, responda com UMA frase curta (ex.: 'Separei os itens, confira abaixo 👇') e NÃO repita os itens em texto nem em tabela — o checklist interativo já mostra tudo.",
   nivel: "confirmar",
   inputSchema: {
     type: "object",
@@ -724,6 +725,204 @@ const marcarEvento: NiaTool = {
   },
 };
 
+/** Diferença em dias entre duas datas ISO (a − b). */
+function diasEntreISO(a: string, b: string): number {
+  const [ay, am, ad] = a.split("-").map(Number);
+  const [by, bm, bd] = b.split("-").map(Number);
+  return Math.round((Date.UTC(ay!, am! - 1, ad!) - Date.UTC(by!, bm! - 1, bd!)) / 86_400_000);
+}
+
+/** Soma `n` dias a uma data ISO (YYYY-MM-DD). */
+function addDiasISO(iso: string, n: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y!, m! - 1, d! + n)).toISOString().slice(0, 10);
+}
+
+interface CandidatoTx {
+  id: string;
+  descricao: string;
+  valor: number;
+  data_transacao: string;
+  cartao_id: string | null;
+  status_conciliacao: string | null;
+}
+
+const conciliarFatura: NiaTool = {
+  nome: "conciliar_fatura",
+  descricao:
+    "CONCILIA uma FATURA de cartão de crédito (o extrato mensal com várias compras) com o que JÁ foi lançado — em vez de relançar tudo e duplicar. Use SEMPRE que o usuário enviar uma fatura/extrato de cartão (não uma nota de UMA compra). Leia cada LINHA da fatura (data da compra, descrição, valor; e a parcela tipo '3/10' se houver) e passe todas em 'linhas'. Informe o 'cartao' (ex.: 'Santander'), e o 'vencimento'/'total' se aparecerem. NÃO inclua linhas de crédito/pagamento (valor negativo, 'pagamento de fatura anterior'). Classifique cada linha com uma categoria do padrão quando der pra inferir (Uber→Transporte, mercado→Alimentação, farmácia→Saúde). O sistema casa cada linha com os lançamentos existentes por valor+data e mostra: já lançado (vou só conferir), faltando (vou lançar) e o que está no app mas não na fatura. NÃO grava direto — gera um cartão de conciliação para o usuário confirmar. Responda com UMA frase curta; o cartão já mostra tudo.",
+  nivel: "confirmar",
+  inputSchema: {
+    type: "object",
+    properties: {
+      cartao: { type: "string", description: "Apelido do cartão da fatura (ex.: 'Santander', 'Nubank')." },
+      mes_referencia: { type: "string", description: "Mês de referência, ISO YYYY-MM-DD (1º dia do mês). Opcional." },
+      vencimento: { type: "string", description: "Vencimento da fatura, ISO YYYY-MM-DD. Opcional." },
+      total: { type: "number", description: "Total a pagar da fatura, em reais. Opcional." },
+      linhas: {
+        type: "array",
+        description: "Linhas (lançamentos) da fatura. Ignore créditos/pagamentos (valor negativo).",
+        items: {
+          type: "object",
+          properties: {
+            data: { type: "string", description: "Data da compra, ISO YYYY-MM-DD." },
+            descricao: { type: "string" },
+            valor: { type: "number", description: "Valor da linha em reais (positivo)." },
+            parcela: { type: "string", description: "Parcela, ex.: '3/10'. Opcional." },
+            categoria: {
+              type: "string",
+              description: "Categoria do padrão inferida da descrição (ex.: Uber→Transporte, farmácia→Saúde). Opcional.",
+            },
+          },
+          required: ["descricao", "valor"],
+        },
+      },
+    },
+    required: ["linhas"],
+  },
+  async executar(args, ctx) {
+    const d = valida(conciliarFaturaArgs, args);
+    const supabase = createClient();
+    const ws = ctx.workspaceId;
+
+    // Resolve o cartão pelo apelido (exato normalizado → contém).
+    let cartaoId: string | null = null;
+    let cartaoApelido: string | null = d.cartao ?? null;
+    if (d.cartao) {
+      const { data } = await supabase
+        .from("cartoes")
+        .select("id, apelido")
+        .eq("workspace_id", ws)
+        .eq("ativo", true);
+      const lista = ((data as { id: string; apelido: string }[] | null) ?? []);
+      const alvo = normalizarTexto(d.cartao);
+      const achado =
+        lista.find((c) => normalizarTexto(c.apelido) === alvo) ??
+        lista.find((c) => {
+          const n = normalizarTexto(c.apelido);
+          return n.includes(alvo) || alvo.includes(n);
+        });
+      if (achado) {
+        cartaoId = achado.id;
+        cartaoApelido = achado.apelido;
+      }
+    }
+
+    // Só linhas de compra (ignora créditos/pagamentos da fatura).
+    const linhas = d.linhas.filter((l) => l.valor > 0);
+    const datas = linhas.map((l) => l.data).filter((x): x is string => !!x).sort();
+    const hoje = new Date().toISOString().slice(0, 10);
+    const lo = datas.length ? addDiasISO(datas[0]!, -7) : addDiasISO(hoje, -120);
+    const hi = datas.length ? addDiasISO(datas[datas.length - 1]!, 7) : hoje;
+
+    // Candidatos: despesas no período ainda não conciliadas.
+    const { data: candData } = await supabase
+      .from("transacoes")
+      .select("id, descricao, valor, data_transacao, cartao_id, status_conciliacao")
+      .eq("workspace_id", ws)
+      .eq("tipo", "despesa")
+      .gte("data_transacao", lo)
+      .lte("data_transacao", hi);
+    const cands = ((candData as CandidatoTx[] | null) ?? []).filter(
+      (c) => c.status_conciliacao !== "conciliado",
+    );
+
+    // Matching: valor exato (±0,01) + data dentro de ±6 dias; prioriza o mesmo cartão e a data mais próxima.
+    const usados = new Set<string>();
+    const casados: ConciliadoLinha[] = [];
+    const faltando: { data: string | null; descricao: string; valor: number; categoria: string | null }[] = [];
+    for (const l of linhas) {
+      let melhor: CandidatoTx | null = null;
+      let melhorScore = Number.POSITIVE_INFINITY;
+      for (const c of cands) {
+        if (usados.has(c.id)) continue;
+        if (Math.abs(Number(c.valor) - l.valor) > 0.01) continue;
+        const dd = l.data ? Math.abs(diasEntreISO(c.data_transacao, l.data)) : 0;
+        if (dd > 6) continue;
+        const penalidadeCartao = cartaoId && c.cartao_id && c.cartao_id !== cartaoId ? 100 : 0;
+        const score = dd + penalidadeCartao;
+        if (score < melhorScore) {
+          melhorScore = score;
+          melhor = c;
+        }
+      }
+      if (melhor) {
+        usados.add(melhor.id);
+        casados.push({
+          data: l.data ?? null,
+          descricao: l.descricao,
+          valor: l.valor,
+          transacaoId: melhor.id,
+          transacaoDescricao: melhor.descricao,
+        });
+      } else {
+        faltando.push({
+          data: l.data ?? null,
+          descricao: l.descricao,
+          valor: l.valor,
+          categoria: l.categoria ?? null,
+        });
+      }
+    }
+
+    // Sobrando: lançamentos do cartão resolvido, no período, que não casaram (informativo).
+    const sobrando = cartaoId
+      ? cands
+          .filter((c) => !usados.has(c.id) && c.cartao_id === cartaoId)
+          .map((c) => ({ data: c.data_transacao, descricao: c.descricao, valor: Number(c.valor) }))
+      : [];
+
+    const mesRef = d.mes_referencia ?? (datas.length ? `${datas[datas.length - 1]!.slice(0, 7)}-01` : null);
+
+    const acaoId = await registrarAcao({
+      workspaceId: ws,
+      profileId: ctx.profileId,
+      conversaId: ctx.conversaId,
+      ferramenta: "conciliar_fatura",
+      nivel: "confirmar",
+      payloadProposto: {
+        cartaoApelido,
+        cartaoId,
+        mesReferencia: mesRef,
+        vencimento: d.vencimento ?? null,
+        total: d.total ?? null,
+        casados,
+        faltando,
+      },
+    });
+    if (!acaoId) throw new Error("Não consegui preparar a conciliação.");
+
+    const widget: NiaWidget = {
+      tipo: "conciliacao_fatura",
+      acaoId,
+      cartao: cartaoApelido,
+      mesReferencia: mesRef,
+      vencimento: d.vencimento ?? null,
+      totalFatura: d.total ?? null,
+      casados: casados.map((c) => ({
+        data: c.data,
+        descricao: c.descricao,
+        valor: c.valor,
+        transacaoDescricao: c.transacaoDescricao,
+      })),
+      faltando,
+      sobrando,
+    };
+    return {
+      texto: `Conciliei a fatura${cartaoApelido ? ` do ${cartaoApelido}` : ""}: ${casados.length} já lançado(s), ${faltando.length} faltando, ${sobrando.length} no app fora da fatura. Aguardando confirmação.`,
+      widget,
+    };
+  },
+};
+
+interface ConciliadoLinha {
+  data: string | null;
+  descricao: string;
+  valor: number;
+  transacaoId: string;
+  transacaoDescricao: string;
+}
+
 const criarConta: NiaTool = {
   nome: "criar_conta",
   descricao:
@@ -1017,6 +1216,7 @@ export const NIA_TOOLS: NiaTool[] = [
   listarTransacoes,
   lancarTransacao,
   lancarTransacaoDetalhada,
+  conciliarFatura,
   criarPessoa,
   criarCategoria,
   criarEvento,
