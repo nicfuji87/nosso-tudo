@@ -46,6 +46,105 @@ export async function getGastosPorCategoria(workspaceId: string): Promise<GastoC
   return (data as GastoCategoria[] | null) ?? [];
 }
 
+export interface CategoriaComparada {
+  categoriaId: string;
+  nome: string;
+  cor: string | null;
+  icone: string | null;
+  atual: number;
+  anterior: number;
+  delta: number;
+  /** variação % vs período anterior; null quando não havia gasto antes (categoria nova) */
+  deltaPct: number | null;
+}
+export interface Comparativo {
+  /** dia do mês usado como corte (compara 1..diaCorte de cada mês) */
+  diaCorte: number;
+  totalAtual: number;
+  totalAnterior: number;
+  /** categorias ordenadas por |delta| desc */
+  categorias: CategoriaComparada[];
+}
+
+/**
+ * Comparativo "mesmo período": 1..hoje deste mês × 1..mesmo-dia do mês anterior.
+ * Compara janelas iguais para a leitura mid-month ser justa (jun não parece
+ * "menor" só por estar pela metade). Usa a RPC gastos_por_categoria_periodo (0021).
+ */
+export async function getComparativoMes(workspaceId: string): Promise<Comparativo> {
+  const supabase = createClient();
+  const hoje = new Date();
+  const diaCorte = hoje.getDate();
+  const fmt = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+  const inicioAtual = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+  const fimAtual = new Date(hoje.getFullYear(), hoje.getMonth(), diaCorte + 1); // exclusivo → inclui hoje
+  const inicioAnterior = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
+  let fimAnterior = new Date(hoje.getFullYear(), hoje.getMonth() - 1, diaCorte + 1);
+  if (fimAnterior > inicioAtual) fimAnterior = inicioAtual; // não vaza p/ o mês atual (meses curtos)
+
+  type Row = { categoria_id: string; categoria_nome: string; cor: string | null; icone: string | null; total: number };
+  const [atualRes, antRes] = await Promise.all([
+    supabase.rpc("gastos_por_categoria_periodo", {
+      p_workspace_id: workspaceId,
+      p_inicio: fmt(inicioAtual),
+      p_fim: fmt(fimAtual),
+    }),
+    supabase.rpc("gastos_por_categoria_periodo", {
+      p_workspace_id: workspaceId,
+      p_inicio: fmt(inicioAnterior),
+      p_fim: fmt(fimAnterior),
+    }),
+  ]);
+  const atual = (atualRes.data as Row[] | null) ?? [];
+  const anterior = (antRes.data as Row[] | null) ?? [];
+
+  const map = new Map<string, CategoriaComparada>();
+  for (const r of atual) {
+    map.set(r.categoria_id, {
+      categoriaId: r.categoria_id,
+      nome: r.categoria_nome,
+      cor: r.cor,
+      icone: r.icone,
+      atual: Number(r.total),
+      anterior: 0,
+      delta: 0,
+      deltaPct: null,
+    });
+  }
+  for (const r of anterior) {
+    const e = map.get(r.categoria_id);
+    if (e) e.anterior = Number(r.total);
+    else
+      map.set(r.categoria_id, {
+        categoriaId: r.categoria_id,
+        nome: r.categoria_nome,
+        cor: r.cor,
+        icone: r.icone,
+        atual: 0,
+        anterior: Number(r.total),
+        delta: 0,
+        deltaPct: null,
+      });
+  }
+
+  const categorias = [...map.values()]
+    .map((c) => {
+      c.delta = c.atual - c.anterior;
+      c.deltaPct = c.anterior > 0 ? (c.delta / c.anterior) * 100 : null;
+      return c;
+    })
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+  return {
+    diaCorte,
+    totalAtual: atual.reduce((s, r) => s + Number(r.total), 0),
+    totalAnterior: anterior.reduce((s, r) => s + Number(r.total), 0),
+    categorias,
+  };
+}
+
 export interface GastoEssencialidade {
   essencialidade: Essencialidade;
   total: number;

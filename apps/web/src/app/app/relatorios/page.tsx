@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { getWorkspaceContext } from "@/lib/auth";
 import {
+  getComparativoMes,
   getGastosPorCategoria,
   getGastosPorContexto,
   getGastosPorEssencialidade,
@@ -11,6 +12,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { BarChart3 } from "lucide-react";
 import { formatBRL } from "@/lib/format";
+import { ComparativoCard } from "@/components/dashboard/comparativo-card";
 import { EssencialidadeCard } from "@/components/dashboard/essencialidade-card";
 
 export const metadata: Metadata = { title: "Relatórios" };
@@ -19,11 +21,12 @@ const PALETTE = ["#3D6D84", "#8FA993", "#FF7043", "#7E57C2", "#EC407A", "#C4B8B0
 
 export default async function RelatoriosPage() {
   const { workspace } = await getWorkspaceContext();
-  const [resumo, categorias, essenc, eventos] = await Promise.all([
+  const [resumo, categorias, essenc, eventos, comparativo] = await Promise.all([
     getResumoMes(workspace.id),
     getGastosPorCategoria(workspace.id),
     getGastosPorEssencialidade(workspace.id),
     getGastosPorContexto(workspace.id),
+    getComparativoMes(workspace.id),
   ]);
 
   const totalCat = categorias.reduce((s, c) => s + Number(c.total), 0);
@@ -74,6 +77,9 @@ export default async function RelatoriosPage() {
         />
       ) : (
         <>
+          {/* Comparativo mês a mês (mesmo período) */}
+          <ComparativoCard comparativo={comparativo} />
+
           {/* Gastos por categoria */}
           <Card>
             <CardContent className="p-5">

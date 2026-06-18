@@ -3,6 +3,7 @@ import { ArrowRight, Sparkles, Wallet } from "lucide-react";
 import { getWorkspaceContext } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import {
+  getComparativoMes,
   getGastosPorCategoria,
   getGastosPorContexto,
   getGastosPorEssencialidade,
@@ -17,6 +18,7 @@ import { EmptyState } from "@/components/patterns/empty-state";
 import { BalanceCard } from "@/components/dashboard/balance-card";
 import { CategoriasCard } from "@/components/dashboard/categorias-card";
 import { CollapsibleCard } from "@/components/dashboard/collapsible-card";
+import { ComparativoCard } from "@/components/dashboard/comparativo-card";
 import { DescobertasCard } from "@/components/dashboard/descobertas-card";
 import { EssencialidadeCard } from "@/components/dashboard/essencialidade-card";
 import { GastoPorPessoa } from "@/components/dashboard/gasto-por-pessoa";
@@ -31,7 +33,8 @@ export default async function HomePage() {
   const { profile, workspace, plan } = await getWorkspaceContext();
   const supabase = createClient();
 
-  const [resumo, gastos, essenc, pessoas, eventos, recentes, descobertas, colecoesRes] = await Promise.all([
+  const [resumo, gastos, essenc, pessoas, eventos, recentes, descobertas, comparativo, colecoesRes] =
+    await Promise.all([
     getResumoMes(workspace.id),
     getGastosPorCategoria(workspace.id),
     getGastosPorEssencialidade(workspace.id),
@@ -39,6 +42,7 @@ export default async function HomePage() {
     getGastosPorContexto(workspace.id),
     listTransacoes(workspace.id, { limit: 6, ordenarPor: "criacao" }),
     getDescobertas(workspace.id),
+    getComparativoMes(workspace.id),
     supabase.from("v_colecoes_em_aberto").select("*").eq("workspace_id", workspace.id).limit(4),
   ]);
 
@@ -92,6 +96,9 @@ export default async function HomePage() {
 
       {/* Descobertas da semana — o app entrega a conclusão */}
       <DescobertasCard descobertas={descobertas} />
+
+      {/* Comparativo mês a mês (mesmo período) */}
+      {!semDados && <ComparativoCard comparativo={comparativo} />}
 
       {/* Gasto por pessoa — recolhível */}
       {pessoas.length > 0 && (

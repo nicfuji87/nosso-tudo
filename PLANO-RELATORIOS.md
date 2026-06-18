@@ -160,14 +160,19 @@ descobertas em profundidade + exploração livre com esses filtros.
 ## 7. Próximos passos concretos
 
 1. ✅ **`lib/insights/`** — tipo `Descoberta` + card `DescobertasCard` no Início.
-   Regras no ar: assinatura fantasma, gastos invisíveis. _(falta: pico de categoria —
-   depende da janela histórica da Fase 0.3)._
-2. **Fase 0.1** — RPCs por intervalo + componente `PeriodoFilter` (client) com estado
-   em URL. Destrava comparativo mês a mês e Relatórios filtrável.
-3. **Previsão de Sufoco** — RPC `previsao_mes` (receita prevista − gastos − contas
+   Regras no ar: assinatura fantasma, gastos invisíveis.
+2. ✅ **Comparativo "mesmo período"** — RPC `gastos_por_categoria_periodo` (0021,
+   intervalo de datas) + `getComparativoMes()` + `ComparativoCard` no Início e em
+   Relatórios. Compara 1..hoje × 1..mesmo-dia do mês anterior (leitura mid-month justa).
+   _É a base do filtro de período (Fase 0.1)._
+3. **Filtro de período/pessoa/categoria** — `PeriodoFilter` (client, estado em URL)
+   reaproveitando a RPC por intervalo. Falta só a UI + propagar para as outras RPCs.
+4. **Previsão de Sufoco** — RPC `previsao_mes` (receita prevista − gastos − contas
    futuras − fatura aberta) → semáforo no herói do Início.
-4. **Radar de Preço Injusto** — RPC `desvio_preco_produto` (preço pago × média 90d do
-   produto) → vira mais uma regra de Descoberta + drill por produto.
 5. Plugar `getDescobertas()` no **`nia-alertas-cron`** para virarem mensagem proativa da Nia.
+
+> **Reprioritização (evidência de dados, jun/2026):** os relatórios de preço (Radar,
+> Cesta, Inflação) ficam para depois — só 4 produtos têm recompra e 0 recorrências
+> supérfluas hoje; mostrariam tela vazia. Voltam quando houver volume de notas.
 
 _Cada item acima é uma PR pequena e isolada; a Fase 0 é a única dependência cruzada._
