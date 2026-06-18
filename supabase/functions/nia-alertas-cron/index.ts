@@ -140,7 +140,7 @@ const TEMPLATES: Record<string, string> = {
   assinaturas_fantasma:
     "👻 {nome}, em *{espaco}* há {qtd} assinatura(s) de baixa prioridade — cerca de {total}/ano. Vale rever: {itens}.",
   gastos_invisiveis:
-    "💧 {nome}, em *{espaco}* já são {total} em {qtd} compras pequenas este mês. Os “gastos invisíveis” somam — bora ficar de olho?",
+    "💧 {nome}, em *{espaco}* já são {total} em {qtd} compras pequenas este mês. Ex.: {itens}. Os “gastos invisíveis” somam — abra o app pra ver todas.",
   personalizado: "{mensagem}",
 };
 
@@ -402,20 +402,28 @@ async function avaliarRegra(
       const limite = Number((a.parametros?.["valor_max"] as number) ?? 35);
       const { data } = await admin
         .from("transacoes")
-        .select("valor")
+        .select("descricao, valor, estabelecimento:estabelecimentos(nome)")
         .eq("workspace_id", workspaceId)
         .eq("tipo", "despesa")
         .eq("status_revisao", "confirmado")
         .gte("data_transacao", t.primeiroDiaMes)
         .gt("valor", 0)
-        .lt("valor", limite);
-      const rows = (data as { valor: number }[] | null) ?? [];
+        .lt("valor", limite)
+        .order("valor", { ascending: false });
+      const rows =
+        (data as
+          | { descricao: string; valor: number; estabelecimento: { nome: string } | null }[]
+          | null) ?? [];
       if (rows.length < 3) return []; // poucas compras: ainda não é um padrão
       const total = rows.reduce((s, r) => s + Number(r.valor), 0);
+      const itens = rows
+        .slice(0, 3)
+        .map((r) => `${r.descricao || r.estabelecimento?.nome || "compra"} (${moeda(Number(r.valor))})`)
+        .join(", ");
       return [
         {
           disc: "invisiveis",
-          vars: { qtd: String(rows.length), total: moeda(total), limite: moeda(limite) },
+          vars: { qtd: String(rows.length), total: moeda(total), limite: moeda(limite), itens },
         },
       ];
     }
