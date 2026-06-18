@@ -22,7 +22,9 @@ const FALLBACK: NiaConfig = {
     "Você é a Nia, assistente do Nosso Tudo. Fale português do Brasil, de forma breve e clara. " +
     "Use as ferramentas para qualquer dado financeiro; nunca invente. Proponha ações e só execute o que o usuário confirmar.",
   temperature: 0.3,
-  maxTokens: 1024,
+  // Alto o bastante para caber um tool-call de nota itemizada. max_tokens é só um
+  // teto: não muda o custo (cobra-se pelo que é de fato gerado).
+  maxTokens: 8192,
 };
 
 /** Config ativa de escopo global (versão mais recente). Cai no fallback se ausente. */

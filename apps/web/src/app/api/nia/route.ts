@@ -275,7 +275,7 @@ export async function POST(req: Request): Promise<Response> {
           );
         }
       } catch (e) {
-        send({ type: "error", error: "A Nia teve um problema ao responder.", detalhe: (e as Error).message });
+        send({ type: "error", error: (e as Error).message || "A Nia teve um problema ao responder." });
       } finally {
         controller.close();
       }

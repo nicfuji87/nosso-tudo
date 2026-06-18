@@ -388,7 +388,9 @@ export function NiaChat({
             patch((x) => ({ ...x, mensagemId: ev.mensagemId ?? null, texto: x.texto || "Pronto." }));
           } else if (ev.type === "error") {
             finalizado = true;
-            patch((x) => ({ ...x, texto: acc || ev.error || "Tive um problema." }));
+            const msg = ev.error || "Tive um problema.";
+            // Não esconde o erro atrás do texto parcial: anexa, pra ficar visível.
+            patch((x) => ({ ...x, texto: acc ? `${acc}\n\n⚠️ ${msg}` : msg }));
           }
         }
       }

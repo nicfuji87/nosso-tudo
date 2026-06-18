@@ -83,6 +83,11 @@ export type NiaStreamProvider = (
 
 const MAX_TURNS = 4;
 
+/** Erro quando o modelo estoura o limite de tokens no meio de um tool-call (sem o
+ *  JSON completo, então não dá pra montar o cartão). Vira mensagem visível. */
+const ERRO_TRUNCADO =
+  "A resposta foi cortada no limite de tokens antes de montar o cartão. Aumente o max_tokens da Nia (Admin › Nia) ou tente de novo com menos itens.";
+
 /* ------------------------------ Anthropic ------------------------------ */
 
 interface AnthropicTextBlock {
@@ -191,7 +196,10 @@ const anthropicProvider: NiaProvider = async (input) => {
     );
     if (textBlocks.length > 0) textoFinal = textBlocks.map((b) => b.text).join("\n").trim();
 
-    if (data.stop_reason !== "tool_use" || toolBlocks.length === 0) break;
+    if (data.stop_reason !== "tool_use" || toolBlocks.length === 0) {
+      if (data.stop_reason === "max_tokens" && toolBlocks.length > 0) throw new Error(ERRO_TRUNCADO);
+      break;
+    }
 
     // Executa as ferramentas pedidas e devolve os resultados ao modelo.
     messages.push({ role: "assistant", content: data.content });
@@ -310,7 +318,10 @@ const openaiProvider: NiaProvider = async (input) => {
     if (choice.message.content) textoFinal = choice.message.content.trim();
 
     const toolCalls = choice.message.tool_calls ?? [];
-    if (choice.finish_reason !== "tool_calls" || toolCalls.length === 0) break;
+    if (choice.finish_reason !== "tool_calls" || toolCalls.length === 0) {
+      if (choice.finish_reason === "length" && toolCalls.length > 0) throw new Error(ERRO_TRUNCADO);
+      break;
+    }
 
     messages.push({ role: "assistant", content: choice.message.content ?? null, tool_calls: toolCalls });
     for (const call of toolCalls) {
@@ -434,7 +445,10 @@ const openaiStream: NiaStreamProvider = async (input, cb) => {
       }
     }
 
-    if (finishReason !== "tool_calls" || toolAcc.size === 0) break;
+    if (finishReason !== "tool_calls" || toolAcc.size === 0) {
+      if (finishReason === "length" && toolAcc.size > 0) throw new Error(ERRO_TRUNCADO);
+      break;
+    }
 
     const toolCalls = [...toolAcc.entries()]
       .sort((a, b) => a[0] - b[0])
@@ -582,7 +596,12 @@ const anthropicStream: NiaStreamProvider = async (input, cb) => {
       }
     }
 
-    if (stopReason !== "tool_use") break;
+    if (stopReason !== "tool_use") {
+      if (stopReason === "max_tokens" && [...blocks.values()].some((b) => b.type === "tool_use")) {
+        throw new Error(ERRO_TRUNCADO);
+      }
+      break;
+    }
 
     const ordered = [...blocks.entries()].sort((a, b) => a[0] - b[0]).map(([, b]) => b);
     const assistantContent = ordered.map((b) =>
