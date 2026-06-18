@@ -218,6 +218,25 @@ export async function getGastosPorEssencialidade(
   }));
 }
 
+/** Breakdown de uma categoria-pai em subcategorias, num intervalo — RPC 0024. */
+export async function getGastosPorSubcategoriaPeriodo(
+  workspaceId: string,
+  inicio: string,
+  fim: string,
+  categoriaId: string,
+  beneficiarioId?: string,
+): Promise<GastoCategoria[]> {
+  const supabase = createClient();
+  const { data } = await supabase.rpc("gastos_por_subcategoria_periodo", {
+    p_workspace_id: workspaceId,
+    p_inicio: inicio,
+    p_fim: fim,
+    p_categoria: categoriaId,
+    ...(beneficiarioId ? { p_beneficiario: beneficiarioId } : {}),
+  });
+  return (data as GastoCategoria[] | null) ?? [];
+}
+
 /** Essencial × supérfluo num intervalo arbitrário — RPC gastos_por_essencialidade_periodo (0023). */
 export async function getGastosPorEssencialidadePeriodo(
   workspaceId: string,
@@ -410,6 +429,22 @@ export async function getGastosPorPessoa(workspaceId: string): Promise<GastoPess
     .map(([id, v]) => ({ id, nome: v.nome, total: v.total }))
     .filter((p) => p.total > 0)
     .sort((a, b) => b.total - a.total);
+}
+
+/** Categorias de topo (pais) ativas — opções do filtro por categoria. */
+export async function listCategoriasPai(
+  workspaceId: string,
+): Promise<{ id: string; nome: string; icone: string | null }[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("categorias")
+    .select("id, nome, icone")
+    .eq("workspace_id", workspaceId)
+    .eq("ativa", true)
+    .is("categoria_pai_id", null)
+    .order("ordem", { ascending: true })
+    .order("nome", { ascending: true });
+  return (data as { id: string; nome: string; icone: string | null }[] | null) ?? [];
 }
 
 /** Pessoas/grupos que aparecem como beneficiário em despesas — opções do filtro. */

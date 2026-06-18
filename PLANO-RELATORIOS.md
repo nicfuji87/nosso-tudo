@@ -175,10 +175,14 @@ descobertas em profundidade + exploração livre com esses filtros.
    com presets (este mês, mês passado, últimos 3/6 meses, ano) e intervalo
    personalizado (`?periodo=`/`?de=&ate=`). RPCs por intervalo `resumo_periodo` e
    `gastos_por_essencialidade_periodo` (migration 0023). Comparativo generalizado p/
-   comparar com o período anterior de mesma duração. _(falta: filtro por categoria)._
-6. **Previsão de Sufoco** — RPC `previsao_mes` (receita prevista − gastos − contas
+   comparar com o período anterior de mesma duração.
+6. ✅ **Filtro por categoria** — `CategoriaFilter` (`?categoria=<id>`) + RPC
+   `gastos_por_subcategoria_periodo` (migration 0024): escolher um pai mostra o
+   **detalhe em subcategorias** (ex.: Alimentação em casa → Carnes, Hortifruti…),
+   combinável com tempo e pessoa. **Trio de filtros completo.**
+7. **Previsão de Sufoco** — RPC `previsao_mes` (receita prevista − gastos − contas
    futuras − fatura aberta) → semáforo no herói do Início.
-7. Plugar `getDescobertas()` no **`nia-alertas-cron`** para virarem mensagem proativa da Nia.
+8. Plugar `getDescobertas()` no **`nia-alertas-cron`** para virarem mensagem proativa da Nia.
 
 > **Reprioritização (evidência de dados, jun/2026):** os relatórios de preço (Radar,
 > Cesta, Inflação) ficam para depois — só 4 produtos têm recompra e 0 recorrências

@@ -5,8 +5,10 @@ import {
   getGastosPorCategoriaPeriodo,
   getGastosPorContexto,
   getGastosPorEssencialidadePeriodo,
+  getGastosPorSubcategoriaPeriodo,
   getResumoPeriodo,
   listBeneficiarios,
+  listCategoriasPai,
 } from "@/lib/db/queries";
 import { PERIODO_PRESETS, resolverPeriodo, type PeriodoPreset } from "@/lib/periodo";
 import { PageHeader } from "@/components/patterns/page-header";
@@ -14,6 +16,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { BarChart3 } from "lucide-react";
 import { formatBRL } from "@/lib/format";
+import { CategoriaFilter } from "@/components/dashboard/categoria-filter";
 import { ComparativoCard } from "@/components/dashboard/comparativo-card";
 import { EssencialidadeCard } from "@/components/dashboard/essencialidade-card";
 import { PeriodoFilter } from "@/components/dashboard/periodo-filter";
@@ -26,7 +29,7 @@ const PALETTE = ["#3D6D84", "#8FA993", "#FF7043", "#7E57C2", "#EC407A", "#C4B8B0
 export default async function RelatoriosPage({
   searchParams,
 }: {
-  searchParams: { periodo?: string; de?: string; ate?: string; pessoa?: string };
+  searchParams: { periodo?: string; de?: string; ate?: string; pessoa?: string; categoria?: string };
 }) {
   const { workspace } = await getWorkspaceContext();
 
@@ -36,14 +39,21 @@ export default async function RelatoriosPage({
     ? (searchParams.periodo as PeriodoPreset)
     : "mes-atual";
 
-  // Filtro por pessoa (?pessoa=<id>) — validado contra quem tem despesa.
-  const pessoas = await listBeneficiarios(workspace.id);
+  // Opções e seleção dos filtros por pessoa e categoria (validadas contra a lista).
+  const [pessoas, categoriasPai] = await Promise.all([
+    listBeneficiarios(workspace.id),
+    listCategoriasPai(workspace.id),
+  ]);
   const pessoaSel = pessoas.find((p) => p.id === searchParams.pessoa) ?? null;
   const beneficiarioId = pessoaSel?.id;
+  const catSel = categoriasPai.find((c) => c.id === searchParams.categoria) ?? null;
 
   const [resumo, categorias, essenc, eventos, comparativo] = await Promise.all([
     getResumoPeriodo(workspace.id, periodo.inicio, periodo.fim),
-    getGastosPorCategoriaPeriodo(workspace.id, periodo.inicio, periodo.fim, beneficiarioId),
+    // Com categoria escolhida, o card vira o detalhe dela (subcategorias).
+    catSel
+      ? getGastosPorSubcategoriaPeriodo(workspace.id, periodo.inicio, periodo.fim, catSel.id, beneficiarioId)
+      : getGastosPorCategoriaPeriodo(workspace.id, periodo.inicio, periodo.fim, beneficiarioId),
     getGastosPorEssencialidadePeriodo(workspace.id, periodo.inicio, periodo.fim, beneficiarioId),
     getGastosPorContexto(workspace.id),
     getComparativoPeriodo(workspace.id, periodo, beneficiarioId),
@@ -51,10 +61,13 @@ export default async function RelatoriosPage({
 
   const totalCat = categorias.reduce((s, c) => s + Number(c.total), 0);
   const totalEssenc = essenc.reduce((s, e) => s + e.total, 0);
-  // Com pessoa selecionada, eventos (all-time, sem filtro) saem da conta.
-  const semDados = pessoaSel
-    ? totalCat === 0 && totalEssenc === 0
-    : totalCat === 0 && totalEssenc === 0 && eventos.length === 0;
+  const filtrado = catSel || pessoaSel;
+  // Filtros estreitam o que conta como "sem dados".
+  const semDados = catSel
+    ? totalCat === 0
+    : pessoaSel
+      ? totalCat === 0 && totalEssenc === 0
+      : totalCat === 0 && totalEssenc === 0 && eventos.length === 0;
 
   return (
     <div className="space-y-6">
@@ -66,13 +79,16 @@ export default async function RelatoriosPage({
       <div className="flex flex-wrap items-center gap-2">
         <PeriodoFilter preset={presetUI} de={searchParams.de ?? null} ate={searchParams.ate ?? null} />
         <PessoaFilter pessoas={pessoas} pessoaId={pessoaSel?.id ?? null} />
+        <CategoriaFilter categorias={categoriasPai} categoriaId={catSel?.id ?? null} />
       </div>
 
-      {/* Resumo — filtrado por pessoa vira só "despesas dela" */}
-      {pessoaSel ? (
+      {/* Resumo — com filtro de categoria/pessoa vira só "despesas daquele recorte" */}
+      {filtrado ? (
         <Card>
           <CardContent className="p-5">
-            <p className="text-caption text-muted-foreground">Despesas de {pessoaSel.nome}</p>
+            <p className="text-caption text-muted-foreground">
+              {catSel ? `Despesas em ${catSel.nome}` : `Despesas de ${pessoaSel!.nome}`}
+            </p>
             <p className="tabular mt-1 text-h4 font-semibold">{formatBRL(totalCat)}</p>
           </CardContent>
         </Card>
@@ -114,19 +130,23 @@ export default async function RelatoriosPage({
         />
       ) : (
         <>
-          {/* Comparativo mês a mês (mesmo período) */}
-          <ComparativoCard comparativo={comparativo} />
+          {/* Comparativo do período — não no recorte de uma categoria só */}
+          {!catSel && <ComparativoCard comparativo={comparativo} />}
 
-          {/* Gastos por categoria */}
+          {/* Gastos por categoria — ou o detalhe (subcategorias) da categoria filtrada */}
           <Card>
             <CardContent className="p-5">
-              <p className="text-body-sm font-medium">Gastos por categoria</p>
+              <p className="text-body-sm font-medium">
+                {catSel ? `Detalhe de ${catSel.nome}` : "Gastos por categoria"}
+              </p>
               <p className="text-caption text-muted-foreground">
-                Onde o dinheiro foi de verdade (somado item a item)
+                {catSel
+                  ? "Subcategorias, somadas item a item"
+                  : "Onde o dinheiro foi de verdade (somado item a item)"}
               </p>
               {categorias.length === 0 ? (
                 <p className="mt-4 text-caption text-muted-foreground">
-                  Sem despesas categorizadas neste mês.
+                  Sem despesas no período.
                 </p>
               ) : (
                 <ul className="mt-4 space-y-3">
@@ -163,8 +183,8 @@ export default async function RelatoriosPage({
             </CardContent>
           </Card>
 
-          {/* Essencial × Supérfluo */}
-          {totalEssenc > 0 && (
+          {/* Essencial × Supérfluo — não no recorte de uma categoria só */}
+          {!catSel && totalEssenc > 0 && (
             <Card>
               <CardContent className="p-5">
                 <p className="text-body-sm font-medium">Essencial × Supérfluo</p>
@@ -178,8 +198,8 @@ export default async function RelatoriosPage({
             </Card>
           )}
 
-          {/* Custo por evento (contexto) — all-time, não se aplica ao filtro de pessoa */}
-          {!pessoaSel && eventos.length > 0 && (
+          {/* Custo por evento (contexto) — all-time, não se aplica a recortes filtrados */}
+          {!filtrado && eventos.length > 0 && (
             <Card>
               <CardContent className="p-5">
                 <p className="text-body-sm font-medium">Custo por evento</p>
