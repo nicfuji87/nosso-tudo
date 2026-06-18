@@ -27,6 +27,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/sonner";
 import { MoneyInput } from "./money-input";
 import { CategoriaPicker } from "./categoria-picker";
+import { EventoCombobox } from "./evento-combobox";
 import { FieldError } from "@/components/auth/field-error";
 import { formatBRL } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
@@ -44,6 +45,7 @@ export function NovaTransacaoDialog({ trigger }: { trigger: React.ReactNode }) {
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [entidades, setEntidades] = useState<Entidade[]>([]);
   const [cartoes, setCartoes] = useState<Cartao[]>([]);
+  const [eventos, setEventos] = useState<{ id: string; nome: string }[]>([]);
 
   const {
     register,
@@ -67,14 +69,16 @@ export function NovaTransacaoDialog({ trigger }: { trigger: React.ReactNode }) {
     if (!open || loaded) return;
     (async () => {
       const supabase = createClient();
-      const [c, e, ca] = await Promise.all([
+      const [c, e, ca, ev] = await Promise.all([
         supabase.from("categorias").select("*").eq("ativa", true).order("ordem"),
         supabase.from("entidades").select("*").eq("ativa", true).order("nome"),
         supabase.from("cartoes").select("*").eq("ativo", true).order("apelido"),
+        supabase.from("contextos").select("id, nome").eq("arquivado", false).order("nome"),
       ]);
       setCategorias((c.data as Categoria[] | null) ?? []);
       setEntidades((e.data as Entidade[] | null) ?? []);
       setCartoes((ca.data as Cartao[] | null) ?? []);
+      setEventos((ev.data as { id: string; nome: string }[] | null) ?? []);
       setLoaded(true);
     })();
   }, [open, loaded]);
@@ -169,10 +173,18 @@ export function NovaTransacaoDialog({ trigger }: { trigger: React.ReactNode }) {
           {/* Contexto / Evento */}
           <div className="space-y-1.5">
             <Label htmlFor="contexto">Contexto / Evento (opcional)</Label>
-            <Input
-              id="contexto"
-              placeholder="Ex.: Passeio em família, Compra do mês"
-              {...register("contexto")}
+            <Controller
+              control={control}
+              name="contexto"
+              render={({ field }) => (
+                <EventoCombobox
+                  id="contexto"
+                  value={field.value ?? ""}
+                  onChange={field.onChange}
+                  eventos={eventos}
+                  placeholder="Ex.: Passeio em família, Compra do mês"
+                />
+              )}
             />
           </div>
 

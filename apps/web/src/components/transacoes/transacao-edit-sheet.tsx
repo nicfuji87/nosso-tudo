@@ -19,6 +19,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MoneyInput } from "./money-input";
 import { CategoriaPicker } from "./categoria-picker";
+import { EventoCombobox } from "./evento-combobox";
 import { FieldError } from "@/components/auth/field-error";
 import { toast } from "@/components/ui/sonner";
 import { createClient } from "@/lib/supabase/client";
@@ -52,6 +53,7 @@ export function TransacaoEditSheet({
   const [entidades, setEntidades] = useState<Entidade[]>([]);
   const [cartoes, setCartoes] = useState<Cartao[]>([]);
   const [contas, setContas] = useState<ContaBancaria[]>([]);
+  const [eventos, setEventos] = useState<{ id: string; nome: string }[]>([]);
 
   const { register, handleSubmit, control, watch, reset, formState } = useForm<TransacaoInput>({
     resolver: zodResolver(transacaoSchema),
@@ -66,18 +68,20 @@ export function TransacaoEditSheet({
     setCarregando(true);
     (async () => {
       const supabase = createClient();
-      const [tx, c, e, ca, co] = await Promise.all([
+      const [tx, c, e, ca, co, ev] = await Promise.all([
         proposta ? carregarPropostaEditavel(id) : carregarTransacaoEditavel(id),
         supabase.from("categorias").select("*").eq("ativa", true).order("ordem"),
         supabase.from("entidades").select("*").eq("ativa", true).order("nome"),
         supabase.from("cartoes").select("*").eq("ativo", true).order("apelido"),
         supabase.from("contas_bancarias").select("*").eq("ativa", true).order("apelido"),
+        supabase.from("contextos").select("id, nome").eq("arquivado", false).order("nome"),
       ]);
       if (!vivo) return;
       setCategorias((c.data as Categoria[] | null) ?? []);
       setEntidades((e.data as Entidade[] | null) ?? []);
       setCartoes((ca.data as Cartao[] | null) ?? []);
       setContas((co.data as ContaBancaria[] | null) ?? []);
+      setEventos((ev.data as { id: string; nome: string }[] | null) ?? []);
       if (tx) {
         reset({
           tipo: tx.tipo,
@@ -276,7 +280,19 @@ export function TransacaoEditSheet({
 
             <div className="space-y-1.5">
               <Label htmlFor="ed-ctx">Evento / contexto (opcional)</Label>
-              <Input id="ed-ctx" placeholder="Ex.: Passeio em família" {...register("contexto")} />
+              <Controller
+                control={control}
+                name="contexto"
+                render={({ field }) => (
+                  <EventoCombobox
+                    id="ed-ctx"
+                    value={field.value ?? ""}
+                    onChange={field.onChange}
+                    eventos={eventos}
+                    placeholder="Ex.: Passeio em família"
+                  />
+                )}
+              />
             </div>
 
             <div className="space-y-1.5">
