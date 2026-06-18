@@ -6,6 +6,7 @@ import {
   getGastosPorContexto,
   getGastosPorEssencialidade,
   getResumoMes,
+  listBeneficiarios,
 } from "@/lib/db/queries";
 import { PageHeader } from "@/components/patterns/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,6 +16,7 @@ import { formatBRL } from "@/lib/format";
 import { ComparativoCard } from "@/components/dashboard/comparativo-card";
 import { EssencialidadeCard } from "@/components/dashboard/essencialidade-card";
 import { PeriodoFilter } from "@/components/dashboard/periodo-filter";
+import { PessoaFilter } from "@/components/dashboard/pessoa-filter";
 
 export const metadata: Metadata = { title: "Relatórios" };
 
@@ -23,7 +25,7 @@ const PALETTE = ["#3D6D84", "#8FA993", "#FF7043", "#7E57C2", "#EC407A", "#C4B8B0
 export default async function RelatoriosPage({
   searchParams,
 }: {
-  searchParams: { mes?: string };
+  searchParams: { mes?: string; pessoa?: string };
 }) {
   const { workspace } = await getWorkspaceContext();
 
@@ -37,17 +39,25 @@ export default async function RelatoriosPage({
   const mesRef = `${mesUI}-01`;
   const ehMesAtual = ref.getFullYear() === hoje.getFullYear() && ref.getMonth() === hoje.getMonth();
 
+  // Filtro por pessoa (?pessoa=<id>) — validado contra quem tem despesa.
+  const pessoas = await listBeneficiarios(workspace.id);
+  const pessoaSel = pessoas.find((p) => p.id === searchParams.pessoa) ?? null;
+  const beneficiarioId = pessoaSel?.id;
+
   const [resumo, categorias, essenc, eventos, comparativo] = await Promise.all([
     getResumoMes(workspace.id, mesRef),
-    getGastosPorCategoria(workspace.id, mesRef),
-    getGastosPorEssencialidade(workspace.id, mesRef),
+    getGastosPorCategoria(workspace.id, mesRef, beneficiarioId),
+    getGastosPorEssencialidade(workspace.id, mesRef, beneficiarioId),
     getGastosPorContexto(workspace.id),
-    getComparativoMes(workspace.id, mesRef),
+    getComparativoMes(workspace.id, mesRef, beneficiarioId),
   ]);
 
   const totalCat = categorias.reduce((s, c) => s + Number(c.total), 0);
   const totalEssenc = essenc.reduce((s, e) => s + e.total, 0);
-  const semDados = totalCat === 0 && totalEssenc === 0 && eventos.length === 0;
+  // Com pessoa selecionada, eventos (all-time, sem filtro) saem da conta.
+  const semDados = pessoaSel
+    ? totalCat === 0 && totalEssenc === 0
+    : totalCat === 0 && totalEssenc === 0 && eventos.length === 0;
 
   return (
     <div className="space-y-6">
@@ -56,36 +66,48 @@ export default async function RelatoriosPage({
         description="Para onde o dinheiro vai — por categoria, por natureza e por evento."
       />
 
-      <PeriodoFilter mes={mesUI} ehMesAtual={ehMesAtual} />
-
-      {/* Resumo do mês */}
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Card>
-          <CardContent className="p-5">
-            <p className="text-caption text-muted-foreground">Receitas</p>
-            <p className="tabular mt-1 text-h4 font-semibold text-success">
-              {formatBRL(resumo.receitas)}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5">
-            <p className="text-caption text-muted-foreground">Despesas</p>
-            <p className="tabular mt-1 text-h4 font-semibold">{formatBRL(resumo.despesas)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5">
-            <p className="text-caption text-muted-foreground">Saldo</p>
-            <p
-              className="tabular mt-1 text-h4 font-semibold"
-              style={{ color: resumo.saldo >= 0 ? "#8FA993" : "#EF8A8A" }}
-            >
-              {formatBRL(resumo.saldo, { sign: true })}
-            </p>
-          </CardContent>
-        </Card>
+      <div className="flex flex-wrap items-center gap-2">
+        <PeriodoFilter mes={mesUI} ehMesAtual={ehMesAtual} />
+        <PessoaFilter pessoas={pessoas} pessoaId={pessoaSel?.id ?? null} />
       </div>
+
+      {/* Resumo — filtrado por pessoa vira só "despesas dela" */}
+      {pessoaSel ? (
+        <Card>
+          <CardContent className="p-5">
+            <p className="text-caption text-muted-foreground">Despesas de {pessoaSel.nome}</p>
+            <p className="tabular mt-1 text-h4 font-semibold">{formatBRL(totalCat)}</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Card>
+            <CardContent className="p-5">
+              <p className="text-caption text-muted-foreground">Receitas</p>
+              <p className="tabular mt-1 text-h4 font-semibold text-success">
+                {formatBRL(resumo.receitas)}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-5">
+              <p className="text-caption text-muted-foreground">Despesas</p>
+              <p className="tabular mt-1 text-h4 font-semibold">{formatBRL(resumo.despesas)}</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-5">
+              <p className="text-caption text-muted-foreground">Saldo</p>
+              <p
+                className="tabular mt-1 text-h4 font-semibold"
+                style={{ color: resumo.saldo >= 0 ? "#8FA993" : "#EF8A8A" }}
+              >
+                {formatBRL(resumo.saldo, { sign: true })}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {semDados ? (
         <EmptyState
@@ -159,8 +181,8 @@ export default async function RelatoriosPage({
             </Card>
           )}
 
-          {/* Custo por evento (contexto) */}
-          {eventos.length > 0 && (
+          {/* Custo por evento (contexto) — all-time, não se aplica ao filtro de pessoa */}
+          {!pessoaSel && eventos.length > 0 && (
             <Card>
               <CardContent className="p-5">
                 <p className="text-body-sm font-medium">Custo por evento</p>

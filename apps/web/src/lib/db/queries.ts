@@ -42,13 +42,18 @@ export async function getResumoMes(workspaceId: string, mesRef?: string): Promis
   );
 }
 
-export async function getGastosPorCategoria(workspaceId: string, mesRef?: string): Promise<GastoCategoria[]> {
+export async function getGastosPorCategoria(
+  workspaceId: string,
+  mesRef?: string,
+  beneficiarioId?: string,
+): Promise<GastoCategoria[]> {
   const supabase = createClient();
   // v2: soma pelos itens quando a nota está itemizada; cai na categoria da
   // transação quando não está (sem contagem dupla). Ver migration 0013.
   const { data } = await supabase.rpc("gastos_por_categoria_v2", {
     p_workspace_id: workspaceId,
     ...(mesRef ? { p_mes: mesRef } : {}),
+    ...(beneficiarioId ? { p_beneficiario: beneficiarioId } : {}),
   });
   return (data as GastoCategoria[] | null) ?? [];
 }
@@ -82,7 +87,11 @@ export interface Comparativo {
  * inteiro. `mesRef` = 1º dia do mês (YYYY-MM-DD); omitido = mês atual.
  * Usa a RPC gastos_por_categoria_periodo (0021).
  */
-export async function getComparativoMes(workspaceId: string, mesRef?: string): Promise<Comparativo> {
+export async function getComparativoMes(
+  workspaceId: string,
+  mesRef?: string,
+  beneficiarioId?: string,
+): Promise<Comparativo> {
   const supabase = createClient();
   const hoje = new Date();
   const ref = mesRef ? new Date(`${mesRef.slice(0, 7)}-01T00:00:00`) : new Date(hoje.getFullYear(), hoje.getMonth(), 1);
@@ -99,16 +108,19 @@ export async function getComparativoMes(workspaceId: string, mesRef?: string): P
   if (fimAnterior > inicioAtual) fimAnterior = inicioAtual; // não vaza p/ o mês de referência (meses curtos)
 
   type Row = { categoria_id: string; categoria_nome: string; cor: string | null; icone: string | null; total: number };
+  const filtroPessoa = beneficiarioId ? { p_beneficiario: beneficiarioId } : {};
   const [atualRes, antRes] = await Promise.all([
     supabase.rpc("gastos_por_categoria_periodo", {
       p_workspace_id: workspaceId,
       p_inicio: fmt(inicioAtual),
       p_fim: fmt(fimAtual),
+      ...filtroPessoa,
     }),
     supabase.rpc("gastos_por_categoria_periodo", {
       p_workspace_id: workspaceId,
       p_inicio: fmt(inicioAnterior),
       p_fim: fmt(fimAnterior),
+      ...filtroPessoa,
     }),
   ]);
   const atual = (atualRes.data as Row[] | null) ?? [];
@@ -168,11 +180,13 @@ export interface GastoEssencialidade {
 export async function getGastosPorEssencialidade(
   workspaceId: string,
   mesRef?: string,
+  beneficiarioId?: string,
 ): Promise<GastoEssencialidade[]> {
   const supabase = createClient();
   const { data } = await supabase.rpc("gastos_por_essencialidade", {
     p_workspace_id: workspaceId,
     ...(mesRef ? { p_mes: mesRef } : {}),
+    ...(beneficiarioId ? { p_beneficiario: beneficiarioId } : {}),
   });
   return ((data as { essencialidade: Essencialidade; total: number }[] | null) ?? []).map((r) => ({
     essencialidade: r.essencialidade,
@@ -352,6 +366,24 @@ export async function getGastosPorPessoa(workspaceId: string): Promise<GastoPess
     .map(([id, v]) => ({ id, nome: v.nome, total: v.total }))
     .filter((p) => p.total > 0)
     .sort((a, b) => b.total - a.total);
+}
+
+/** Pessoas/grupos que aparecem como beneficiário em despesas — opções do filtro. */
+export async function listBeneficiarios(workspaceId: string): Promise<{ id: string; nome: string }[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("transacoes")
+    .select("beneficiario:entidades!transacoes_beneficiario_id_fkey(id, nome)")
+    .eq("workspace_id", workspaceId)
+    .eq("tipo", "despesa")
+    .not("beneficiario_id", "is", null);
+  const map = new Map<string, string>();
+  for (const r of (data as { beneficiario: { id: string; nome: string } | null }[] | null) ?? []) {
+    if (r.beneficiario) map.set(r.beneficiario.id, r.beneficiario.nome);
+  }
+  return [...map.entries()]
+    .map(([id, nome]) => ({ id, nome }))
+    .sort((a, b) => a.nome.localeCompare(b.nome));
 }
 
 export async function listRecorrencias(workspaceId: string): Promise<Recorrencia[]> {

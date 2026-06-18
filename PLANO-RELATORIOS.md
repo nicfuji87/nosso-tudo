@@ -167,11 +167,14 @@ descobertas em profundidade + exploração livre com esses filtros.
    _É a base do filtro de período (Fase 0.1)._
 3. ✅ **Filtro de mês em Relatórios** — `PeriodoFilter` (client, estado em URL
    `?mes=YYYY-MM`) + `mesRef` propagado para `resumo_mes`, `gastos_por_categoria_v2`,
-   `gastos_por_essencialidade` e o comparativo (mês fechado × anterior). _(falta:
-   filtro por pessoa/categoria e ranges multi-mês "últimos 3 meses")._
-4. **Previsão de Sufoco** — RPC `previsao_mes` (receita prevista − gastos − contas
+   `gastos_por_essencialidade` e o comparativo (mês fechado × anterior).
+4. ✅ **Filtro por pessoa** — `PessoaFilter` (`?pessoa=<id>`) + `p_beneficiario` nas
+   RPCs de categoria/essencialidade/período (migration 0022, opcional, NULL = sem
+   filtro). Resumo vira "Despesas de {pessoa}" quando filtrado. _(falta: filtro por
+   categoria e ranges multi-mês "últimos 3 meses")._
+5. **Previsão de Sufoco** — RPC `previsao_mes` (receita prevista − gastos − contas
    futuras − fatura aberta) → semáforo no herói do Início.
-5. Plugar `getDescobertas()` no **`nia-alertas-cron`** para virarem mensagem proativa da Nia.
+6. Plugar `getDescobertas()` no **`nia-alertas-cron`** para virarem mensagem proativa da Nia.
 
 > **Reprioritização (evidência de dados, jun/2026):** os relatórios de preço (Radar,
 > Cesta, Inflação) ficam para depois — só 4 produtos têm recompra e 0 recorrências
