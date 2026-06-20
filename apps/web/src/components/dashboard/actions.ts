@@ -146,6 +146,54 @@ export async function transacoesPorCategoria(categoriaId: string): Promise<Categ
   return { nome, total, transacoes };
 }
 
+export interface PessoaDrill {
+  nome: string;
+  total: number;
+  transacoes: CategoriaDrillTransacao[];
+}
+
+/**
+ * Lançamentos (despesas confirmadas do mês) de uma pessoa/beneficiário — ou dos
+ * "Não atribuído" quando `beneficiarioId` é "—" (sem beneficiário). Espelha
+ * transacoesPorCategoria para o drilldown do "Gasto por pessoa".
+ */
+export async function transacoesPorPessoa(beneficiarioId: string): Promise<PessoaDrill> {
+  const supabase = createClient();
+  const inicio = new Date();
+  inicio.setDate(1);
+  const mesRef = inicio.toISOString().slice(0, 10);
+
+  const semBeneficiario = !beneficiarioId || beneficiarioId === "—";
+  let query = supabase
+    .from("transacoes")
+    .select("id, descricao, valor, data_transacao, estabelecimento:estabelecimentos(nome)")
+    .eq("tipo", "despesa")
+    .eq("status_revisao", "confirmado")
+    .gte("data_transacao", mesRef)
+    .order("data_transacao", { ascending: false });
+  query = semBeneficiario ? query.is("beneficiario_id", null) : query.eq("beneficiario_id", beneficiarioId);
+  const { data } = await query;
+
+  const transacoes = ((data as unknown as Record<string, unknown>[] | null) ?? []).map((r) => {
+    const estab = r.estabelecimento as { nome?: string } | null;
+    return {
+      id: String(r.id),
+      descricao: String(r.descricao ?? ""),
+      valor: Number(r.valor ?? 0),
+      data: String(r.data_transacao ?? ""),
+      estabelecimento: estab?.nome ?? null,
+    };
+  });
+
+  let nome = "Não atribuído";
+  if (!semBeneficiario) {
+    const { data: ent } = await supabase.from("entidades").select("nome").eq("id", beneficiarioId).maybeSingle();
+    nome = (ent as { nome: string } | null)?.nome ?? "Pessoa";
+  }
+  const total = transacoes.reduce((s, t) => s + t.valor, 0);
+  return { nome, total, transacoes };
+}
+
 export interface EssencialidadeLinha {
   /** id da transação de origem (para abrir/linkar, se quiser) */
   id: string;
