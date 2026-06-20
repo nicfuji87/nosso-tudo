@@ -524,8 +524,36 @@ export async function confirmarRecorrencia(acaoId: string): Promise<{ error?: st
   const hoje = new Date().toISOString().slice(0, 10);
   const dataInicio = d.data_inicio ?? hoje;
   const cat = await resolverCategoriaCanonica(supabase, ws, d.categoria);
-  // Onde a geração começa: retroativo → desde o início; senão, 1ª data >= hoje.
-  const inicioGeracao = primeiraGeracao(d.frequencia, dataInicio, hoje, d.retroativo ?? false);
+
+  // Dedupe: se já existe uma conta fixa ativa com mesma descrição + frequência,
+  // reaproveita em vez de duplicar. Protege contra reenviar a mesma proposta
+  // (ex.: o usuário acha que não criou e pede de novo) gerando cobranças em dobro.
+  const { data: existente } = await supabase
+    .from("recorrencias")
+    .select("id")
+    .eq("workspace_id", ws)
+    .eq("frequencia", d.frequencia)
+    .eq("ativa", true)
+    .ilike("descricao", d.descricao)
+    .limit(1)
+    .maybeSingle();
+  if (existente) {
+    const recId = (existente as { id: string }).id;
+    await atualizarAcao(acaoId, { status: "executada", resultado: { ok: true, jaExistia: true }, registroId: recId });
+    return { ok: true };
+  }
+
+  // Onde a geração começa:
+  // - retroativo → desde data_inicio (recria o histórico, só sob pedido explícito);
+  // - vencimento DESTE período já passou (data_inicio <= hoje e a próxima ocorrência
+  //   ainda é futura) → lança o período atual agora, senão a conta fixa fica
+  //   "invisível" (nenhum lançamento) até o próximo ciclo e parece que falhou;
+  // - caso contrário (conta antiga ou início no futuro) → 1ª data >= hoje.
+  const lancaPeriodoAtual =
+    !d.retroativo && dataInicio <= hoje && avancarDataRecorrencia(dataInicio, d.frequencia) > hoje;
+  const inicioGeracao = lancaPeriodoAtual
+    ? dataInicio
+    : primeiraGeracao(d.frequencia, dataInicio, hoje, d.retroativo ?? false);
 
   const { data: rec, error } = await supabase
     .from("recorrencias")
