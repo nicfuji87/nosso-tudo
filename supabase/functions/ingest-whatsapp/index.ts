@@ -207,7 +207,14 @@ async function resolverProduto(
 
 const ESSENCIALIDADES = new Set(["essencial", "necessario", "superfluo", "investimento"]);
 
-/** Ancora um nome de categoria no padrão canônico (exato → fuzzy pg_trgm). */
+/**
+ * Ancora um nome de categoria no padrão. Entende o formato "Grupo › Subcategoria"
+ * que a Nia/n8n manda (separadores › ou >, não "/" nem "," — que aparecem em nomes
+ * canônicos como "Óculos/lentes"), resolvendo a folha pelo par sub+grupo-pai — assim
+ * desambigua subcategorias de mesmo nome em grupos diferentes (Passeios em Lazer ×
+ * Viagens, Vacinas em Saúde × Pets). Cai para exato (preferindo a subcategoria ao
+ * grupo homônimo) e, por fim, fuzzy pg_trgm. Paridade com lib/classificacao.ts.
+ */
 async function resolverCategoriaCanonica(
   admin: SupabaseClient,
   workspaceId: string,
@@ -215,11 +222,36 @@ async function resolverCategoriaCanonica(
   minScore = 0.45,
 ): Promise<{ id: string; nome: string } | null> {
   if (!nomeRaw) return null;
-  const exato = await matchPorNome(admin, "categorias", "nome", workspaceId, nomeRaw);
-  if (exato) return exato;
+  const nome = String(nomeRaw);
+  const { data: catsData } = await admin
+    .from("categorias")
+    .select("id, nome, categoria_pai_id")
+    .eq("workspace_id", workspaceId)
+    .eq("ativa", true);
+  const cats =
+    (catsData as Array<{ id: string; nome: string; categoria_pai_id: string | null }> | null) ?? [];
+  const nomePorId = new Map(cats.map((c) => [c.id, c.nome]));
+
+  const partes = nome.split(/\s*[›>»]\s*/).map((s) => s.trim()).filter(Boolean);
+  if (partes.length >= 2) {
+    const grupoAlvo = norm(partes[partes.length - 2]!);
+    const subAlvo = norm(partes[partes.length - 1]!);
+    const folhas = cats.filter((c) => c.categoria_pai_id && norm(c.nome) === subAlvo);
+    const comPai = folhas.find((c) => norm(nomePorId.get(c.categoria_pai_id!) ?? "") === grupoAlvo);
+    if (comPai) return { id: comPai.id, nome: comPai.nome };
+    if (folhas[0]) return { id: folhas[0].id, nome: folhas[0].nome };
+    const grupo = cats.find((c) => !c.categoria_pai_id && norm(c.nome) === grupoAlvo);
+    if (grupo) return { id: grupo.id, nome: grupo.nome };
+  }
+
+  const alvo = norm(nome);
+  const exatos = cats.filter((c) => norm(c.nome) === alvo);
+  const exato = exatos.find((c) => c.categoria_pai_id) ?? exatos[0]; // prefere subcategoria
+  if (exato) return { id: exato.id, nome: exato.nome };
+
   const { data } = await admin.rpc("buscar_match_categoria", {
     p_workspace_id: workspaceId,
-    p_nome: String(nomeRaw),
+    p_nome: nome,
   });
   const top = (data as Array<{ id: string; nome: string; score: number }> | null)?.[0];
   if (top && Number(top.score) >= minScore) return { id: top.id, nome: top.nome };
