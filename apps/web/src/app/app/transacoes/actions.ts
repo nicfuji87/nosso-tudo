@@ -257,7 +257,7 @@ export async function salvarItensTransacao(
 
   const manter = itens.filter((i) => !i.remover);
   for (const it of manter) {
-    const { error } = await supabase
+    const { data: row, error } = await supabase
       .from("itens_transacao")
       .update({
         descricao_original: it.nome,
@@ -266,8 +266,20 @@ export async function salvarItensTransacao(
         categoria_id: it.categoriaId || null,
         essencialidade: it.essencialidade ?? "necessario",
       })
-      .eq("id", it.id);
+      .eq("id", it.id)
+      .select("produto_id")
+      .maybeSingle();
     if (error) return { error: "Não foi possível salvar um item." };
+    // Correção gruda na memória: a categoria salva pelo usuário vira a memória do
+    // produto, valendo para as próximas compras dele (não repete o erro depois).
+    const produtoId = (row as { produto_id: string | null } | null)?.produto_id;
+    if (produtoId && it.categoriaId) {
+      await supabase
+        .from("produtos")
+        .update({ categoria_sugerida_id: it.categoriaId })
+        .eq("id", produtoId)
+        .eq("workspace_id", workspaceId);
+    }
   }
 
   if (manter.length > 0) {

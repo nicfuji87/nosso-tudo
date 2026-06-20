@@ -351,6 +351,12 @@ export async function confirmarTransacaoDetalhada(
       );
       // Categoria editada pelo usuário no item (vence a classificação automática).
       const itemCategoriaId = ed[i]?.categoria_id || cls.categoriaId;
+      // Correção gruda na memória: se o usuário editou a categoria, ela passa a
+      // valer para as próximas compras do mesmo produto (senão a memória ficaria
+      // com a classificação automática antiga e o erro se repetiria).
+      if (prod.produtoId && itemCategoriaId && itemCategoriaId !== cls.categoriaId) {
+        await supabase.from("produtos").update({ categoria_sugerida_id: itemCategoriaId }).eq("id", prod.produtoId);
+      }
       const vTotal = valorItem(it);
       if (itemCategoriaId && vTotal > 0) {
         catTotais.set(itemCategoriaId, (catTotais.get(itemCategoriaId) ?? 0) + vTotal);
