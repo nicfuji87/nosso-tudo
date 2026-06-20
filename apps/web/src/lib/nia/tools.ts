@@ -246,7 +246,11 @@ const lancarTransacao: NiaTool = {
       descricao: { type: "string", description: "Descrição curta (ex.: 'mercado')." },
       valor: { type: "number", description: "Valor positivo em reais." },
       data_transacao: { type: "string", description: "Data ISO (YYYY-MM-DD). Default: hoje." },
-      categoria: { type: "string", description: "Nome da categoria, se o usuário indicar." },
+      categoria: {
+        type: "string",
+        description:
+          "Categoria no formato 'Grupo › Subcategoria', escolhendo a subcategoria mais específica que EXISTE na lista de categorias do contexto (ex.: 'Alimentação fora › Restaurante'). Não classifique só no grupo: se nenhuma subcategoria servir, proponha criar a certa (criar_categoria com categoria_pai) ou pergunte se pode deixar no grupo.",
+      },
       estabelecimento: { type: "string", description: "Nome do estabelecimento, se houver." },
       contexto: {
         type: "string",
@@ -366,7 +370,7 @@ const lancarTransacaoDetalhada: NiaTool = {
       itens: {
         type: "array",
         description:
-          "Itens da nota. Classifique CADA item: categoria pelo nome do padrão (ex.: 'Hortifruti', 'Limpeza', 'Restaurante'), essencialidade e tipo. Itens da mesma nota podem ter categorias diferentes (mercado mistura comida, limpeza, higiene...).",
+          "Itens da nota. Classifique CADA item na subcategoria mais específica, no formato 'Grupo › Subcategoria' (ex.: 'Alimentação em casa › Hortifruti', 'Casa › Limpeza', 'Alimentação fora › Restaurante'). Itens da mesma nota podem ter categorias diferentes (mercado mistura comida, limpeza, higiene...). Use os nomes da lista de categorias do contexto.",
         items: {
           type: "object",
           properties: {
@@ -375,7 +379,10 @@ const lancarTransacaoDetalhada: NiaTool = {
             unidade: { type: "string" },
             valor_unitario: { type: "number" },
             valor_total: { type: "number" },
-            categoria: { type: "string", description: "Categoria do item (nome do padrão)." },
+            categoria: {
+              type: "string",
+              description: "Categoria do item no formato 'Grupo › Subcategoria' (a subcategoria mais específica que existir).",
+            },
             essencialidade: {
               type: "string",
               enum: ["essencial", "necessario", "superfluo", "investimento"],
@@ -819,7 +826,8 @@ const conciliarFatura: NiaTool = {
             parcela: { type: "string", description: "Parcela, ex.: '3/10'. Opcional." },
             categoria: {
               type: "string",
-              description: "Categoria do padrão inferida da descrição (ex.: Uber→Transporte, farmácia→Saúde). Opcional.",
+              description:
+                "Categoria inferida da descrição, no formato 'Grupo › Subcategoria' (ex.: Uber → 'Transporte › Aplicativo/táxi', farmácia → 'Saúde › Medicamentos'). Opcional.",
             },
           },
           required: ["descricao", "valor"],

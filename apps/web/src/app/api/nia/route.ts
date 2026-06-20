@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { getUser, isPlatformAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { getHistoricoRecente, getLancamentosDaConversa, listRecorrencias } from "@/lib/db/queries";
+import {
+  getHistoricoRecente,
+  getLancamentosDaConversa,
+  listCategorias,
+  listRecorrencias,
+} from "@/lib/db/queries";
 import { formatBRL } from "@/lib/format";
 import { LABEL_FREQUENCIA } from "@/lib/types/db";
 import { processarAnexos, removerMidias } from "@/lib/nia/anexos";
@@ -200,6 +205,34 @@ export async function POST(req: Request): Promise<Response> {
     );
     partesDinamicas.push(
       `Contas fixas (recorrências) já cadastradas. ANTES de chamar criar_recorrencia, confira esta lista: se o usuário descrever algo que já está aqui — mesmo escrito com outras palavras, desde que seja claramente a MESMA conta (mesma frequência e valor parecido) — NÃO crie outra; avise que já existe e pergunte se quer atualizar (valor/dia). Só crie quando for realmente uma conta diferente:\n${linhas.join(
+        "\n",
+      )}`,
+    );
+  }
+
+  // Árvore de categorias do workspace (Grupo › subcategorias). Sem isto a Nia
+  // não sabe quais subcategorias existem: classifica no grupo ("Alimentação
+  // fora" em vez de "Restaurante") ou inventa subcategoria no grupo errado.
+  // Mostrar a lista deixa ela escolher a folha mais específica e usar o nome
+  // exato no formato "Grupo › Sub" (que resolverCategoriaCanonica desambigua).
+  const categorias = await listCategorias(workspaceId);
+  if (categorias.length > 0) {
+    const subsPorPai = new Map<string, string[]>();
+    for (const c of categorias) {
+      if (c.categoria_pai_id) {
+        const arr = subsPorPai.get(c.categoria_pai_id) ?? [];
+        arr.push(c.nome);
+        subsPorPai.set(c.categoria_pai_id, arr);
+      }
+    }
+    const linhas = categorias
+      .filter((c) => !c.categoria_pai_id)
+      .map((g) => {
+        const subs = subsPorPai.get(g.id) ?? [];
+        return subs.length ? `- ${g.nome}: ${subs.join(", ")}` : `- ${g.nome} (sem subcategorias)`;
+      });
+    partesDinamicas.push(
+      `Categorias do workspace (Grupo: subcategorias). Ao classificar um gasto ou item, escolha SEMPRE a subcategoria mais específica que servir e informe no formato "Grupo › Subcategoria" (ex.: "Alimentação fora › Restaurante", nunca só "Alimentação fora"). Use exatamente os nomes abaixo. Se nenhuma subcategoria existente servir, NÃO classifique no grupo calado: ou proponha criar a subcategoria certa (criar_categoria com categoria_pai = o grupo) ou pergunte ao usuário se prefere criar a subcategoria ou deixar no grupo.\n${linhas.join(
         "\n",
       )}`,
     );

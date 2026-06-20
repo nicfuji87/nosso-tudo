@@ -13,7 +13,14 @@ type DB = ReturnType<typeof createClient>;
 
 const ESSENCIALIDADES = new Set(["essencial", "necessario", "superfluo", "investimento"]);
 
-/** Ancora um nome de categoria no padrão (exato → fuzzy pg_trgm). */
+/**
+ * Ancora um nome de categoria no padrão. Entende o formato "Grupo › Subcategoria"
+ * que a Nia usa (separadores › ou >, não "/" nem "," — que aparecem em nomes
+ * canônicos como "Óculos/lentes" e "Cama, mesa e banho"), resolvendo a folha cujo
+ * pai bate com o grupo — assim desambigua subcategorias de mesmo nome em grupos
+ * diferentes (ex.: "Passeios" em Lazer × Viagens). Cai para exato (preferindo a
+ * subcategoria ao grupo homônimo) e, por fim, fuzzy pg_trgm.
+ */
 export async function resolverCategoriaCanonica(
   db: DB,
   workspaceId: string,
@@ -21,15 +28,36 @@ export async function resolverCategoriaCanonica(
   minScore = 0.45,
 ): Promise<{ id: string; nome: string } | null> {
   if (!nome) return null;
-  const alvo = normalizarTexto(nome);
-  const { data: cats } = await db
+  const { data: catsData } = await db
     .from("categorias")
-    .select("id, nome")
+    .select("id, nome, categoria_pai_id")
     .eq("workspace_id", workspaceId)
     .eq("ativa", true);
-  const exato = (cats as { id: string; nome: string }[] | null)?.find(
-    (c) => normalizarTexto(c.nome) === alvo,
-  );
+  const cats = (catsData as { id: string; nome: string; categoria_pai_id: string | null }[] | null) ?? [];
+  const nomePorId = new Map(cats.map((c) => [c.id, c.nome]));
+
+  // "Grupo › Subcategoria": resolve a folha pelo par (sub + grupo-pai).
+  const partes = nome
+    .split(/\s*[›>»]\s*/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (partes.length >= 2) {
+    const grupoAlvo = normalizarTexto(partes[partes.length - 2]!);
+    const subAlvo = normalizarTexto(partes[partes.length - 1]!);
+    const folhas = cats.filter((c) => c.categoria_pai_id && normalizarTexto(c.nome) === subAlvo);
+    const comPai = folhas.find(
+      (c) => normalizarTexto(nomePorId.get(c.categoria_pai_id!) ?? "") === grupoAlvo,
+    );
+    if (comPai) return { id: comPai.id, nome: comPai.nome };
+    if (folhas[0]) return { id: folhas[0]!.id, nome: folhas[0]!.nome };
+    // Subcategoria não existe ainda: ao menos cai no grupo certo.
+    const grupo = cats.find((c) => !c.categoria_pai_id && normalizarTexto(c.nome) === grupoAlvo);
+    if (grupo) return { id: grupo.id, nome: grupo.nome };
+  }
+
+  const alvo = normalizarTexto(nome);
+  const exatos = cats.filter((c) => normalizarTexto(c.nome) === alvo);
+  const exato = exatos.find((c) => c.categoria_pai_id) ?? exatos[0]; // prefere subcategoria
   if (exato) return { id: exato.id, nome: exato.nome };
 
   const { data } = await db.rpc("buscar_match_categoria", {
