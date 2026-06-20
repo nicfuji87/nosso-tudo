@@ -421,7 +421,7 @@ const lancarTransacaoDetalhada: NiaTool = {
 const criarRecorrencia: NiaTool = {
   nome: "criar_recorrencia",
   descricao:
-    "Propõe cadastrar uma CONTA FIXA (despesa ou receita RECORRENTE): aluguel, mensalidade, assinatura, salário, diarista/passadeira que vem sempre, etc. Use quando o usuário descrever algo que se REPETE no tempo ('todo mês', 'toda terça', 'semana sim, semana não', 'todo dia 10', 'todo ano'). Mapeie a frequência: diaria, semanal, quinzenal (= semana sim/semana não, a cada 15 dias), mensal, bimestral, trimestral, semestral, anual. O sistema gera os lançamentos sozinho no vencimento — então NÃO use lancar_transacao para o mesmo gasto recorrente, nem lembrar_fato (a recorrência já é a memória). Gera um cartão de confirmação.",
+    "Propõe cadastrar uma CONTA FIXA (despesa ou receita RECORRENTE): aluguel, mensalidade, assinatura, salário, diarista/passadeira que vem sempre, etc. Use quando o usuário descrever algo que se REPETE no tempo ('todo mês', 'toda terça', 'semana sim, semana não', 'todo dia 10', 'todo ano'). Mapeie a frequência: diaria, semanal, quinzenal (= semana sim/semana não, a cada 15 dias), mensal, bimestral, trimestral, semestral, anual. O sistema gera os lançamentos sozinho no vencimento — então NÃO use lancar_transacao para o mesmo gasto recorrente, nem lembrar_fato (a recorrência já é a memória). ANTES de usar, confira a lista 'Contas fixas (recorrências) já cadastradas' no contexto: se já existir uma equivalente (mesma frequência e valor parecido, mesmo que escrita com outras palavras), NÃO crie outra — avise que já existe e ofereça atualizar. Gera um cartão de confirmação.",
   nivel: "confirmar",
   inputSchema: {
     type: "object",

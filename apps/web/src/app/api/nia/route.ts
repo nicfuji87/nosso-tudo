@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { getUser, isPlatformAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { getHistoricoRecente, getLancamentosDaConversa } from "@/lib/db/queries";
+import { getHistoricoRecente, getLancamentosDaConversa, listRecorrencias } from "@/lib/db/queries";
 import { formatBRL } from "@/lib/format";
+import { LABEL_FREQUENCIA } from "@/lib/types/db";
 import { processarAnexos, removerMidias } from "@/lib/nia/anexos";
 import { calcularCusto, getApiKey, getNiaConfig } from "@/lib/nia/config";
 import { getProvider, getStreamProvider } from "@/lib/nia/provider";
@@ -182,6 +183,23 @@ export async function POST(req: Request): Promise<Response> {
     });
     partesDinamicas.push(
       `Já lançado nesta conversa (NÃO reproponha estes lançamentos nem itens já registrados; se o usuário citar algo que já está aqui, avise que já foi lançado em vez de criar de novo):\n${linhas.join(
+        "\n",
+      )}`,
+    );
+  }
+
+  // Contas fixas já cadastradas: a Nia precisa enxergá-las para não recriar uma
+  // que já existe ao propor criar_recorrencia. O usuário costuma redescrever a
+  // mesma conta com outras palavras ('Aline Rabelo - Terapeuta' vs '...terapia
+  // esportiva judô'); o dedupe por string no servidor não pega isso, então a
+  // decisão de não duplicar tem que acontecer aqui, com a lista à vista.
+  const recorrenciasAtivas = (await listRecorrencias(workspaceId)).filter((r) => r.ativa);
+  if (recorrenciasAtivas.length > 0) {
+    const linhas = recorrenciasAtivas.map(
+      (r) => `- ${r.descricao} · ${formatBRL(r.valor_previsto)} · ${LABEL_FREQUENCIA[r.frequencia]}`,
+    );
+    partesDinamicas.push(
+      `Contas fixas (recorrências) já cadastradas. ANTES de chamar criar_recorrencia, confira esta lista: se o usuário descrever algo que já está aqui — mesmo escrito com outras palavras, desde que seja claramente a MESMA conta (mesma frequência e valor parecido) — NÃO crie outra; avise que já existe e pergunte se quer atualizar (valor/dia). Só crie quando for realmente uma conta diferente:\n${linhas.join(
         "\n",
       )}`,
     );
