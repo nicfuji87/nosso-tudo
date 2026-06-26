@@ -6,6 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PerfilForm } from "@/components/perfil/perfil-form";
+import { MemoriaNiaCard } from "@/components/perfil/memoria-nia-card";
+import { getMemoriaNia } from "./actions";
 import { formatBRL } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Perfil" };
@@ -13,6 +15,7 @@ export const metadata: Metadata = { title: "Perfil" };
 export default async function PerfilPage() {
   const { profile, workspace, plan, role } = await getWorkspaceContext();
   const isPro = plan.slug === "pro";
+  const memoria = await getMemoriaNia();
 
   return (
     <div className="space-y-6">
@@ -82,6 +85,22 @@ export default async function PerfilPage() {
           </Card>
         </div>
       </div>
+
+      {/* Memória da Nia — o que a assistente lembra da família (editável) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="size-4 text-accent" /> Memória da Nia
+          </CardTitle>
+          <CardDescription>
+            O que a Nia lembra sobre a rotina e as preferências da família — usado como contexto nas conversas. Revise,
+            corrija ou apague o que quiser.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <MemoriaNiaCard fatosIniciais={memoria} />
+        </CardContent>
+      </Card>
     </div>
   );
 }
