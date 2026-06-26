@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PerfilForm } from "@/components/perfil/perfil-form";
 import { MemoriaNiaCard } from "@/components/perfil/memoria-nia-card";
-import { getMemoriaNia } from "./actions";
+import { PerfilFamiliaCard } from "@/components/perfil/perfil-familia-card";
+import { getMemoriaNia, getPerfilFamilia } from "./actions";
 import { formatBRL } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Perfil" };
@@ -15,7 +16,7 @@ export const metadata: Metadata = { title: "Perfil" };
 export default async function PerfilPage() {
   const { profile, workspace, plan, role } = await getWorkspaceContext();
   const isPro = plan.slug === "pro";
-  const memoria = await getMemoriaNia();
+  const [perfilFamilia, memoria] = await Promise.all([getPerfilFamilia(), getMemoriaNia()]);
 
   return (
     <div className="space-y-6">
@@ -85,6 +86,22 @@ export default async function PerfilPage() {
           </Card>
         </div>
       </div>
+
+      {/* Perfil da família — a identidade estável que a Nia sempre recebe */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="size-4 text-accent" /> Perfil da família
+          </CardTitle>
+          <CardDescription>
+            O básico de quem é a família — a Nia sempre tem isto em mente pra entender com quem está falando. Estável:
+            só muda quando você atualizar aqui (ou confirmar uma sugestão forte da Nia).
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <PerfilFamiliaCard perfilInicial={perfilFamilia} />
+        </CardContent>
+      </Card>
 
       {/* Memória da Nia — o que a assistente lembra da família (editável) */}
       <Card>

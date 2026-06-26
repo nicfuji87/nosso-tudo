@@ -59,6 +59,60 @@ export async function getMemoriaNia(): Promise<string[]> {
   return Array.isArray(fatos) ? (fatos.filter((f) => typeof f === "string") as string[]) : [];
 }
 
+export interface PerfilFamilia {
+  sobre: string;
+  financas: string;
+  objetivos: string;
+  observacoes: string;
+}
+
+const perfilFamiliaSchema = z.object({
+  sobre: z.string().trim().max(800).optional().default(""),
+  financas: z.string().trim().max(800).optional().default(""),
+  objetivos: z.string().trim().max(800).optional().default(""),
+  observacoes: z.string().trim().max(800).optional().default(""),
+});
+
+/** Perfil estruturado da família — a identidade estável que a Nia sempre recebe. */
+export async function getPerfilFamilia(): Promise<PerfilFamilia> {
+  const vazio: PerfilFamilia = { sobre: "", financas: "", objetivos: "", observacoes: "" };
+  const { workspaceId } = await getWorkspaceId();
+  if (!workspaceId) return vazio;
+  const supabase = createClient();
+  const { data } = await supabase.from("nia_contexto").select("perfil").eq("workspace_id", workspaceId).maybeSingle();
+  const p = ((data as { perfil: unknown } | null)?.perfil ?? {}) as Partial<PerfilFamilia>;
+  return {
+    sobre: typeof p.sobre === "string" ? p.sobre : "",
+    financas: typeof p.financas === "string" ? p.financas : "",
+    objetivos: typeof p.objetivos === "string" ? p.objetivos : "",
+    observacoes: typeof p.observacoes === "string" ? p.observacoes : "",
+  };
+}
+
+/** Salva o perfil da família (substitui). Só campos curados — não é memória solta. */
+export async function salvarPerfilFamilia(input: PerfilFamilia): Promise<{ error?: string; ok?: boolean }> {
+  const { workspaceId, error } = await getWorkspaceId();
+  if (error || !workspaceId) return { error: error ?? "Workspace não encontrado." };
+  const parsed = perfilFamiliaSchema.safeParse(input);
+  if (!parsed.success) return { error: "Algum campo ficou longo demais (máx. 800 caracteres)." };
+  const perfil = {
+    sobre: parsed.data.sobre.trim(),
+    financas: parsed.data.financas.trim(),
+    objetivos: parsed.data.objetivos.trim(),
+    observacoes: parsed.data.observacoes.trim(),
+  };
+  const supabase = createClient();
+  const { error: e } = await supabase
+    .from("nia_contexto")
+    .upsert(
+      { workspace_id: workspaceId, perfil, atualizado_em: new Date().toISOString() },
+      { onConflict: "workspace_id" },
+    );
+  if (e) return { error: "Não foi possível salvar o perfil." };
+  revalidatePath("/app/perfil");
+  return { ok: true };
+}
+
 const fatosSchema = z.array(z.string().trim().min(1).max(300)).max(50);
 
 /** Salva a memória da família editada no perfil (substitui a lista de fatos). */
