@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { getWorkspaceContext } from "@/lib/auth";
 import {
   getComparativoPeriodo,
+  getCompromissosFuturos,
   getGastosPorCategoriaPeriodo,
   getGastosPorContexto,
   getGastosPorEssencialidadePeriodo,
@@ -21,6 +22,7 @@ import { ComparativoCard } from "@/components/dashboard/comparativo-card";
 import { EssencialidadeCard } from "@/components/dashboard/essencialidade-card";
 import { PeriodoFilter } from "@/components/dashboard/periodo-filter";
 import { PessoaFilter } from "@/components/dashboard/pessoa-filter";
+import { CompromissosFuturosSecao } from "@/components/dashboard/compromissos-futuros";
 
 export const metadata: Metadata = { title: "Relatórios" };
 
@@ -40,10 +42,12 @@ export default async function RelatoriosPage({
     : "mes-atual";
 
   // Opções e seleção dos filtros por pessoa e categoria (validadas contra a lista).
-  const [pessoas, categoriasPai] = await Promise.all([
+  const [pessoas, categoriasPai, compromissos] = await Promise.all([
     listBeneficiarios(workspace.id),
     listCategoriasPai(workspace.id),
+    getCompromissosFuturos(workspace.id),
   ]);
+  const temFuturo = compromissos.contasFixas.length > 0 || compromissos.parcelasAbertas.length > 0;
   const pessoaSel = pessoas.find((p) => p.id === searchParams.pessoa) ?? null;
   const beneficiarioId = pessoaSel?.id;
   const catSel = categoriasPai.find((c) => c.id === searchParams.categoria) ?? null;
@@ -75,6 +79,8 @@ export default async function RelatoriosPage({
         title="Relatórios"
         description="Para onde o dinheiro vai — por categoria, por natureza e por evento."
       />
+
+      {temFuturo && <CompromissosFuturosSecao dados={compromissos} />}
 
       <div className="flex flex-wrap items-center gap-2">
         <PeriodoFilter preset={presetUI} de={searchParams.de ?? null} ate={searchParams.ate ?? null} />

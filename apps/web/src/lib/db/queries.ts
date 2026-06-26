@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { formatBRL } from "@/lib/format";
+import { avancarDataRecorrencia } from "@/lib/recorrencias";
 import type { NiaWidget } from "@/lib/nia/schemas";
+import { LABEL_FREQUENCIA } from "@/lib/types/db";
 import type {
   Cartao,
   Categoria,
@@ -504,6 +506,197 @@ export async function listRecorrencias(workspaceId: string): Promise<Recorrencia
     .order("ativa", { ascending: false })
     .order("descricao", { ascending: true });
   return (data as Recorrencia[] | null) ?? [];
+}
+
+/* ------------------------------------------------------------------ */
+/* Futuro — compromissos já assumidos (recorrências + parcelas)        */
+/* ------------------------------------------------------------------ */
+
+export interface CompromissoMes {
+  mes: string; // "YYYY-MM"
+  label: string; // "jul/26"
+  recorrencias: number;
+  parcelas: number;
+  total: number;
+}
+export interface ContaFixaResumo {
+  id: string;
+  descricao: string;
+  valorMensal: number;
+  frequenciaLabel: string;
+}
+export interface ParcelaAberta {
+  serieId: string;
+  descricao: string;
+  totalParcelas: number;
+  pagas: number;
+  restantes: number;
+  valorParcela: number;
+  totalRestante: number;
+  proxima: string | null;
+}
+export interface CompromissosFuturos {
+  porMes: CompromissoMes[];
+  contasFixas: ContaFixaResumo[];
+  parcelasAbertas: ParcelaAberta[];
+  totalMensalRecorrente: number;
+  totalParcelasRestante: number;
+}
+
+/** Quantas vezes a frequência ocorre, em média, por mês (p/ normalizar conta fixa). */
+const FATOR_MENSAL: Record<string, number> = {
+  diaria: 30,
+  semanal: 30 / 7,
+  quinzenal: 2,
+  mensal: 1,
+  bimestral: 1 / 2,
+  trimestral: 1 / 3,
+  semestral: 1 / 6,
+  anual: 1 / 12,
+};
+
+/**
+ * Olha pra frente: o que a família já tem comprometido nos próximos `meses` —
+ * recorrências (contas fixas) ocorrência a ocorrência + parcelas a vencer.
+ * Renda comprometida exige a renda cadastrada como receita recorrente (ainda
+ * pode faltar), então aqui o foco é o lado das obrigações (sólido).
+ */
+export async function getCompromissosFuturos(workspaceId: string, meses = 6): Promise<CompromissosFuturos> {
+  const supabase = createClient();
+  const hoje = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+  const cy = Number(hoje.slice(0, 4));
+  const cm = Number(hoje.slice(5, 7)); // 1..12
+
+  // Buckets dos próximos `meses` (começando no mês atual).
+  const porMes: CompromissoMes[] = [];
+  for (let i = 0; i < meses; i++) {
+    const y = cy + Math.floor((cm - 1 + i) / 12);
+    const m0 = (cm - 1 + i) % 12; // 0..11
+    const mes = `${y}-${String(m0 + 1).padStart(2, "0")}`;
+    const label = new Intl.DateTimeFormat("pt-BR", { month: "short", year: "2-digit" })
+      .format(new Date(Date.UTC(y, m0, 1)))
+      .replace(".", "");
+    porMes.push({ mes, label, recorrencias: 0, parcelas: 0, total: 0 });
+  }
+  const ultimo = porMes[porMes.length - 1]!;
+  const fimAno = Number(ultimo.mes.slice(0, 4));
+  const fimMes0 = Number(ultimo.mes.slice(5, 7)) - 1;
+  const windowEnd = `${fimAno}-${String(fimMes0 + 1).padStart(2, "0")}-${String(
+    new Date(Date.UTC(fimAno, fimMes0 + 1, 0)).getUTCDate(),
+  ).padStart(2, "0")}`;
+  const idxByMes = new Map(porMes.map((b, i) => [b.mes, i]));
+  const idxDe = (d: string): number => idxByMes.get(d.slice(0, 7)) ?? -1;
+
+  // 1) Recorrências de despesa ativas → ocorrências por mês + valor mensal normalizado.
+  const { data: recData } = await supabase
+    .from("recorrencias")
+    .select("id, descricao, valor_previsto, frequencia, proxima_geracao, data_inicio, data_fim")
+    .eq("workspace_id", workspaceId)
+    .eq("ativa", true)
+    .eq("tipo", "despesa");
+  const recs =
+    (recData as
+      | {
+          id: string;
+          descricao: string;
+          valor_previsto: number;
+          frequencia: string;
+          proxima_geracao: string | null;
+          data_inicio: string | null;
+          data_fim: string | null;
+        }[]
+      | null) ?? [];
+
+  const contasFixas: ContaFixaResumo[] = recs
+    .map((r) => ({
+      id: r.id,
+      descricao: r.descricao,
+      valorMensal: Number(r.valor_previsto) * (FATOR_MENSAL[r.frequencia] ?? 1),
+      frequenciaLabel: LABEL_FREQUENCIA[r.frequencia as keyof typeof LABEL_FREQUENCIA] ?? r.frequencia,
+    }))
+    .sort((a, b) => b.valorMensal - a.valorMensal);
+  const totalMensalRecorrente = contasFixas.reduce((s, c) => s + c.valorMensal, 0);
+
+  for (const r of recs) {
+    let v = r.proxima_geracao ?? r.data_inicio ?? hoje;
+    let guard = 0;
+    while (v < hoje && guard < 800) {
+      v = avancarDataRecorrencia(v, r.frequencia);
+      guard++;
+    }
+    guard = 0;
+    while (v <= windowEnd && (!r.data_fim || v <= r.data_fim) && guard < 800) {
+      const idx = idxDe(v);
+      if (idx >= 0) porMes[idx]!.recorrencias += Number(r.valor_previsto);
+      v = avancarDataRecorrencia(v, r.frequencia);
+      guard++;
+    }
+  }
+
+  // 2) Parcelas (compras parceladas) — agenda futura + séries em aberto.
+  const { data: parcData } = await supabase
+    .from("transacoes")
+    .select("id, transacao_pai_id, descricao, valor, data_transacao, total_parcelas, numero_parcela")
+    .eq("workspace_id", workspaceId)
+    .eq("tipo", "despesa")
+    .eq("eh_parcelado", true);
+  const parcs =
+    (parcData as
+      | {
+          id: string;
+          transacao_pai_id: string | null;
+          descricao: string;
+          valor: number;
+          data_transacao: string;
+          total_parcelas: number | null;
+          numero_parcela: number | null;
+        }[]
+      | null) ?? [];
+
+  const series = new Map<string, typeof parcs>();
+  for (const p of parcs) {
+    const k = p.transacao_pai_id ?? p.id;
+    let arr = series.get(k);
+    if (!arr) {
+      arr = [];
+      series.set(k, arr);
+    }
+    arr.push(p);
+    // agenda futura por mês
+    if (p.data_transacao >= hoje && p.data_transacao <= windowEnd) {
+      const idx = idxDe(p.data_transacao);
+      if (idx >= 0) porMes[idx]!.parcelas += Number(p.valor);
+    }
+  }
+
+  const parcelasAbertas: ParcelaAberta[] = [];
+  for (const [serieId, linhas] of series) {
+    const futuras = linhas.filter((l) => l.data_transacao >= hoje);
+    if (futuras.length === 0) continue;
+    const totalParcelas = Number(linhas[0]!.total_parcelas ?? linhas.length);
+    const proxima = futuras.map((l) => l.data_transacao).sort()[0] ?? null;
+    parcelasAbertas.push({
+      serieId,
+      descricao: linhas[0]!.descricao.replace(/\s*\(\d+\/\d+\)\s*$/, ""),
+      totalParcelas,
+      pagas: totalParcelas - futuras.length,
+      restantes: futuras.length,
+      valorParcela: Number(linhas[0]!.valor),
+      totalRestante: futuras.reduce((s, l) => s + Number(l.valor), 0),
+      proxima,
+    });
+  }
+  parcelasAbertas.sort((a, b) => (a.proxima ?? "").localeCompare(b.proxima ?? ""));
+  const totalParcelasRestante = parcelasAbertas.reduce((s, p) => s + p.totalRestante, 0);
+
+  for (const b of porMes) b.total = b.recorrencias + b.parcelas;
+
+  return { porMes, contasFixas, parcelasAbertas, totalMensalRecorrente, totalParcelasRestante };
 }
 
 export async function listEntidades(workspaceId: string): Promise<Entidade[]> {
