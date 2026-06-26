@@ -60,6 +60,7 @@ export function TransacaoEditSheet({
   });
   const { errors, isSubmitting } = formState;
   const meio = watch("meio_pagamento");
+  const tipoVal = watch("tipo");
   const mostraCartao = meio === "cartao_credito" || meio === "cartao_debito";
 
   useEffect(() => {
@@ -97,6 +98,7 @@ export function TransacaoEditSheet({
           contexto: tx.contexto || undefined,
           observacoes: tx.observacoes || undefined,
           tags: [],
+          parcelas: tx.parcelas ?? 1,
         });
       }
       setCarregando(false);
@@ -169,6 +171,32 @@ export function TransacaoEditSheet({
               <Input id="ed-desc" {...register("descricao")} />
               <FieldError message={errors.descricao?.message} />
             </div>
+
+            {proposta && tipoVal === "despesa" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="ed-parcelas">Parcelas</Label>
+                <Controller
+                  control={control}
+                  name="parcelas"
+                  render={({ field }) => (
+                    <Input
+                      id="ed-parcelas"
+                      type="number"
+                      min={1}
+                      max={60}
+                      value={field.value ?? 1}
+                      onChange={(e) => {
+                        const n = parseInt(e.target.value, 10);
+                        field.onChange(Number.isFinite(n) && n >= 1 ? n : 1);
+                      }}
+                    />
+                  )}
+                />
+                <p className="text-caption text-muted-foreground">
+                  1 = à vista. O valor é o total; cada parcela vira um lançamento por mês.
+                </p>
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <Label>Categoria</Label>

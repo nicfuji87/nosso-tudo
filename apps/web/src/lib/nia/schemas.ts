@@ -74,6 +74,8 @@ export const lancarTransacaoArgs = z.object({
   cartao: z.string().trim().max(60).optional(),
   conta: z.string().trim().max(60).optional(),
   beneficiario: z.string().trim().max(80).optional(),
+  /** Nº de parcelas quando a compra foi parcelada (1 = à vista). `valor` é o total. */
+  parcelas: z.coerce.number().int().min(1).max(60).optional(),
 });
 export type LancarTransacaoArgs = z.infer<typeof lancarTransacaoArgs>;
 
@@ -300,6 +302,8 @@ export interface WidgetConfirmarTransacao {
   /** Quem se beneficiou da compra (nome da pessoa/grupo). */
   beneficiario: string | null;
   data: string;
+  /** Nº de parcelas (>1 = parcelado; `valor` é o total). null/1 = à vista. */
+  parcelas: number | null;
   /** Dúvida de estabelecimento (zona cinza): a Nia achou um parecido. */
   match?: { sugestao: string; score: number } | null;
 }

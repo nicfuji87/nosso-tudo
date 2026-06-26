@@ -233,7 +233,7 @@ const consultarAlertas: NiaTool = {
 const lancarTransacao: NiaTool = {
   nome: "lancar_transacao",
   descricao:
-    "Propõe o lançamento de uma despesa ou receita. NÃO grava direto: gera um cartão de confirmação para o usuário aprovar. Use quando o usuário relatar um gasto ou recebimento. Capture também o meio de pagamento e o cartão/conta quando o usuário mencionar (ex.: 'paguei no Latam Pass', 'saiu do Itaú'). E o BENEFICIÁRIO (quem se beneficiou), inferindo do contexto: 'Henrique cortou o cabelo' → beneficiario 'Henrique'; 'Bruna comprou roupas' → 'Bruna'; mercado/contas da casa → o grupo da família (ex.: 'Casa'). Independe de quem pagou.",
+    "Propõe o lançamento de uma despesa ou receita. NÃO grava direto: gera um cartão de confirmação para o usuário aprovar. Use quando o usuário relatar um gasto ou recebimento. Capture também o meio de pagamento e o cartão/conta quando o usuário mencionar (ex.: 'paguei no Latam Pass', 'saiu do Itaú'). E o BENEFICIÁRIO (quem se beneficiou), inferindo do contexto: 'Henrique cortou o cabelo' → beneficiario 'Henrique'; 'Bruna comprou roupas' → 'Bruna'; mercado/contas da casa → o grupo da família (ex.: 'Casa'). Independe de quem pagou. PARCELAMENTO: se a compra foi parcelada (ex.: 'em 3x', 'parcelei em 2'), preencha `parcelas` com o número de vezes — o `valor` é sempre o TOTAL da compra (se o usuário disser '2x de R$200', o total é R$400 e parcelas=2). O sistema gera um lançamento por mês automaticamente.",
   nivel: "confirmar",
   inputSchema: {
     type: "object",
@@ -285,6 +285,11 @@ const lancarTransacao: NiaTool = {
         description:
           "Quem se beneficiou da compra (nome de pessoa/grupo já cadastrado). Ex.: corte de cabelo do Henrique → 'Henrique'; mercado da casa → 'Casa'. Independe de quem pagou.",
       },
+      parcelas: {
+        type: "number",
+        description:
+          "Número de parcelas, se a compra foi parcelada (ex.: 'em 3x' → 3). 1 ou ausente = à vista. O `valor` continua sendo o TOTAL; o sistema divide em N lançamentos mensais.",
+      },
     },
     required: ["descricao", "valor"],
   },
@@ -323,9 +328,12 @@ const lancarTransacao: NiaTool = {
       pagamento: d.cartao ?? d.conta ?? null,
       beneficiario: d.beneficiario ?? null,
       data,
+      parcelas: d.parcelas && d.parcelas > 1 ? d.parcelas : null,
       match: match ? { sugestao: match.sugestao, score: match.score } : null,
     };
-    const texto = `Preparei um lançamento de ${formatBRL(d.valor)} (${d.descricao}) para o usuário confirmar.`;
+    const texto = `Preparei um lançamento de ${formatBRL(d.valor)} (${d.descricao}${
+      d.parcelas && d.parcelas > 1 ? `, em ${d.parcelas}x` : ""
+    }) para o usuário confirmar.`;
     return { texto, widget };
   },
 };

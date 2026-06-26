@@ -171,6 +171,8 @@ export interface TransacaoEditavel {
   estabelecimento: string;
   contexto: string;
   observacoes: string;
+  /** Só vem preenchido em propostas da Nia ainda não lançadas (parcelamento). */
+  parcelas?: number;
 }
 
 /** Carrega os campos editáveis de uma transação (RLS garante o workspace). */

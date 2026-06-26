@@ -861,6 +861,11 @@ function ConfirmarTransacaoCard({
           <p className="font-medium">{w.descricao}</p>
           {detalhes && <p className="text-caption text-muted-foreground">{detalhes}</p>}
           {linha2 && <p className="text-caption text-muted-foreground">{linha2}</p>}
+          {w.parcelas && w.parcelas > 1 && (
+            <p className="text-caption font-medium text-accent">
+              Parcelado em {w.parcelas}x de {formatBRL(w.valor / w.parcelas)}
+            </p>
+          )}
         </div>
         <p className="shrink-0 font-mono text-body font-semibold tabular-nums">{formatBRL(w.valor)}</p>
       </div>

@@ -186,6 +186,7 @@ export async function confirmarTransacao(
     beneficiario_id: beneficiarioId,
     estabelecimento,
     contexto: d.contexto,
+    parcelas: d.parcelas,
     tags: [],
   });
   if (res.error) return { error: res.error };
@@ -223,6 +224,7 @@ export async function carregarPropostaEditavel(acaoId: string): Promise<Transaca
     estabelecimento: d.estabelecimento ?? "",
     contexto: d.contexto ?? "",
     observacoes: "",
+    parcelas: d.parcelas,
   };
 }
 
