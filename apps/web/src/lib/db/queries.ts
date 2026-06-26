@@ -699,6 +699,103 @@ export async function getCompromissosFuturos(workspaceId: string, meses = 6): Pr
   return { porMes, contasFixas, parcelasAbertas, totalMensalRecorrente, totalParcelasRestante };
 }
 
+/* ------------------------------------------------------------------ */
+/* Insights — dependência de fornecedores & dinheiro sem dono          */
+/* ------------------------------------------------------------------ */
+
+export interface FornecedorGasto {
+  id: string;
+  nome: string;
+  total: number;
+  n: number;
+  pct: number;
+}
+export interface DependenciaFornecedores {
+  fornecedores: FornecedorGasto[];
+  total: number;
+  topPct: number;
+  topN: number;
+}
+
+/** Concentração de gastos por estabelecimento no período (onde a família mais depende). */
+export async function getDependenciaFornecedores(
+  workspaceId: string,
+  inicio: string,
+  fim: string,
+  topN = 5,
+): Promise<DependenciaFornecedores> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("transacoes")
+    .select("valor, estabelecimento:estabelecimentos(id, nome)")
+    .eq("workspace_id", workspaceId)
+    .eq("tipo", "despesa")
+    .eq("status_revisao", "confirmado")
+    .gte("data_transacao", inicio)
+    .lte("data_transacao", fim)
+    .not("estabelecimento_id", "is", null);
+  const rows = (data as { valor: number; estabelecimento: { id: string; nome: string } | null }[] | null) ?? [];
+  const map = new Map<string, { nome: string; total: number; n: number }>();
+  let total = 0;
+  for (const r of rows) {
+    if (!r.estabelecimento) continue;
+    total += Number(r.valor);
+    const a = map.get(r.estabelecimento.id) ?? { nome: r.estabelecimento.nome, total: 0, n: 0 };
+    a.total += Number(r.valor);
+    a.n += 1;
+    map.set(r.estabelecimento.id, a);
+  }
+  const fornecedores = [...map.entries()]
+    .map(([id, v]) => ({ id, nome: v.nome, total: v.total, n: v.n, pct: total > 0 ? (v.total / total) * 100 : 0 }))
+    .sort((a, b) => b.total - a.total);
+  const topPct = fornecedores.slice(0, topN).reduce((s, f) => s + f.pct, 0);
+  return { fornecedores: fornecedores.slice(0, 8), total, topPct, topN: Math.min(topN, fornecedores.length) };
+}
+
+export interface SemDonoLinha {
+  id: string;
+  descricao: string;
+  valor: number;
+  data: string;
+}
+export interface DinheiroSemDono {
+  total: number;
+  linhas: SemDonoLinha[];
+}
+
+/** Despesas confirmadas no período sem categoria (nem na transação, nem nos itens) — "saiu sem contar uma história". */
+export async function getDinheiroSemDono(workspaceId: string, inicio: string, fim: string): Promise<DinheiroSemDono> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("transacoes")
+    .select("id, descricao, valor, data_transacao")
+    .eq("workspace_id", workspaceId)
+    .eq("tipo", "despesa")
+    .eq("status_revisao", "confirmado")
+    .is("categoria_id", null)
+    .gte("data_transacao", inicio)
+    .lte("data_transacao", fim)
+    .order("valor", { ascending: false });
+  let rows = (data as { id: string; descricao: string; valor: number; data_transacao: string }[] | null) ?? [];
+  // Tira as que têm a categoria nos itens (nota itemizada sem categoria na transação).
+  if (rows.length > 0) {
+    const { data: itens } = await supabase
+      .from("itens_transacao")
+      .select("transacao_id")
+      .in("transacao_id", rows.map((r) => r.id))
+      .not("categoria_id", "is", null);
+    const comItem = new Set(((itens as { transacao_id: string }[] | null) ?? []).map((i) => i.transacao_id));
+    rows = rows.filter((r) => !comItem.has(r.id));
+  }
+  const linhas = rows.map((r) => ({
+    id: r.id,
+    descricao: r.descricao,
+    valor: Number(r.valor),
+    data: r.data_transacao,
+  }));
+  return { total: linhas.reduce((s, l) => s + l.valor, 0), linhas };
+}
+
 export async function listEntidades(workspaceId: string): Promise<Entidade[]> {
   const supabase = createClient();
   const { data } = await supabase

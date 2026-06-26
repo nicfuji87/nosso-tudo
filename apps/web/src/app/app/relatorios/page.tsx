@@ -3,6 +3,8 @@ import { getWorkspaceContext } from "@/lib/auth";
 import {
   getComparativoPeriodo,
   getCompromissosFuturos,
+  getDependenciaFornecedores,
+  getDinheiroSemDono,
   getGastosPorCategoriaPeriodo,
   getGastosPorContexto,
   getGastosPorEssencialidadePeriodo,
@@ -23,6 +25,7 @@ import { EssencialidadeCard } from "@/components/dashboard/essencialidade-card";
 import { PeriodoFilter } from "@/components/dashboard/periodo-filter";
 import { PessoaFilter } from "@/components/dashboard/pessoa-filter";
 import { CompromissosFuturosSecao } from "@/components/dashboard/compromissos-futuros";
+import { DependenciaFornecedoresCard, DinheiroSemDonoCard } from "@/components/dashboard/insights-extra";
 
 export const metadata: Metadata = { title: "Relatórios" };
 
@@ -52,7 +55,7 @@ export default async function RelatoriosPage({
   const beneficiarioId = pessoaSel?.id;
   const catSel = categoriasPai.find((c) => c.id === searchParams.categoria) ?? null;
 
-  const [resumo, categorias, essenc, eventos, comparativo] = await Promise.all([
+  const [resumo, categorias, essenc, eventos, comparativo, fornecedores, semDono] = await Promise.all([
     getResumoPeriodo(workspace.id, periodo.inicio, periodo.fim),
     // Com categoria escolhida, o card vira o detalhe dela (subcategorias).
     catSel
@@ -61,6 +64,8 @@ export default async function RelatoriosPage({
     getGastosPorEssencialidadePeriodo(workspace.id, periodo.inicio, periodo.fim, beneficiarioId),
     getGastosPorContexto(workspace.id),
     getComparativoPeriodo(workspace.id, periodo, beneficiarioId),
+    getDependenciaFornecedores(workspace.id, periodo.inicio, periodo.fim),
+    getDinheiroSemDono(workspace.id, periodo.inicio, periodo.fim),
   ]);
 
   const totalCat = categorias.reduce((s, c) => s + Number(c.total), 0);
@@ -229,6 +234,10 @@ export default async function RelatoriosPage({
               </CardContent>
             </Card>
           )}
+
+          {/* Dependência de fornecedores e dinheiro sem dono — só na visão geral */}
+          {!filtrado && <DependenciaFornecedoresCard dados={fornecedores} />}
+          {!filtrado && <DinheiroSemDonoCard dados={semDono} />}
         </>
       )}
     </div>
