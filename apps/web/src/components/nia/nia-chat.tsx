@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/sonner";
 import { createClient } from "@/lib/supabase/client";
 import {
+  confirmarAtualizarPerfil,
   confirmarCartao,
   confirmarCategoria,
   confirmarCompromisso,
@@ -696,6 +697,17 @@ function WidgetView({
           confirmar={() => confirmarFato(widget.acaoId)}
           descartar={() => rejeitarAcao(widget.acaoId)}
           labelFeito="Guardado"
+          estadoInicial={estadoInicial}
+        />
+      );
+    case "atualizar_perfil":
+      return (
+        <AcaoCard
+          titulo={`Atualizar perfil · ${widget.campoLabel}`}
+          subtitulo={widget.texto}
+          confirmar={() => confirmarAtualizarPerfil(widget.acaoId)}
+          descartar={() => rejeitarAcao(widget.acaoId)}
+          labelFeito="Perfil atualizado"
           estadoInicial={estadoInicial}
         />
       );

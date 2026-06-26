@@ -25,9 +25,12 @@ import { formatBRL, formatDate } from "@/lib/format";
 import { FREQUENCIAS_RECORRENCIA, LABEL_ESSENCIALIDADE, LABEL_FREQUENCIA } from "@/lib/types/db";
 import { normalizarTexto } from "@/lib/normalize";
 import {
+  atualizarPerfilArgs,
   buscarDocumentosArgs,
   buscarItensArgs,
+  CAMPOS_PERFIL,
   conciliarFaturaArgs,
+  LABEL_CAMPO_PERFIL,
   consultarCadastrosArgs,
   consultarGastosArgs,
   criarCartaoArgs,
@@ -584,6 +587,51 @@ const lembrarFato: NiaTool = {
     if (!acaoId) throw new Error("Não consegui preparar a memória.");
     const widget: NiaWidget = { tipo: "lembrar_fato", acaoId, fato: d.fato };
     return { texto: `Quer que eu lembre: "${d.fato}"?`, widget };
+  },
+};
+
+const atualizarPerfil: NiaTool = {
+  nome: "atualizar_perfil",
+  descricao:
+    "Propõe atualizar o PERFIL FIXO da família — a identidade estável que você sempre recebe no contexto. Campos: 'sobre' (quem é a família: pessoas, papéis, idades), 'financas' (quem sustenta, como dividem), 'objetivos' (metas e valores) e 'observacoes' (contexto duradouro e importante, ex.: rotina/saúde de alguém). Use SOMENTE para fatos ESTRUTURAIS e duradouros sobre QUEM a família é — nunca para gastos ou fatos do dia a dia (esses são lembrar_fato). Em 'texto', escreva o conteúdo COMPLETO e já atualizado do campo: incorpore o que já existe no perfil (você o recebe no contexto) + a novidade, sem só anexar. Gera cartão de confirmação.",
+  nivel: "confirmar_estrutural",
+  inputSchema: {
+    type: "object",
+    properties: {
+      campo: {
+        type: "string",
+        enum: [...CAMPOS_PERFIL],
+        description: "Qual campo do perfil atualizar.",
+      },
+      texto: {
+        type: "string",
+        description: "Conteúdo completo e atualizado do campo (não só o acréscimo).",
+      },
+    },
+    required: ["campo", "texto"],
+  },
+  async executar(args, ctx) {
+    const d = valida(atualizarPerfilArgs, args);
+    const acaoId = await registrarAcao({
+      workspaceId: ctx.workspaceId,
+      profileId: ctx.profileId,
+      conversaId: ctx.conversaId,
+      ferramenta: "atualizar_perfil",
+      nivel: "confirmar_estrutural",
+      payloadProposto: d,
+    });
+    if (!acaoId) throw new Error("Não consegui preparar a atualização do perfil.");
+    const widget: NiaWidget = {
+      tipo: "atualizar_perfil",
+      acaoId,
+      campo: d.campo,
+      campoLabel: LABEL_CAMPO_PERFIL[d.campo],
+      texto: d.texto,
+    };
+    return {
+      texto: `Quer que eu atualize o perfil da família (${LABEL_CAMPO_PERFIL[d.campo]})?`,
+      widget,
+    };
   },
 };
 
@@ -1293,6 +1341,7 @@ export const NIA_TOOLS: NiaTool[] = [
   criarMeta,
   criarOrcamento,
   lembrarFato,
+  atualizarPerfil,
   buscarItensTool,
   consultarDocumentos,
   enviarDocumento,

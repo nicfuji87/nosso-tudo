@@ -138,6 +138,19 @@ export const lembrarFatoArgs = z.object({
 });
 export type LembrarFatoArgs = z.infer<typeof lembrarFatoArgs>;
 
+export const CAMPOS_PERFIL = ["sobre", "financas", "objetivos", "observacoes"] as const;
+export const LABEL_CAMPO_PERFIL: Record<(typeof CAMPOS_PERFIL)[number], string> = {
+  sobre: "Sobre a família",
+  financas: "Finanças",
+  objetivos: "Objetivos e valores",
+  observacoes: "Observações",
+};
+export const atualizarPerfilArgs = z.object({
+  campo: z.enum(CAMPOS_PERFIL),
+  texto: z.string().trim().min(1).max(800),
+});
+export type AtualizarPerfilArgs = z.infer<typeof atualizarPerfilArgs>;
+
 export const buscarItensArgs = z.object({ termo: z.string().trim().min(1).max(100) });
 export type BuscarItensArgs = z.infer<typeof buscarItensArgs>;
 
@@ -329,6 +342,14 @@ export interface WidgetLembrarFato {
   fato: string;
 }
 
+export interface WidgetAtualizarPerfil {
+  tipo: "atualizar_perfil";
+  acaoId: string;
+  campo: string;
+  campoLabel: string;
+  texto: string;
+}
+
 export interface WidgetCriarCategoria {
   tipo: "criar_categoria";
   acaoId: string;
@@ -441,6 +462,7 @@ export type NiaWidget =
   | WidgetCriarPessoa
   | WidgetCriarCompromisso
   | WidgetLembrarFato
+  | WidgetAtualizarPerfil
   | WidgetCriarCategoria
   | WidgetCriarConta
   | WidgetCriarCartao

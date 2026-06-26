@@ -12,6 +12,7 @@ import { transacaoSchema, type TransacaoInput } from "@/lib/schemas/transacao";
 import { criarCartao, criarConta, criarCategoria, criarEntidade } from "@/app/app/cadastros/actions";
 import { listCategorias, listEntidades } from "@/lib/db/queries";
 import {
+  atualizarPerfilArgs,
   conciliarFaturaPayload,
   criarCartaoArgs,
   criarCategoriaArgs,
@@ -993,7 +994,11 @@ export async function confirmarFato(acaoId: string): Promise<{ error?: string; o
   const atuais = Array.isArray((ctxRow as { fatos: unknown } | null)?.fatos)
     ? ((ctxRow as { fatos: string[] }).fatos as string[])
     : [];
-  const fatos = [...atuais, parsed.data.fato].slice(-50);
+  // Memória domada: não duplica fato equivalente e mantém só os 30 mais recentes
+  // (o que é estrutural deve ir pro perfil via atualizar_perfil, não acumular aqui).
+  const novoFato = parsed.data.fato;
+  const jaExiste = atuais.some((f) => normalizarTexto(f) === normalizarTexto(novoFato));
+  const fatos = (jaExiste ? atuais : [...atuais, novoFato]).slice(-30);
 
   const { error } = await supabase
     .from("nia_contexto")
@@ -1002,6 +1007,38 @@ export async function confirmarFato(acaoId: string): Promise<{ error?: string; o
       { onConflict: "workspace_id" },
     );
   if (error) return { error: "Não foi possível salvar na memória." };
+
+  await atualizarAcao(acaoId, { status: "executada", resultado: { ok: true } });
+  return { ok: true };
+}
+
+/** Aplica a atualização do PERFIL FIXO da família proposta pela Nia (sinal forte). */
+export async function confirmarAtualizarPerfil(acaoId: string): Promise<{ error?: string; ok?: boolean }> {
+  const acao = await carregarAcao(acaoId);
+  if (!acao) return { error: "Ação não encontrada." };
+  if (acao.status !== "proposta") return { error: "Essa ação já foi processada." };
+  if (acao.ferramenta !== "atualizar_perfil") return { error: "Ação não suportada." };
+
+  const parsed = atualizarPerfilArgs.safeParse(acao.payload_proposto);
+  if (!parsed.success) return { error: "Dados da proposta inválidos." };
+  const d = parsed.data;
+
+  const supabase = createClient();
+  const { data: ctxRow } = await supabase
+    .from("nia_contexto")
+    .select("perfil")
+    .eq("workspace_id", acao.workspace_id)
+    .maybeSingle();
+  const perfil = { ...(((ctxRow as { perfil?: Record<string, unknown> } | null)?.perfil) ?? {}) };
+  perfil[d.campo] = d.texto;
+
+  const { error } = await supabase
+    .from("nia_contexto")
+    .upsert(
+      { workspace_id: acao.workspace_id, perfil, atualizado_em: new Date().toISOString() },
+      { onConflict: "workspace_id" },
+    );
+  if (error) return { error: "Não foi possível atualizar o perfil." };
 
   await atualizarAcao(acaoId, { status: "executada", resultado: { ok: true } });
   return { ok: true };
