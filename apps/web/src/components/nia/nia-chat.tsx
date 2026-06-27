@@ -148,6 +148,7 @@ export function NiaChat({
   conversaIdInicial,
   mensagensIniciais = [],
   statusAcoes = {},
+  perfilVazio = false,
 }: {
   nome: string;
   workspaceId: string;
@@ -155,8 +156,12 @@ export function NiaChat({
   conversaIdInicial?: string;
   mensagensIniciais?: Msg[];
   statusAcoes?: Record<string, string>;
+  /** Perfil da família ainda vazio → saudação de boas-vindas que abre a entrevista. */
+  perfilVazio?: boolean;
 }) {
-  const saudacao = `Oi, ${nome}! Sou a Nia. Me conta um gasto — tipo "paguei 80 no mercado" — ou pergunta "quanto gastei esse mês?".`;
+  const saudacao = perfilVazio
+    ? `Oi, ${nome}! Sou a Nia, sua assistente aqui no Nosso Tudo 💚 Eu organizo os gastos da família, leio notas e faturas, cuido das contas fixas e respondo suas perguntas — sempre pedindo sua confirmação. Pra eu te conhecer e ajudar melhor, me conta rapidinho: quem mora com você e quem são as pessoas da família?`
+    : `Oi, ${nome}! Sou a Nia. Me conta um gasto — tipo "paguei 80 no mercado" — ou pergunta "quanto gastei esse mês?".`;
   const bolhaAlertas: Msg | null =
     alertas.length > 0
       ? {

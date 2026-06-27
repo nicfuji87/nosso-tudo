@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { NiaChat } from "@/components/nia/nia-chat";
 import { NIA_FEATURE } from "@/lib/nia/schemas";
+import { getPerfilFamilia } from "@/app/app/perfil/actions";
 
 export const metadata: Metadata = { title: "Nia · Nosso Tudo" };
 
@@ -38,10 +39,13 @@ export default async function NiaPage() {
   }
 
   const primeiroNome = ctx.profile.nome.split(" ")[0] ?? ctx.profile.nome;
-  const [alertas, conversaId] = await Promise.all([
+  const [alertas, conversaId, perfilFam] = await Promise.all([
     getAlertas(ctx.workspace.id),
     getConversaAtiva(ctx.workspace.id),
+    getPerfilFamilia(),
   ]);
+  const perfilVazio =
+    !perfilFam.sobre && !perfilFam.financas && !perfilFam.objetivos && !perfilFam.observacoes;
   const [mensagens, statusAcoes] = conversaId
     ? await Promise.all([getMensagensConversa(conversaId), getStatusAcoes(conversaId)])
     : [[], {}];
@@ -54,6 +58,7 @@ export default async function NiaPage() {
       conversaIdInicial={conversaId ?? undefined}
       mensagensIniciais={mensagens}
       statusAcoes={statusAcoes}
+      perfilVazio={perfilVazio}
     />
   );
 }
