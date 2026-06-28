@@ -10,6 +10,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export interface NiaConfig {
   provedor: string;
   modelo: string;
+  /** Modelo barato p/ turnos simples (roteamento). Ausente = sem roteamento. */
+  modeloSimples?: string;
   systemPrompt: string;
   temperature: number;
   maxTokens: number;
@@ -43,11 +45,12 @@ export async function getNiaConfig(): Promise<NiaConfig> {
     system_prompt: string;
     provedor: string;
     modelo: string;
-    parametros: { temperature?: number; max_tokens?: number } | null;
+    parametros: { temperature?: number; max_tokens?: number; modelo_simples?: string } | null;
   };
   return {
     provedor: row.provedor,
     modelo: row.modelo,
+    modeloSimples: row.parametros?.modelo_simples,
     systemPrompt: row.system_prompt,
     temperature: row.parametros?.temperature ?? FALLBACK.temperature,
     maxTokens: row.parametros?.max_tokens ?? FALLBACK.maxTokens,

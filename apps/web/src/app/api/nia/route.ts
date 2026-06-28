@@ -23,6 +23,18 @@ export const runtime = "nodejs";
 // OBS: requer plano Pro; no Hobby o máximo é 60.
 export const maxDuration = 300;
 
+/** Roteamento de modelo: turnos simples (sem anexo, curtos, sem cara de
+ *  nota/fatura) vão pro modelo barato; o resto fica no forte. Heurística sem
+ *  chamada extra — na dúvida, escolhe o forte. */
+function turnoComplexo(userMessage: string, temAnexo: boolean): boolean {
+  if (temAnexo) return true; // imagem/PDF → visão + itemização
+  const m = userMessage ?? "";
+  if (m.length > 240) return true; // mensagem longa (nota/lista/fatura colada)
+  if ((m.match(/\n/g)?.length ?? 0) >= 3) return true; // várias linhas → itens
+  if ((m.match(/\d+[.,]?\d*/g)?.length ?? 0) >= 4) return true; // muitos valores
+  return /\b(fatura|concilia|parcel|nota fiscal|extrato|itens)\b/i.test(m);
+}
+
 export async function POST(req: Request): Promise<Response> {
   const user = await getUser();
   if (!user) return NextResponse.json({ error: "Sessão expirada." }, { status: 401 });
@@ -299,9 +311,14 @@ export async function POST(req: Request): Promise<Response> {
     .map((m) => ({ midiaId: m.id }));
   const reter: string[] = [];
 
+  // Roteamento de modelo: simples → barato (config.modeloSimples), complexo/visão → forte.
+  const temAnexo = (proc.conteudos?.length ?? 0) > 0;
+  const modeloEscolhido =
+    config.modeloSimples && !turnoComplexo(userMessage, temAnexo) ? config.modeloSimples : config.modelo;
+
   const input = {
     apiKey,
-    modelo: config.modelo,
+    modelo: modeloEscolhido,
     systemPrompt,
     systemSemiEstatico,
     systemDinamico,
@@ -346,7 +363,7 @@ export async function POST(req: Request): Promise<Response> {
         const latenciaMs = Date.now() - t0;
         const custo = await calcularCusto(
           config.provedor,
-          config.modelo,
+          modeloEscolhido,
           res.tokensInput,
           res.tokensOutput,
           res.tokensCache,
@@ -362,7 +379,7 @@ export async function POST(req: Request): Promise<Response> {
           tokensOutput: res.tokensOutput,
           tokensCache: res.tokensCache,
           provedor: config.provedor,
-          modelo: config.modelo,
+          modelo: modeloEscolhido,
           custo,
           latenciaMs,
         });
