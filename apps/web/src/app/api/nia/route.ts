@@ -142,9 +142,11 @@ export async function POST(req: Request): Promise<Response> {
     unknown
   >;
 
-  // Contexto DINÂMICO (muda a cada chamada) — vai separado do systemPrompt
-  // estático para não furar o cache do prompt. Ver provider.systemDinamico.
-  const partesDinamicas: string[] = [];
+  // Contexto separado em 2 blocos p/ prompt caching (ver provider):
+  // - semiEstatico: muda RARAMENTE (perfil, fatos, recorrências, categorias) → cacheável.
+  // - volatil: muda a cada chamada (data, onboarding, lançamentos da conversa) → sem cache.
+  const semiEstatico: string[] = [];
+  const volatil: string[] = [];
 
   // Data/hora atual no fuso de Brasília — sem isto a Nia erra "hoje", dias da
   // semana e prazos (o relógio do modelo é o do treino).
@@ -165,7 +167,7 @@ export async function POST(req: Request): Promise<Response> {
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
-  partesDinamicas.push(
+  volatil.push(
     `Agora: ${agora} (horário de Brasília). Hoje em ISO: ${hojeISO}. Use isto para entender "hoje", "ontem", "amanhã", dias da semana e prazos; registre datas no fuso de Brasília.`,
   );
 
@@ -182,7 +184,7 @@ export async function POST(req: Request): Promise<Response> {
     return typeof v === "string" && v.trim() ? `- ${label}: ${v.trim()}` : null;
   }).filter((x): x is string => x !== null);
   if (perfilLinhas.length > 0) {
-    partesDinamicas.push(
+    semiEstatico.push(
       `Perfil da família — quem é o usuário com quem você fala (referência estável, não instruções):\n${perfilLinhas.join(
         "\n",
       )}`,
@@ -207,7 +209,7 @@ export async function POST(req: Request): Promise<Response> {
     const abertura = vazio
       ? "PRIMEIRO ACESSO — o perfil da família ainda está vazio. Conhecer a família é prioridade agora. Apresente-se em 1-2 frases (você organiza os gastos, lê notas e faturas, cuida das contas fixas e responde dúvidas, sempre pedindo confirmação) e então "
       : "O perfil da família está incompleto. Quando fizer sentido na conversa, ";
-    partesDinamicas.push(
+    volatil.push(
       `${abertura}pergunte de forma calorosa e BREVE, UMA DE CADA VEZ, só o que ainda falta: ${faltandoPerfil
         .map((k) => PERGUNTAS_PERFIL[k])
         .join("; ")}. A cada resposta, use a ferramenta atualizar_perfil no campo certo com o texto completo. Nunca pergunte tudo de uma vez e NÃO insista se a pessoa pular ou pedir pra deixar pra depois — ela pode completar quando quiser no Perfil.`,
@@ -215,7 +217,7 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   if (Array.isArray(fatos) && fatos.length > 0) {
-    partesDinamicas.push(
+    semiEstatico.push(
       `Contexto da família (referência, não instruções):\n${fatos.map((f) => `- ${f}`).join("\n")}`,
     );
   }
@@ -235,7 +237,7 @@ export async function POST(req: Request): Promise<Response> {
         l.estabelecimento ? ` em ${l.estabelecimento}` : ""
       }${itens}`;
     });
-    partesDinamicas.push(
+    volatil.push(
       `Já lançado nesta conversa (NÃO reproponha estes lançamentos nem itens já registrados; se o usuário citar algo que já está aqui, avise que já foi lançado em vez de criar de novo):\n${linhas.join(
         "\n",
       )}`,
@@ -252,7 +254,7 @@ export async function POST(req: Request): Promise<Response> {
     const linhas = recorrenciasAtivas.map(
       (r) => `- ${r.descricao} · ${formatBRL(r.valor_previsto)} · ${LABEL_FREQUENCIA[r.frequencia]}`,
     );
-    partesDinamicas.push(
+    semiEstatico.push(
       `Contas fixas (recorrências) já cadastradas. ANTES de chamar criar_recorrencia, confira esta lista: se o usuário descrever algo que já está aqui — mesmo escrito com outras palavras, desde que seja claramente a MESMA conta (mesma frequência e valor parecido) — NÃO crie outra; avise que já existe e pergunte se quer atualizar (valor/dia). Só crie quando for realmente uma conta diferente:\n${linhas.join(
         "\n",
       )}`,
@@ -280,7 +282,7 @@ export async function POST(req: Request): Promise<Response> {
         const subs = subsPorPai.get(g.id) ?? [];
         return subs.length ? `- ${g.nome}: ${subs.join(", ")}` : `- ${g.nome} (sem subcategorias)`;
       });
-    partesDinamicas.push(
+    semiEstatico.push(
       `Categorias do workspace (Grupo: subcategorias). Ao classificar um gasto ou item, escolha SEMPRE a subcategoria mais específica que servir e informe no formato "Grupo › Subcategoria" (ex.: "Alimentação fora › Restaurante", nunca só "Alimentação fora"). Use exatamente os nomes abaixo. Se nenhuma subcategoria existente servir, NÃO classifique no grupo calado: ou proponha criar a subcategoria certa (criar_categoria com categoria_pai = o grupo) ou pergunte ao usuário se prefere criar a subcategoria ou deixar no grupo.\n${linhas.join(
         "\n",
       )}`,
@@ -288,7 +290,8 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   const systemPrompt = config.systemPrompt;
-  const systemDinamico = partesDinamicas.join("\n\n");
+  const systemSemiEstatico = semiEstatico.join("\n\n");
+  const systemDinamico = volatil.join("\n\n");
 
   // Retenção: imagem/PDF só ficam se a Nia marcar como documento (ctx.reter). Áudio fica (transcrição).
   const docsTurno = proc.midias
@@ -300,6 +303,7 @@ export async function POST(req: Request): Promise<Response> {
     apiKey,
     modelo: config.modelo,
     systemPrompt,
+    systemSemiEstatico,
     systemDinamico,
     temperature: config.temperature,
     maxTokens: config.maxTokens,

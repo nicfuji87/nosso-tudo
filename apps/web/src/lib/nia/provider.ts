@@ -19,8 +19,12 @@ export interface NiaProviderInput {
   apiKey: string;
   modelo: string;
   systemPrompt: string;
-  /** Contexto que muda a cada chamada (data/hora, memória, já lançado). Vai num
-   *  bloco separado e NÃO cacheável — preserva o cache do systemPrompt estático. */
+  /** Contexto que muda RARAMENTE (categorias, perfil, recorrências, fatos). Vai
+   *  num bloco com cache_control próprio (2º breakpoint) — em multi-turn e nos
+   *  round-trips de ferramenta ele vem do cache (~0.1x), cortando o custo. */
+  systemSemiEstatico?: string;
+  /** Contexto que muda a cada chamada (data/hora, onboarding, já lançado). Vai num
+   *  bloco separado e NÃO cacheável — preserva o cache dos blocos acima. */
   systemDinamico?: string;
   temperature: number;
   maxTokens: number;
@@ -158,6 +162,9 @@ const anthropicProvider: NiaProvider = async (input) => {
   }));
   const systemPayload: Record<string, unknown>[] = [
     { type: "text", text: input.systemPrompt, cache_control: cacheCtrl },
+    ...(input.systemSemiEstatico
+      ? [{ type: "text", text: input.systemSemiEstatico, cache_control: cacheCtrl }]
+      : []),
     ...(input.systemDinamico ? [{ type: "text", text: input.systemDinamico }] : []),
   ];
 
@@ -275,6 +282,9 @@ function ehRaciocinio(modelo: string): boolean {
 const openaiProvider: NiaProvider = async (input) => {
   const messages: OpenAIMsg[] = [
     { role: "system", content: input.systemPrompt },
+    ...(input.systemSemiEstatico
+      ? [{ role: "system" as const, content: input.systemSemiEstatico }]
+      : []),
     ...(input.systemDinamico ? [{ role: "system" as const, content: input.systemDinamico }] : []),
     ...(input.historico ?? []).map((h) => ({ role: h.role, content: h.content })),
     { role: "user", content: openaiUserContent(input.userMessage, input.anexos) },
@@ -360,6 +370,9 @@ const openaiProvider: NiaProvider = async (input) => {
 const openaiStream: NiaStreamProvider = async (input, cb) => {
   const messages: OpenAIMsg[] = [
     { role: "system", content: input.systemPrompt },
+    ...(input.systemSemiEstatico
+      ? [{ role: "system" as const, content: input.systemSemiEstatico }]
+      : []),
     ...(input.systemDinamico ? [{ role: "system" as const, content: input.systemDinamico }] : []),
     ...(input.historico ?? []).map((h) => ({ role: h.role, content: h.content })),
     { role: "user", content: openaiUserContent(input.userMessage, input.anexos) },
@@ -508,6 +521,9 @@ const anthropicStream: NiaStreamProvider = async (input, cb) => {
   }));
   const systemPayload: Record<string, unknown>[] = [
     { type: "text", text: input.systemPrompt, cache_control: cacheCtrl },
+    ...(input.systemSemiEstatico
+      ? [{ type: "text", text: input.systemSemiEstatico, cache_control: cacheCtrl }]
+      : []),
     ...(input.systemDinamico ? [{ type: "text", text: input.systemDinamico }] : []),
   ];
 
