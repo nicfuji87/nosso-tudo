@@ -344,7 +344,7 @@ const lancarTransacao: NiaTool = {
 const lancarTransacaoDetalhada: NiaTool = {
   nome: "lancar_transacao_detalhada",
   descricao:
-    "Lança uma compra com os ITENS individuais (de uma nota fiscal/recibo de UMA única compra). Use quando o usuário enviar a foto ou PDF de uma nota: leia cada item (nome, quantidade, valor) e proponha todos. NÃO use para FATURA/EXTRATO de cartão de crédito (várias compras do mês) — nesse caso use conciliar_fatura, que casa com o que já foi lançado em vez de duplicar. Capture também o meio de pagamento, o cartão/conta e o beneficiário quando aparecerem (ex.: 'Latam Pass' → cartao 'Latam Pass'). NÃO grava direto — gera um checklist para o usuário confirmar item a item. IMPORTANTE: ao chamar esta ferramenta, responda com UMA frase curta (ex.: 'Separei os itens, confira abaixo 👇') e NÃO repita os itens em texto nem em tabela — o checklist interativo já mostra tudo.",
+    "Lança uma compra com os ITENS individuais (de uma nota fiscal/recibo de UMA única compra). Use quando o usuário enviar a foto ou PDF de uma nota: leia cada item (nome, quantidade, valor) e proponha todos. NÃO use para FATURA/EXTRATO de cartão de crédito (várias compras do mês) — nesse caso use conciliar_fatura, que casa com o que já foi lançado em vez de duplicar. Capture também o meio de pagamento, o cartão/conta e o beneficiário quando aparecerem (ex.: 'Latam Pass' → cartao 'Latam Pass'). NÃO grava direto — gera um checklist para o usuário confirmar item a item.",
   nivel: "confirmar",
   inputSchema: {
     type: "object",
@@ -770,7 +770,7 @@ const criarEvento: NiaTool = {
 const marcarEvento: NiaTool = {
   nome: "marcar_evento",
   descricao:
-    "Agrupa lançamentos JÁ EXISTENTES sob um evento/contexto, mantendo a categoria de cada um. Use quando o usuário quiser juntar os gastos de uma viagem/passeio que já foram lançados (ex.: 'marca tudo da viagem da Argentina, de 10 a 17 de maio'). Informe a janela de datas do evento (data_inicio/data_fim) e, opcionalmente, um termo de busca. Antes, confira com consultar_eventos se o evento já existe (reaproveita); cria só se não existir. NÃO muda a categoria dos gastos — só os liga ao evento. Gera um cartão com a LISTA dos lançamentos: o usuário marca/desmarca quais entram antes de confirmar. Responda com UMA frase curta; a lista já mostra tudo.",
+    "Agrupa lançamentos JÁ EXISTENTES sob um evento/contexto, mantendo a categoria de cada um. Use quando o usuário quiser juntar os gastos de uma viagem/passeio que já foram lançados (ex.: 'marca tudo da viagem da Argentina, de 10 a 17 de maio'). Informe a janela de datas do evento (data_inicio/data_fim) e, opcionalmente, um termo de busca. Antes, confira com consultar_eventos se o evento já existe (reaproveita); cria só se não existir. NÃO muda a categoria dos gastos — só os liga ao evento. Gera um cartão com a LISTA dos lançamentos: o usuário marca/desmarca quais entram antes de confirmar.",
   nivel: "confirmar",
   inputSchema: {
     type: "object",
@@ -861,7 +861,7 @@ interface CandidatoTx {
 const conciliarFatura: NiaTool = {
   nome: "conciliar_fatura",
   descricao:
-    "CONCILIA uma FATURA de cartão de crédito (o extrato mensal com várias compras) com o que JÁ foi lançado — em vez de relançar tudo e duplicar. Use SEMPRE que o usuário enviar uma fatura/extrato de cartão (não uma nota de UMA compra). Leia cada LINHA da fatura (data da compra, descrição, valor; e a parcela tipo '3/10' se houver) e passe todas em 'linhas'. Informe o 'cartao' (ex.: 'Santander'), e o 'vencimento'/'total' se aparecerem. NÃO inclua linhas de crédito/pagamento (valor negativo, 'pagamento de fatura anterior'). Classifique cada linha com uma categoria do padrão quando der pra inferir (Uber→Transporte, mercado→Alimentação, farmácia→Saúde). O sistema casa cada linha com os lançamentos existentes por valor+data e mostra: já lançado (vou só conferir), faltando (vou lançar) e o que está no app mas não na fatura. NÃO grava direto — gera um cartão de conciliação para o usuário confirmar. Responda com UMA frase curta; o cartão já mostra tudo.",
+    "CONCILIA uma FATURA de cartão de crédito (o extrato mensal com várias compras) com o que JÁ foi lançado — em vez de relançar tudo e duplicar. Use SEMPRE que o usuário enviar uma fatura/extrato de cartão (não uma nota de UMA compra). Leia cada LINHA da fatura (data da compra, descrição, valor; e a parcela tipo '3/10' se houver) e passe todas em 'linhas'. Informe o 'cartao' (ex.: 'Santander'), e o 'vencimento'/'total' se aparecerem. NÃO inclua linhas de crédito/pagamento (valor negativo, 'pagamento de fatura anterior'). Classifique cada linha com uma categoria do padrão quando der pra inferir (Uber→Transporte, mercado→Alimentação, farmácia→Saúde). O sistema casa cada linha com os lançamentos existentes por valor+data e mostra: já lançado (vou só conferir), faltando (vou lançar) e o que está no app mas não na fatura. NÃO grava direto — gera um cartão de conciliação para o usuário confirmar.",
   nivel: "confirmar",
   inputSchema: {
     type: "object",
@@ -1217,7 +1217,7 @@ const consultarDocumentos: NiaTool = {
     const docs = await buscarDocumentos(ctx.workspaceId, busca);
     if (docs.length === 0) return { texto: "Não encontrei documentos com esse conteúdo." };
     const linhas = docs.map(
-      (d) => `[id:${d.id}] ${d.nome ?? "documento"} (${formatDate(d.data)}): ${(d.resumo ?? "").slice(0, 400)}`,
+      (d) => `[id:${d.id}] ${d.nome ?? "documento"} (${formatDate(d.data)}): ${(d.resumo ?? "").slice(0, 200)}`,
     );
     return { texto: linhas.join("\n\n") };
   },
