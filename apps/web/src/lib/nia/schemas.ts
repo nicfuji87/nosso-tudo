@@ -151,6 +151,11 @@ export const atualizarPerfilArgs = z.object({
 });
 export type AtualizarPerfilArgs = z.infer<typeof atualizarPerfilArgs>;
 
+export const lembrarPreferenciaArgs = z.object({
+  preferencia: z.string().trim().min(1).max(200),
+});
+export type LembrarPreferenciaArgs = z.infer<typeof lembrarPreferenciaArgs>;
+
 export const buscarItensArgs = z.object({ termo: z.string().trim().min(1).max(100) });
 export type BuscarItensArgs = z.infer<typeof buscarItensArgs>;
 
@@ -350,6 +355,12 @@ export interface WidgetAtualizarPerfil {
   texto: string;
 }
 
+export interface WidgetLembrarPreferencia {
+  tipo: "lembrar_preferencia";
+  acaoId: string;
+  preferencia: string;
+}
+
 export interface WidgetCriarCategoria {
   tipo: "criar_categoria";
   acaoId: string;
@@ -463,6 +474,7 @@ export type NiaWidget =
   | WidgetCriarCompromisso
   | WidgetLembrarFato
   | WidgetAtualizarPerfil
+  | WidgetLembrarPreferencia
   | WidgetCriarCategoria
   | WidgetCriarConta
   | WidgetCriarCartao

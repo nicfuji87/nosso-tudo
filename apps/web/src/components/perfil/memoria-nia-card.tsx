@@ -5,66 +5,72 @@ import { Check, Loader2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { salvarMemoriaNia } from "@/app/app/perfil/actions";
 
 /**
- * Edita a memória da família que a Nia recebe como contexto (nia_contexto.fatos).
- * É o que a Nia "lembra" sobre a rotina/preferências — o usuário pode revisar,
- * corrigir ou apagar. Salva a lista inteira de uma vez.
+ * Editor genérico de uma lista curada de frases (memória da família,
+ * preferências…). Salva a lista inteira de uma vez via a action recebida.
  */
-export function MemoriaNiaCard({ fatosIniciais }: { fatosIniciais: string[] }) {
-  const [fatos, setFatos] = useState<string[]>(fatosIniciais);
+export function ListaCuradaCard({
+  itensIniciais,
+  salvar,
+  addPlaceholder,
+  emptyText,
+  saveLabel = "Salvar",
+  toastOk = "Salvo",
+  maxLen = 300,
+}: {
+  itensIniciais: string[];
+  salvar: (itens: string[]) => Promise<{ error?: string; ok?: boolean }>;
+  addPlaceholder: string;
+  emptyText: string;
+  saveLabel?: string;
+  toastOk?: string;
+  maxLen?: number;
+}) {
+  const [itens, setItens] = useState<string[]>(itensIniciais);
   const [novo, setNovo] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [sujo, setSujo] = useState(false);
 
   function editar(i: number, v: string) {
-    setFatos((a) => a.map((f, j) => (j === i ? v : f)));
+    setItens((a) => a.map((f, j) => (j === i ? v : f)));
     setSujo(true);
   }
   function remover(i: number) {
-    setFatos((a) => a.filter((_, j) => j !== i));
+    setItens((a) => a.filter((_, j) => j !== i));
     setSujo(true);
   }
   function adicionar() {
     const v = novo.trim();
     if (!v) return;
-    setFatos((a) => [...a, v]);
+    setItens((a) => [...a, v]);
     setNovo("");
     setSujo(true);
   }
 
-  async function salvar() {
+  async function persistir() {
     setSalvando(true);
-    const limpos = fatos.map((f) => f.trim()).filter(Boolean);
-    const r = await salvarMemoriaNia(limpos);
+    const limpos = itens.map((f) => f.trim()).filter(Boolean);
+    const r = await salvar(limpos);
     setSalvando(false);
     if (r.error) {
       toast.error("Erro ao salvar", { description: r.error });
       return;
     }
-    setFatos(limpos);
+    setItens(limpos);
     setSujo(false);
-    toast.success("Memória atualizada");
+    toast.success(toastOk);
   }
 
   return (
     <div className="space-y-3">
-      {fatos.length === 0 ? (
-        <p className="rounded-lg bg-secondary/50 p-3 text-body-sm text-muted-foreground">
-          A Nia ainda não guardou nada. Conforme você conversa, ela aprende a rotina e as preferências da família — e
-          tudo o que ela lembrar aparece aqui para você revisar.
-        </p>
+      {itens.length === 0 ? (
+        <p className="rounded-lg bg-secondary/50 p-3 text-body-sm text-muted-foreground">{emptyText}</p>
       ) : (
         <ul className="space-y-2">
-          {fatos.map((f, i) => (
+          {itens.map((f, i) => (
             <li key={i} className="flex items-center gap-2">
-              <Input
-                value={f}
-                onChange={(e) => editar(i, e.target.value)}
-                maxLength={300}
-                aria-label={`Memória ${i + 1}`}
-              />
+              <Input value={f} onChange={(e) => editar(i, e.target.value)} maxLength={maxLen} aria-label={`Item ${i + 1}`} />
               <Button
                 type="button"
                 size="icon"
@@ -90,8 +96,8 @@ export function MemoriaNiaCard({ fatosIniciais }: { fatosIniciais: string[] }) {
               adicionar();
             }
           }}
-          maxLength={300}
-          placeholder="Adicionar algo que a Nia deve lembrar…"
+          maxLength={maxLen}
+          placeholder={addPlaceholder}
         />
         <Button type="button" variant="secondary" onClick={adicionar} disabled={!novo.trim()} className="shrink-0">
           <Plus className="size-4" /> Adicionar
@@ -99,9 +105,9 @@ export function MemoriaNiaCard({ fatosIniciais }: { fatosIniciais: string[] }) {
       </div>
 
       <div className="flex justify-end pt-1">
-        <Button type="button" onClick={salvar} disabled={!sujo || salvando}>
+        <Button type="button" onClick={persistir} disabled={!sujo || salvando}>
           {salvando ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
-          Salvar memória
+          {saveLabel}
         </Button>
       </div>
     </div>

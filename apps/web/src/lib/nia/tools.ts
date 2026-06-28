@@ -47,6 +47,7 @@ import {
   lancarTransacaoArgs,
   lancarTransacaoDetalhadaArgs,
   lembrarFatoArgs,
+  lembrarPreferenciaArgs,
   listarTransacoesArgs,
   type NiaWidget,
   type NivelConfirmacao,
@@ -632,6 +633,34 @@ const atualizarPerfil: NiaTool = {
       texto: `Quer que eu atualize o perfil da família (${LABEL_CAMPO_PERFIL[d.campo]})?`,
       widget,
     };
+  },
+};
+
+const lembrarPreferencia: NiaTool = {
+  nome: "lembrar_preferencia",
+  descricao:
+    "Propõe guardar uma PREFERÊNCIA durável da família — uma regra de COMO as coisas devem ser feitas, que te deixa consistente (ex.: 'cartão padrão é o Latam Pass', 'não separar gorjeta em restaurante', 'chamar o Henrique de Rique', 'mercado padrão é o Pão de Açúcar'). Diferente de lembrar_fato (fato pontual) e de atualizar_perfil (identidade da família). Use quando o usuário expressar como prefere algo de forma duradoura. Gera cartão de confirmação.",
+  nivel: "confirmar",
+  inputSchema: {
+    type: "object",
+    properties: {
+      preferencia: { type: "string", description: "A preferência, curta e específica (regra de como fazer)." },
+    },
+    required: ["preferencia"],
+  },
+  async executar(args, ctx) {
+    const d = valida(lembrarPreferenciaArgs, args);
+    const acaoId = await registrarAcao({
+      workspaceId: ctx.workspaceId,
+      profileId: ctx.profileId,
+      conversaId: ctx.conversaId,
+      ferramenta: "lembrar_preferencia",
+      nivel: "confirmar",
+      payloadProposto: d,
+    });
+    if (!acaoId) throw new Error("Não consegui preparar a preferência.");
+    const widget: NiaWidget = { tipo: "lembrar_preferencia", acaoId, preferencia: d.preferencia };
+    return { texto: `Quer que eu guarde a preferência: "${d.preferencia}"?`, widget };
   },
 };
 
@@ -1342,6 +1371,7 @@ export const NIA_TOOLS: NiaTool[] = [
   criarOrcamento,
   lembrarFato,
   atualizarPerfil,
+  lembrarPreferencia,
   buscarItensTool,
   consultarDocumentos,
   enviarDocumento,

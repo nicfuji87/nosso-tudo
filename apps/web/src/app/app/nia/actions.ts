@@ -26,6 +26,7 @@ import {
   lancarTransacaoArgs,
   lancarTransacaoDetalhadaArgs,
   lembrarFatoArgs,
+  lembrarPreferenciaArgs,
   marcarEventoPayload,
 } from "@/lib/nia/schemas";
 import { atualizarAcao, votar } from "@/lib/nia/store";
@@ -1039,6 +1040,41 @@ export async function confirmarAtualizarPerfil(acaoId: string): Promise<{ error?
       { onConflict: "workspace_id" },
     );
   if (error) return { error: "Não foi possível atualizar o perfil." };
+
+  await atualizarAcao(acaoId, { status: "executada", resultado: { ok: true } });
+  return { ok: true };
+}
+
+/** Guarda uma preferência durável da família (nia_contexto.preferencias) — dedupe + teto 20. */
+export async function confirmarPreferencia(acaoId: string): Promise<{ error?: string; ok?: boolean }> {
+  const acao = await carregarAcao(acaoId);
+  if (!acao) return { error: "Ação não encontrada." };
+  if (acao.status !== "proposta") return { error: "Essa ação já foi processada." };
+  if (acao.ferramenta !== "lembrar_preferencia") return { error: "Ação não suportada." };
+
+  const parsed = lembrarPreferenciaArgs.safeParse(acao.payload_proposto);
+  if (!parsed.success) return { error: "Dados da proposta inválidos." };
+
+  const supabase = createClient();
+  const { data: ctxRow } = await supabase
+    .from("nia_contexto")
+    .select("preferencias")
+    .eq("workspace_id", acao.workspace_id)
+    .maybeSingle();
+  const atuais = Array.isArray((ctxRow as { preferencias: unknown } | null)?.preferencias)
+    ? ((ctxRow as { preferencias: string[] }).preferencias as string[])
+    : [];
+  const nova = parsed.data.preferencia;
+  const jaExiste = atuais.some((p) => normalizarTexto(p) === normalizarTexto(nova));
+  const preferencias = (jaExiste ? atuais : [...atuais, nova]).slice(-20);
+
+  const { error } = await supabase
+    .from("nia_contexto")
+    .upsert(
+      { workspace_id: acao.workspace_id, preferencias, atualizado_em: new Date().toISOString() },
+      { onConflict: "workspace_id" },
+    );
+  if (error) return { error: "Não foi possível salvar a preferência." };
 
   await atualizarAcao(acaoId, { status: "executada", resultado: { ok: true } });
   return { ok: true };

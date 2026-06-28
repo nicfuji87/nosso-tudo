@@ -6,9 +6,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PerfilForm } from "@/components/perfil/perfil-form";
-import { MemoriaNiaCard } from "@/components/perfil/memoria-nia-card";
+import { ListaCuradaCard } from "@/components/perfil/memoria-nia-card";
 import { PerfilFamiliaCard } from "@/components/perfil/perfil-familia-card";
-import { getMemoriaNia, getPerfilFamilia } from "./actions";
+import {
+  getMemoriaNia,
+  getPerfilFamilia,
+  getPreferenciasNia,
+  salvarMemoriaNia,
+  salvarPreferenciasNia,
+} from "./actions";
 import { formatBRL } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Perfil" };
@@ -16,7 +22,11 @@ export const metadata: Metadata = { title: "Perfil" };
 export default async function PerfilPage() {
   const { profile, workspace, plan, role } = await getWorkspaceContext();
   const isPro = plan.slug === "pro";
-  const [perfilFamilia, memoria] = await Promise.all([getPerfilFamilia(), getMemoriaNia()]);
+  const [perfilFamilia, memoria, preferencias] = await Promise.all([
+    getPerfilFamilia(),
+    getMemoriaNia(),
+    getPreferenciasNia(),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -115,7 +125,38 @@ export default async function PerfilPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <MemoriaNiaCard fatosIniciais={memoria} />
+          <ListaCuradaCard
+            itensIniciais={memoria}
+            salvar={salvarMemoriaNia}
+            addPlaceholder="Adicionar algo que a Nia deve lembrar…"
+            emptyText="A Nia ainda não guardou nada. Conforme você conversa, ela aprende a rotina e as preferências da família — e tudo o que ela lembrar aparece aqui."
+            saveLabel="Salvar memória"
+            toastOk="Memória atualizada"
+          />
+        </CardContent>
+      </Card>
+
+      {/* Preferências — como a família gosta que as coisas sejam feitas */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="size-4 text-accent" /> Preferências
+          </CardTitle>
+          <CardDescription>
+            Como vocês gostam que as coisas sejam feitas — regras duráveis que deixam a Nia consistente (ex.:
+            &lsquo;cartão padrão é o Latam&rsquo;, &lsquo;não separar gorjeta&rsquo;, chamar alguém por um apelido).
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ListaCuradaCard
+            itensIniciais={preferencias}
+            salvar={salvarPreferenciasNia}
+            addPlaceholder="Adicionar uma preferência…"
+            emptyText="Sem preferências ainda. Quando você disser como prefere (cartão padrão, apelidos, o que ignorar…), a Nia guarda aqui."
+            saveLabel="Salvar preferências"
+            toastOk="Preferências atualizadas"
+            maxLen={200}
+          />
         </CardContent>
       </Card>
     </div>

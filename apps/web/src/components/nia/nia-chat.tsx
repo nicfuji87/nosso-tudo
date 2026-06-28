@@ -38,6 +38,7 @@ import {
   confirmarMeta,
   confirmarOrcamento,
   confirmarPessoa,
+  confirmarPreferencia,
   confirmarRecorrencia,
   confirmarTransacao,
   confirmarTransacaoDetalhada,
@@ -713,6 +714,17 @@ function WidgetView({
           confirmar={() => confirmarAtualizarPerfil(widget.acaoId)}
           descartar={() => rejeitarAcao(widget.acaoId)}
           labelFeito="Perfil atualizado"
+          estadoInicial={estadoInicial}
+        />
+      );
+    case "lembrar_preferencia":
+      return (
+        <AcaoCard
+          titulo="Guardar como preferência?"
+          subtitulo={widget.preferencia}
+          confirmar={() => confirmarPreferencia(widget.acaoId)}
+          descartar={() => rejeitarAcao(widget.acaoId)}
+          labelFeito="Preferência guardada"
           estadoInicial={estadoInicial}
         />
       );

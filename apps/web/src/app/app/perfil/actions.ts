@@ -137,3 +137,41 @@ export async function salvarMemoriaNia(fatos: string[]): Promise<{ error?: strin
   revalidatePath("/app/perfil");
   return { ok: true };
 }
+
+const preferenciasSchema = z.array(z.string().trim().min(1).max(200)).max(20);
+
+/** Preferências duráveis da família (como gostam que as coisas sejam feitas). */
+export async function getPreferenciasNia(): Promise<string[]> {
+  const { workspaceId } = await getWorkspaceId();
+  if (!workspaceId) return [];
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("nia_contexto")
+    .select("preferencias")
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  const prefs = (data as { preferencias: unknown } | null)?.preferencias;
+  return Array.isArray(prefs) ? (prefs.filter((p) => typeof p === "string") as string[]) : [];
+}
+
+/** Salva as preferências editadas no perfil (substitui a lista). */
+export async function salvarPreferenciasNia(prefs: string[]): Promise<{ error?: string; ok?: boolean }> {
+  const { workspaceId, error } = await getWorkspaceId();
+  if (error || !workspaceId) return { error: error ?? "Workspace não encontrado." };
+
+  const limpos = (Array.isArray(prefs) ? prefs : []).map((p) => String(p).trim()).filter(Boolean).slice(0, 20);
+  const parsed = preferenciasSchema.safeParse(limpos);
+  if (!parsed.success) return { error: "Alguma preferência ficou longa demais (máx. 200 caracteres)." };
+
+  const supabase = createClient();
+  const { error: e } = await supabase
+    .from("nia_contexto")
+    .upsert(
+      { workspace_id: workspaceId, preferencias: parsed.data, atualizado_em: new Date().toISOString() },
+      { onConflict: "workspace_id" },
+    );
+  if (e) return { error: "Não foi possível salvar as preferências." };
+
+  revalidatePath("/app/perfil");
+  return { ok: true };
+}
