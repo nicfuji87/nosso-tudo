@@ -435,32 +435,19 @@ export interface GastoPessoa {
   total: number;
 }
 
-/** Despesas confirmadas do mês agrupadas por quem se BENEFICIOU (beneficiário). */
-export async function getGastosPorPessoa(workspaceId: string): Promise<GastoPessoa[]> {
+/** Despesas confirmadas do mês por beneficiário — agregado no banco (RPC, sem teto de linha). */
+export async function getGastosPorPessoa(workspaceId: string, mesRef?: string): Promise<GastoPessoa[]> {
   const supabase = createClient();
-  const inicio = new Date();
-  inicio.setDate(1);
-  const mesRef = inicio.toISOString().slice(0, 10);
-  const { data } = await supabase
-    .from("transacoes")
-    .select("valor, beneficiario:entidades!transacoes_beneficiario_id_fkey(id, nome)")
-    .eq("workspace_id", workspaceId)
-    .eq("tipo", "despesa")
-    .eq("status_revisao", "confirmado")
-    .gte("data_transacao", mesRef);
-  const rows =
-    (data as { valor: number; beneficiario: { id: string; nome: string } | null }[] | null) ?? [];
-  const map = new Map<string, { nome: string; total: number }>();
-  for (const r of rows) {
-    const key = r.beneficiario?.id ?? "—";
-    const atual = map.get(key) ?? { nome: r.beneficiario?.nome ?? "Não atribuído", total: 0 };
-    atual.total += Number(r.valor);
-    map.set(key, atual);
-  }
-  return [...map.entries()]
-    .map(([id, v]) => ({ id, nome: v.nome, total: v.total }))
-    .filter((p) => p.total > 0)
-    .sort((a, b) => b.total - a.total);
+  const { data } = await supabase.rpc("gastos_por_pessoa", {
+    p_workspace_id: workspaceId,
+    ...(mesRef ? { p_mes: mesRef } : {}),
+  });
+  // id null (sem beneficiário) → "—" para casar com o drilldown transacoesPorPessoa.
+  return ((data as { id: string | null; nome: string; total: number }[] | null) ?? []).map((r) => ({
+    id: r.id ?? "—",
+    nome: r.nome,
+    total: Number(r.total),
+  }));
 }
 
 /** Categorias de topo (pais) ativas — opções do filtro por categoria. */
@@ -725,29 +712,21 @@ export async function getDependenciaFornecedores(
   topN = 5,
 ): Promise<DependenciaFornecedores> {
   const supabase = createClient();
-  const { data } = await supabase
-    .from("transacoes")
-    .select("valor, estabelecimento:estabelecimentos(id, nome)")
-    .eq("workspace_id", workspaceId)
-    .eq("tipo", "despesa")
-    .eq("status_revisao", "confirmado")
-    .gte("data_transacao", inicio)
-    .lte("data_transacao", fim)
-    .not("estabelecimento_id", "is", null);
-  const rows = (data as { valor: number; estabelecimento: { id: string; nome: string } | null }[] | null) ?? [];
-  const map = new Map<string, { nome: string; total: number; n: number }>();
-  let total = 0;
-  for (const r of rows) {
-    if (!r.estabelecimento) continue;
-    total += Number(r.valor);
-    const a = map.get(r.estabelecimento.id) ?? { nome: r.estabelecimento.nome, total: 0, n: 0 };
-    a.total += Number(r.valor);
-    a.n += 1;
-    map.set(r.estabelecimento.id, a);
-  }
-  const fornecedores = [...map.entries()]
-    .map(([id, v]) => ({ id, nome: v.nome, total: v.total, n: v.n, pct: total > 0 ? (v.total / total) * 100 : 0 }))
-    .sort((a, b) => b.total - a.total);
+  // Agregado no banco (RPC) — sem teto de 1000 linhas.
+  const { data } = await supabase.rpc("gastos_por_fornecedor", {
+    p_workspace_id: workspaceId,
+    p_inicio: inicio,
+    p_fim: fim,
+  });
+  const rows = (data as { id: string; nome: string; total: number; n: number }[] | null) ?? [];
+  const total = rows.reduce((s, r) => s + Number(r.total), 0);
+  const fornecedores = rows.map((r) => ({
+    id: r.id,
+    nome: r.nome,
+    total: Number(r.total),
+    n: Number(r.n),
+    pct: total > 0 ? (Number(r.total) / total) * 100 : 0,
+  }));
   const topPct = fornecedores.slice(0, topN).reduce((s, f) => s + f.pct, 0);
   return { fornecedores: fornecedores.slice(0, 8), total, topPct, topN: Math.min(topN, fornecedores.length) };
 }
@@ -766,6 +745,16 @@ export interface DinheiroSemDono {
 /** Despesas confirmadas no período sem categoria (nem na transação, nem nos itens) — "saiu sem contar uma história". */
 export async function getDinheiroSemDono(workspaceId: string, inicio: string, fim: string): Promise<DinheiroSemDono> {
   const supabase = createClient();
+  // Total/contagem agregados no banco (RPC, sem teto). A lista é só ilustrativa
+  // (as maiores) — exibição naturalmente capada, então pode buscar poucas linhas.
+  const { data: agg } = await supabase.rpc("dinheiro_sem_dono", {
+    p_workspace_id: workspaceId,
+    p_inicio: inicio,
+    p_fim: fim,
+  });
+  const total = Number((agg as { total: number; n: number }[] | null)?.[0]?.total ?? 0);
+  if (total <= 0) return { total: 0, linhas: [] };
+
   const { data } = await supabase
     .from("transacoes")
     .select("id, descricao, valor, data_transacao")
@@ -775,9 +764,9 @@ export async function getDinheiroSemDono(workspaceId: string, inicio: string, fi
     .is("categoria_id", null)
     .gte("data_transacao", inicio)
     .lte("data_transacao", fim)
-    .order("valor", { ascending: false });
+    .order("valor", { ascending: false })
+    .limit(20);
   let rows = (data as { id: string; descricao: string; valor: number; data_transacao: string }[] | null) ?? [];
-  // Tira as que têm a categoria nos itens (nota itemizada sem categoria na transação).
   if (rows.length > 0) {
     const { data: itens } = await supabase
       .from("itens_transacao")
@@ -787,13 +776,13 @@ export async function getDinheiroSemDono(workspaceId: string, inicio: string, fi
     const comItem = new Set(((itens as { transacao_id: string }[] | null) ?? []).map((i) => i.transacao_id));
     rows = rows.filter((r) => !comItem.has(r.id));
   }
-  const linhas = rows.map((r) => ({
+  const linhas = rows.slice(0, 8).map((r) => ({
     id: r.id,
     descricao: r.descricao,
     valor: Number(r.valor),
     data: r.data_transacao,
   }));
-  return { total: linhas.reduce((s, l) => s + l.valor, 0), linhas };
+  return { total, linhas };
 }
 
 export async function listEntidades(workspaceId: string): Promise<Entidade[]> {
