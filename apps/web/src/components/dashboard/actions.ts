@@ -2,7 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { resolveWorkspaceId } from "@/lib/auth";
+import { getGastosPorEssencialidade } from "@/lib/db/queries";
 import type { Essencialidade, MeioPagamento, StatusRevisao, TipoTransacao } from "@/lib/types/db";
+
+/** Quantas linhas mostrar num drilldown (o total vem de agregação SQL, não da lista). */
+const DRILL_LIMITE = 100;
 
 export interface ItemDetalhe {
   nome: string;
@@ -108,6 +113,8 @@ export interface CategoriaDrill {
 
 /** Lançamentos (despesas confirmadas do mês) de uma categoria — para o drilldown. */
 export async function transacoesPorCategoria(categoriaId: string): Promise<CategoriaDrill | null> {
+  const wk = await resolveWorkspaceId();
+  if ("error" in wk) return null;
   const supabase = createClient();
   const inicio = new Date();
   inicio.setDate(1);
@@ -123,6 +130,7 @@ export async function transacoesPorCategoria(categoriaId: string): Promise<Categ
   const ids = lista.length > 0 ? lista.map((c) => c.id) : [categoriaId];
   const nome = lista.find((c) => c.id === categoriaId)?.nome ?? "Categoria";
 
+  // Lista capada (exibição); o total vem da agregação SQL (correto além de 1000).
   const { data } = await supabase
     .from("transacoes")
     .select("id, descricao, valor, data_transacao, estabelecimento:estabelecimentos(nome)")
@@ -130,7 +138,8 @@ export async function transacoesPorCategoria(categoriaId: string): Promise<Categ
     .eq("tipo", "despesa")
     .eq("status_revisao", "confirmado")
     .gte("data_transacao", mesRef)
-    .order("data_transacao", { ascending: false });
+    .order("data_transacao", { ascending: false })
+    .limit(DRILL_LIMITE);
 
   const transacoes = ((data as unknown as Record<string, unknown>[] | null) ?? []).map((r) => {
     const estab = r.estabelecimento as { nome?: string } | null;
@@ -142,8 +151,11 @@ export async function transacoesPorCategoria(categoriaId: string): Promise<Categ
       estabelecimento: estab?.nome ?? null,
     };
   });
-  const total = transacoes.reduce((s, t) => s + t.valor, 0);
-  return { nome, total, transacoes };
+  const { data: totalData } = await supabase.rpc("total_categoria_mes", {
+    p_workspace_id: wk.workspaceId,
+    p_categoria_id: categoriaId,
+  });
+  return { nome, total: Number(totalData ?? 0), transacoes };
 }
 
 export interface PessoaDrill {
@@ -158,6 +170,9 @@ export interface PessoaDrill {
  * transacoesPorCategoria para o drilldown do "Gasto por pessoa".
  */
 export async function transacoesPorPessoa(beneficiarioId: string): Promise<PessoaDrill> {
+  const vazio: PessoaDrill = { nome: "Não atribuído", total: 0, transacoes: [] };
+  const wk = await resolveWorkspaceId();
+  if ("error" in wk) return vazio;
   const supabase = createClient();
   const inicio = new Date();
   inicio.setDate(1);
@@ -170,7 +185,8 @@ export async function transacoesPorPessoa(beneficiarioId: string): Promise<Pesso
     .eq("tipo", "despesa")
     .eq("status_revisao", "confirmado")
     .gte("data_transacao", mesRef)
-    .order("data_transacao", { ascending: false });
+    .order("data_transacao", { ascending: false })
+    .limit(DRILL_LIMITE);
   query = semBeneficiario ? query.is("beneficiario_id", null) : query.eq("beneficiario_id", beneficiarioId);
   const { data } = await query;
 
@@ -190,8 +206,11 @@ export async function transacoesPorPessoa(beneficiarioId: string): Promise<Pesso
     const { data: ent } = await supabase.from("entidades").select("nome").eq("id", beneficiarioId).maybeSingle();
     nome = (ent as { nome: string } | null)?.nome ?? "Pessoa";
   }
-  const total = transacoes.reduce((s, t) => s + t.valor, 0);
-  return { nome, total, transacoes };
+  const { data: totalData } = await supabase.rpc("total_pessoa_mes", {
+    p_workspace_id: wk.workspaceId,
+    p_beneficiario_id: semBeneficiario ? null : beneficiarioId,
+  });
+  return { nome, total: Number(totalData ?? 0), transacoes };
 }
 
 export interface EssencialidadeLinha {
@@ -218,6 +237,8 @@ export interface EssencialidadeDrill {
 export async function transacoesPorEssencialidade(
   essencialidade: Essencialidade,
 ): Promise<EssencialidadeDrill> {
+  const wk = await resolveWorkspaceId();
+  if ("error" in wk) return { total: 0, linhas: [] };
   const supabase = createClient();
   const inicio = new Date();
   inicio.setDate(1);
@@ -299,8 +320,11 @@ export async function transacoesPorEssencialidade(
     }
   }
   linhas.sort((a, b) => b.valor - a.valor);
-  const total = linhas.reduce((s, l) => s + l.valor, 0);
-  return { total, linhas };
+  // Total da agregação SQL (RPC gastos_por_essencialidade, correto em qualquer
+  // volume); as linhas são só uma amostra para exibição (capada).
+  const porEss = await getGastosPorEssencialidade(wk.workspaceId);
+  const total = porEss.find((e) => e.essencialidade === essencialidade)?.total ?? 0;
+  return { total, linhas: linhas.slice(0, DRILL_LIMITE) };
 }
 
 export interface ContextoTransacao {
