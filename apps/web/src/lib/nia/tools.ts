@@ -30,6 +30,7 @@ import {
   buscarItensArgs,
   CAMPOS_PERFIL,
   conciliarFaturaArgs,
+  consultarItemArgs,
   LABEL_CAMPO_PERFIL,
   consultarCadastrosArgs,
   consultarGastosArgs,
@@ -1212,10 +1213,67 @@ const criarOrcamento: NiaTool = {
   },
 };
 
+const consultarItem: NiaTool = {
+  nome: "consultar_item",
+  descricao:
+    "Responde com PRECISÃO perguntas sobre um item/produto comprado, com os números calculados pelo banco — você NUNCA soma nem lembra datas de cabeça. Dá: quantas vezes foi comprado, total gasto (e num período), última e primeira compra (data, valor, local) e preço médio. Use para 'quando comprei X pela última vez?', 'quanto gastamos de X nos últimos 3 meses?', 'quantas vezes comprei X?', 'qual o preço do X?'. Passe 'termo' = o produto (ex.: 'sal', 'farinha de trigo', 'banana'). Para um período, passe 'inicio' e 'fim' em ISO (YYYY-MM-DD) calculados a partir de hoje (ex.: 'últimos 3 meses'); sem período, considera todo o histórico.",
+  nivel: "auto",
+  inputSchema: {
+    type: "object",
+    properties: {
+      termo: { type: "string", description: "O produto/item (ex.: 'sal', 'farinha de trigo')." },
+      inicio: { type: "string", description: "Início do período em ISO (YYYY-MM-DD). Opcional." },
+      fim: { type: "string", description: "Fim do período em ISO (YYYY-MM-DD). Opcional." },
+    },
+    required: ["termo"],
+  },
+  async executar(args, ctx) {
+    const d = valida(consultarItemArgs, args);
+    const supabase = createClient();
+    const { data } = await supabase.rpc("consultar_item", {
+      p_workspace_id: ctx.workspaceId,
+      p_termo: d.termo,
+      p_inicio: d.inicio ?? null,
+      p_fim: d.fim ?? null,
+    });
+    const row = (
+      data as
+        | {
+            n_compras: number;
+            total: number;
+            qtd_total: number;
+            ultima_data: string | null;
+            ultimo_valor: number | null;
+            ultimo_local: string | null;
+            primeira_data: string | null;
+            preco_medio: number | null;
+          }[]
+        | null
+    )?.[0];
+    const periodoTxt = d.inicio || d.fim ? " no período" : "";
+    const n = row ? Number(row.n_compras) : 0;
+    if (!row || n === 0) return { texto: `Não encontrei compras de "${d.termo}"${periodoTxt}.` };
+    const partes = [
+      `"${d.termo}": ${n} ${n === 1 ? "compra" : "compras"}${periodoTxt}, total ${formatBRL(Number(row.total))}.`,
+    ];
+    if (row.ultima_data) {
+      partes.push(
+        `Última compra: ${formatDate(row.ultima_data)}${
+          row.ultimo_valor != null ? ` por ${formatBRL(Number(row.ultimo_valor))}` : ""
+        }${row.ultimo_local ? ` em ${row.ultimo_local}` : ""}.`,
+      );
+    }
+    if (row.preco_medio != null && n > 1) {
+      partes.push(`Preço médio por compra: ${formatBRL(Number(row.preco_medio))}.`);
+    }
+    return { texto: partes.join(" ") };
+  },
+};
+
 const buscarItensTool: NiaTool = {
   nome: "buscar_itens",
   descricao:
-    "Busca itens/produtos já comprados (linhas das notas) por nome — ex.: 'feijão'. Responde quando, onde e por quanto. Use para 'eu comprei X?', 'quando comprei Y?', 'comprei feijão no Pão de Açúcar?'.",
+    "LISTA as ocorrências de um item comprado (cada linha de nota: nome, data, local, valor) — ex.: 'me mostra minhas compras de feijão'. Para CONTAR, SOMAR, ver a ÚLTIMA compra ou o total gasto num item, use consultar_item (preciso, calculado no banco), não esta.",
   nivel: "auto",
   inputSchema: { type: "object", properties: { termo: { type: "string" } }, required: ["termo"] },
   async executar(args, ctx) {
@@ -1372,6 +1430,7 @@ export const NIA_TOOLS: NiaTool[] = [
   lembrarFato,
   atualizarPerfil,
   lembrarPreferencia,
+  consultarItem,
   buscarItensTool,
   consultarDocumentos,
   enviarDocumento,

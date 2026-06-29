@@ -159,6 +159,14 @@ export type LembrarPreferenciaArgs = z.infer<typeof lembrarPreferenciaArgs>;
 export const buscarItensArgs = z.object({ termo: z.string().trim().min(1).max(100) });
 export type BuscarItensArgs = z.infer<typeof buscarItensArgs>;
 
+export const consultarItemArgs = z.object({
+  termo: z.string().trim().min(1).max(80),
+  /** Janela opcional (ISO YYYY-MM-DD). Sem janela = considera tudo. */
+  inicio: z.string().optional(),
+  fim: z.string().optional(),
+});
+export type ConsultarItemArgs = z.infer<typeof consultarItemArgs>;
+
 export const buscarDocumentosArgs = z.object({ busca: z.string().trim().max(100).optional() });
 export type BuscarDocumentosArgs = z.infer<typeof buscarDocumentosArgs>;
 
