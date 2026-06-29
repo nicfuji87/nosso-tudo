@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, ListChecks, MoreHorizontal, Pencil, Search, Trash2, Wallet } from "lucide-react";
+import { ChevronDown, ListChecks, Loader2, MoreHorizontal, Pencil, Search, Trash2, Wallet } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -33,7 +33,7 @@ import { TransacaoItem } from "./transacao-item";
 import { TransacaoEditSheet } from "./transacao-edit-sheet";
 import { ItensEditSheet } from "./itens-edit-sheet";
 import { toast } from "@/components/ui/sonner";
-import { excluirTransacao } from "@/app/app/transacoes/actions";
+import { carregarTransacoes, excluirTransacao } from "@/app/app/transacoes/actions";
 import { cn } from "@/lib/utils";
 import { formatBRL } from "@/lib/format";
 import {
@@ -55,15 +55,30 @@ const ESSENCIALIDADE_VARIANT: Record<
 };
 
 export function TransacoesView({
-  transacoes,
+  transacoes: transacoesIniciais,
   categorias,
-  itensPorTx = {},
+  itensPorTx: itensIniciais = {},
+  temMaisInicial = false,
+  pageSize = 50,
 }: {
   transacoes: TransacaoComRelacoes[];
   categorias: Categoria[];
   itensPorTx?: Record<string, ItemDeTransacao[]>;
+  temMaisInicial?: boolean;
+  pageSize?: number;
 }) {
   const router = useRouter();
+  // Lista paginada: começa na 1ª página e cresce com "carregar mais". Resetada
+  // quando o servidor manda dados novos (router.refresh após editar/excluir).
+  const [transacoes, setTransacoes] = useState(transacoesIniciais);
+  const [itensPorTx, setItensPorTx] = useState(itensIniciais);
+  const [temMais, setTemMais] = useState(temMaisInicial);
+  const [carregandoMais, setCarregandoMais] = useState(false);
+  useEffect(() => {
+    setTransacoes(transacoesIniciais);
+    setItensPorTx(itensIniciais);
+    setTemMais(temMaisInicial);
+  }, [transacoesIniciais, itensIniciais, temMaisInicial]);
   const [busca, setBusca] = useState("");
   const [tipo, setTipo] = useState("todos");
   const [categoria, setCategoria] = useState("todas");
@@ -91,6 +106,15 @@ export function TransacoesView({
     () => transacoes.filter((t) => t.origem === "recorrente").length,
     [transacoes],
   );
+
+  async function carregarMais() {
+    setCarregandoMais(true);
+    const r = await carregarTransacoes(transacoes.length);
+    setCarregandoMais(false);
+    setTransacoes((prev) => [...prev, ...r.transacoes]);
+    setItensPorTx((prev) => ({ ...prev, ...r.itens }));
+    setTemMais(r.transacoes.length === pageSize);
+  }
 
   async function confirmarExclusao() {
     if (!excluindo) return;
@@ -247,6 +271,15 @@ export function TransacoesView({
             })}
           </CardContent>
         </Card>
+      )}
+
+      {temMais && (
+        <div className="flex justify-center">
+          <Button variant="secondary" onClick={carregarMais} disabled={carregandoMais}>
+            {carregandoMais && <Loader2 className="size-4 animate-spin" />}
+            Carregar mais
+          </Button>
+        </div>
       )}
 
       {/* Confirmação de exclusão */}

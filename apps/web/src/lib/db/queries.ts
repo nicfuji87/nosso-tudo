@@ -386,11 +386,16 @@ export async function getItensPorTransacao(
   return out;
 }
 
+/** Tamanho da página da lista de Transações (paginação "carregar mais"). */
+export const PAGINA_TRANSACOES = 50;
+
 export interface TransacaoFilters {
   tipo?: string;
   categoriaId?: string;
   busca?: string;
   limit?: number;
+  /** Deslocamento para paginação (page = offset/limit). */
+  offset?: number;
   /** "data" (padrão, por data da compra) ou "criacao" (último lançado primeiro). */
   ordenarPor?: "data" | "criacao";
 }
@@ -407,7 +412,11 @@ export async function listTransacoes(
   } else {
     query = query.order("data_transacao", { ascending: false }).order("created_at", { ascending: false });
   }
-  query = query.limit(filters.limit ?? 100);
+  // range = limit + offset (paginação): nunca trunca silenciosamente — o cliente
+  // pede a próxima página com "carregar mais".
+  const limit = filters.limit ?? 100;
+  const offset = filters.offset ?? 0;
+  query = query.range(offset, offset + limit - 1);
 
   if (filters.tipo) query = query.eq("tipo", filters.tipo);
   if (filters.categoriaId) query = query.eq("categoria_id", filters.categoriaId);

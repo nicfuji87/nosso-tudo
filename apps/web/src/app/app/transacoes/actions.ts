@@ -3,9 +3,25 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { transacaoSchema, type TransacaoInput } from "@/lib/schemas/transacao";
-import type { Essencialidade } from "@/lib/types/db";
+import type { Essencialidade, TransacaoComRelacoes } from "@/lib/types/db";
+import { getItensPorTransacao, listTransacoes, PAGINA_TRANSACOES, type ItemDeTransacao } from "@/lib/db/queries";
 import { normalizarTexto } from "@/lib/normalize";
 import { resolverContexto } from "@/lib/classificacao";
+
+/** Próxima página de transações + os itens das linhas dela. Sem teto fixo: a
+ *  lista nunca trunca silenciosamente — o cliente pede mais conforme rola. */
+export async function carregarTransacoes(
+  offset: number,
+): Promise<{ transacoes: TransacaoComRelacoes[]; itens: Record<string, ItemDeTransacao[]> }> {
+  const { workspaceId } = await getWorkspaceId();
+  if (!workspaceId) return { transacoes: [], itens: {} };
+  const transacoes = await listTransacoes(workspaceId, { limit: PAGINA_TRANSACOES, offset });
+  const itens = await getItensPorTransacao(
+    workspaceId,
+    transacoes.map((t) => t.id),
+  );
+  return { transacoes, itens };
+}
 
 async function getWorkspaceId(): Promise<{ workspaceId?: string; userId?: string; error?: string }> {
   const supabase = createClient();
