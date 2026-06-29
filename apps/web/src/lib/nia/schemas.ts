@@ -167,6 +167,16 @@ export const consultarItemArgs = z.object({
 });
 export type ConsultarItemArgs = z.infer<typeof consultarItemArgs>;
 
+export const consultarTransacoesArgs = z.object({
+  /** Descritor: palavra na descrição/estabelecimento/categoria (ex.: "presente", "Pão de Açúcar"). */
+  termo: z.string().trim().max(80).optional(),
+  /** Beneficiário (pessoa/grupo) — ex.: "Gabriela", "Bruna", "Casa". */
+  pessoa: z.string().trim().max(80).optional(),
+  inicio: z.string().optional(),
+  fim: z.string().optional(),
+});
+export type ConsultarTransacoesArgs = z.infer<typeof consultarTransacoesArgs>;
+
 export const buscarDocumentosArgs = z.object({ busca: z.string().trim().max(100).optional() });
 export type BuscarDocumentosArgs = z.infer<typeof buscarDocumentosArgs>;
 

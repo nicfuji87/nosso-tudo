@@ -31,6 +31,7 @@ import {
   CAMPOS_PERFIL,
   conciliarFaturaArgs,
   consultarItemArgs,
+  consultarTransacoesArgs,
   LABEL_CAMPO_PERFIL,
   consultarCadastrosArgs,
   consultarGastosArgs,
@@ -1270,6 +1271,82 @@ const consultarItem: NiaTool = {
   },
 };
 
+const consultarTransacoes: NiaTool = {
+  nome: "consultar_transacoes",
+  descricao:
+    "Soma e lista transações por filtros, com o TOTAL calculado pelo banco — você NUNCA soma de cabeça. Filtros: 'pessoa' (beneficiário — quem se beneficiou, ex.: 'Gabriela', 'Bruna', 'Casa'), 'termo' (uma palavra que apareça na descrição, no estabelecimento ou na categoria, ex.: 'presente', 'Pão de Açúcar') e período ('inicio'/'fim' em ISO). Use para 'quanto custou o presente que demos para a Gabriela?', 'quanto gastei com a Bruna em maio?', 'quanto gastamos no Pão de Açúcar?'. Para um ITEM de nota (sal, farinha) prefira consultar_item.",
+  nivel: "auto",
+  inputSchema: {
+    type: "object",
+    properties: {
+      termo: { type: "string", description: "Palavra na descrição/estabelecimento/categoria (ex.: 'presente')." },
+      pessoa: { type: "string", description: "Beneficiário: pessoa/grupo (ex.: 'Gabriela')." },
+      inicio: { type: "string", description: "Início do período em ISO (YYYY-MM-DD). Opcional." },
+      fim: { type: "string", description: "Fim do período em ISO (YYYY-MM-DD). Opcional." },
+    },
+  },
+  async executar(args, ctx) {
+    const d = valida(consultarTransacoesArgs, args);
+    if (!d.termo && !d.pessoa && !d.inicio && !d.fim) {
+      return { texto: "Preciso de ao menos um filtro (pessoa, termo ou período) para somar." };
+    }
+    const supabase = createClient();
+
+    // Resolve a pessoa (beneficiário) por nome — exato normalizado, depois contém.
+    let beneficiarioId: string | null = null;
+    if (d.pessoa) {
+      const alvo = normalizarTexto(d.pessoa);
+      const { data: ents } = await supabase
+        .from("entidades")
+        .select("id, nome")
+        .eq("workspace_id", ctx.workspaceId)
+        .eq("ativa", true);
+      const lista = (ents as { id: string; nome: string }[] | null) ?? [];
+      const achado =
+        lista.find((e) => normalizarTexto(e.nome) === alvo) ??
+        lista.find((e) => normalizarTexto(e.nome).includes(alvo) || alvo.includes(normalizarTexto(e.nome)));
+      if (!achado) return { texto: `Não encontrei "${d.pessoa}" entre as pessoas/grupos cadastrados.` };
+      beneficiarioId = achado.id;
+    }
+
+    const { data } = await supabase.rpc("consultar_transacoes", {
+      p_workspace_id: ctx.workspaceId,
+      p_termo: d.termo ?? null,
+      p_beneficiario_id: beneficiarioId,
+      p_inicio: d.inicio ?? null,
+      p_fim: d.fim ?? null,
+    });
+    const rows =
+      (data as
+        | { descricao: string; valor: number; data: string; local: string | null; total_geral: number; n_geral: number }[]
+        | null) ?? [];
+
+    const filtros = [
+      d.termo ? `"${d.termo}"` : null,
+      d.pessoa ? `para ${d.pessoa}` : null,
+      d.inicio || d.fim ? "no período" : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    if (rows.length === 0) return { texto: `Não encontrei lançamentos${filtros ? ` (${filtros})` : ""}.` };
+
+    const total = Number(rows[0]!.total_geral);
+    const n = Number(rows[0]!.n_geral);
+    const exemplos = rows
+      .map(
+        (r) =>
+          `${r.data ? `${formatDate(r.data)} · ` : ""}${r.descricao} · ${formatBRL(Number(r.valor))}${
+            r.local ? ` (${r.local})` : ""
+          }`,
+      )
+      .join("\n");
+    const cabecalho = `${n} ${n === 1 ? "lançamento" : "lançamentos"}${filtros ? ` (${filtros})` : ""}, total ${formatBRL(
+      total,
+    )}.`;
+    return { texto: n > rows.length ? `${cabecalho}\nAlguns:\n${exemplos}` : `${cabecalho}\n${exemplos}` };
+  },
+};
+
 const buscarItensTool: NiaTool = {
   nome: "buscar_itens",
   descricao:
@@ -1431,6 +1508,7 @@ export const NIA_TOOLS: NiaTool[] = [
   atualizarPerfil,
   lembrarPreferencia,
   consultarItem,
+  consultarTransacoes,
   buscarItensTool,
   consultarDocumentos,
   enviarDocumento,
