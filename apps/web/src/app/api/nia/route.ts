@@ -36,6 +36,20 @@ function turnoComplexo(userMessage: string, temAnexo: boolean): boolean {
 }
 
 export async function POST(req: Request): Promise<Response> {
+  try {
+    return await handlePost(req);
+  } catch (e) {
+    // Rede de segurança: sem isto, um throw antes do stream vira 500 sem corpo e
+    // o cliente mostra "Tive um problema." mudo — e nada fica nos logs do Vercel.
+    console.error("[/api/nia] erro não tratado:", e);
+    return NextResponse.json(
+      { error: "A Nia teve um erro interno ao processar sua mensagem. Tente de novo em instantes." },
+      { status: 500 },
+    );
+  }
+}
+
+async function handlePost(req: Request): Promise<Response> {
   const user = await getUser();
   if (!user) return NextResponse.json({ error: "Sessão expirada." }, { status: 401 });
 
@@ -410,6 +424,7 @@ export async function POST(req: Request): Promise<Response> {
           );
         }
       } catch (e) {
+        console.error("[/api/nia] erro no stream:", e);
         send({ type: "error", error: (e as Error).message || "A Nia teve um problema ao responder." });
       } finally {
         controller.close();
