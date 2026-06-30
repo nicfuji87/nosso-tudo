@@ -149,9 +149,12 @@ export async function POST(req: Request): Promise<Response> {
     .eq("workspace_id", workspaceId)
     .maybeSingle();
   const fatos = (ctxRow as { fatos: string[] } | null)?.fatos ?? [];
-  const preferencias = (((ctxRow as { preferencias?: unknown } | null)?.preferencias ?? []) as unknown[]).filter(
-    (p): p is string => typeof p === "string" && p.trim().length > 0,
-  );
+  // Guard Array.isArray: a coluna preferencias tem default '{}' (objeto), então
+  // sem isto o .filter estoura ("filter is not a function") e derruba a Nia.
+  const preferenciasRaw = (ctxRow as { preferencias?: unknown } | null)?.preferencias;
+  const preferencias = Array.isArray(preferenciasRaw)
+    ? preferenciasRaw.filter((p): p is string => typeof p === "string" && p.trim().length > 0)
+    : [];
   const perfilFamilia = ((ctxRow as { perfil?: Record<string, unknown> } | null)?.perfil ?? {}) as Record<
     string,
     unknown
