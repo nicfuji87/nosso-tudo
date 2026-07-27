@@ -5,6 +5,7 @@ import {
   getHistoricoRecente,
   getLancamentosDaConversa,
   getLancamentosDaData,
+  listarEventos,
   listCategorias,
   listRecorrencias,
   type LancamentoConversa,
@@ -342,6 +343,27 @@ async function handlePost(req: Request): Promise<Response> {
     );
     semiEstatico.push(
       `Contas fixas (recorrências) já cadastradas. ANTES de chamar criar_recorrencia, confira esta lista: se o usuário descrever algo que já está aqui — mesmo escrito com outras palavras, desde que seja claramente a MESMA conta (mesma frequência e valor parecido) — NÃO crie outra; avise que já existe e pergunte se quer atualizar (valor/dia). Só crie quando for realmente uma conta diferente:\n${linhas.join(
+        "\n",
+      )}`,
+    );
+  }
+
+  // Eventos/contextos já cadastrados — mesmo problema das recorrências acima, e
+  // pelo mesmo motivo: a Nia só enxergava a lista se lembrasse de chamar
+  // consultar_eventos, e frequentemente não chamava. Resultado: 'Judô' ao lado de
+  // 'Judô do Henrique', 'Kangueiko' ao lado de 'Kangueiko Bastos'. O aviso de
+  // similaridade em criar_evento é só informativo (não bloqueia), então a decisão
+  // de reaproveitar tem que acontecer aqui, com a lista à vista.
+  const eventosAtivos = await listarEventos(workspaceId);
+  if (eventosAtivos.length > 0) {
+    const linhas = eventosAtivos.map(
+      (e) =>
+        `- ${e.nome}${e.tipo ? ` (${e.tipo})` : ""}${
+          e.dataReferencia ? ` · ${formatDate(e.dataReferencia)}` : ""
+        }`,
+    );
+    semiEstatico.push(
+      `Eventos/contextos já cadastrados. ANTES de chamar criar_evento ou marcar_evento, confira esta lista: se o usuário mencionar algo que já está aqui — mesmo com outras palavras, mais curto ou mais longo (ex.: "judô" quando existe "Judô do Henrique") — REAPROVEITE o evento existente, usando o nome exato da lista. Só crie um evento novo quando for realmente outra coisa; na dúvida, pergunte se é o mesmo em vez de criar outro:\n${linhas.join(
         "\n",
       )}`,
     );
