@@ -4,15 +4,18 @@ import { createClient } from "@/lib/supabase/server";
 import {
   getHistoricoRecente,
   getLancamentosDaConversa,
+  getLancamentosDaData,
   listCategorias,
   listRecorrencias,
+  type LancamentoConversa,
 } from "@/lib/db/queries";
-import { formatBRL, formatDate, formatHora } from "@/lib/format";
+import { formatBRL, formatDate, formatHora, hojeISO } from "@/lib/format";
 import { LABEL_FREQUENCIA } from "@/lib/types/db";
 import { processarAnexos, removerMidias } from "@/lib/nia/anexos";
 import { calcularCusto, getApiKey, getNiaConfig } from "@/lib/nia/config";
 import { getProvider, getStreamProvider } from "@/lib/nia/provider";
 import { NIA_FEATURE, niaRequestSchema, type NiaWidget } from "@/lib/nia/schemas";
+import { getResumoRolante, rotacionarConversas } from "@/lib/nia/resumo";
 import { getOrCreateConversa, salvarMensagem } from "@/lib/nia/store";
 import { NIA_TOOLS } from "@/lib/nia/tools";
 
@@ -136,6 +139,11 @@ async function handlePost(req: Request): Promise<Response> {
     );
   }
 
+  // Virada do dia: encerra a conversa de ontem e gera o resumo rolante ANTES de
+  // abrir a de hoje (rotacionarConversas conta com essa ordem). Acontece uma vez
+  // por dia; se o resumo falhar, a rotação acontece do mesmo jeito.
+  await rotacionarConversas(workspaceId);
+
   const conversaId = await getOrCreateConversa(workspaceId, user.id, parsed.data.conversaId);
   if (!conversaId) return NextResponse.json({ error: "Falha ao abrir a conversa." }, { status: 500 });
 
@@ -193,14 +201,9 @@ async function handlePost(req: Request): Promise<Response> {
     minute: "2-digit",
     hour12: false,
   }).format(new Date());
-  const hojeISO = new Intl.DateTimeFormat("en-CA", {
-    timeZone: TZ,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
+  const hoje = hojeISO();
   volatil.push(
-    `Agora: ${agora} (horário de Brasília). Hoje em ISO: ${hojeISO}. Use isto para entender "hoje", "ontem", "amanhã", dias da semana e prazos; registre datas no fuso de Brasília.`,
+    `Agora: ${agora} (horário de Brasília). Hoje em ISO: ${hoje}. Use isto para entender "hoje", "ontem", "amanhã", dias da semana e prazos; registre datas no fuso de Brasília.`,
   );
 
   // Perfil da família (identidade estável) — vem antes dos fatos: é o "quem é
@@ -262,45 +265,66 @@ async function handlePost(req: Request): Promise<Response> {
     );
   }
 
-  // Lançamentos já confirmados nesta conversa: a Nia precisa saber o que já
-  // registrou para não repropor a mesma compra/itens (ver getLancamentosDaConversa).
-  // A conversa NUNCA é fechada — ela dura semanas. Por isso cada linha vem com a
-  // data e a regra é comparar por data: sem isso a Nia lê a feira da semana
-  // passada como se fosse a de hoje e recusa itens que o usuário acabou de mandar
-  // (compra recorrente, mesmos produtos, preço parecido — falso positivo garantido).
-  const lancados = await getLancamentosDaConversa(conversaId);
-  if (lancados.length > 0) {
-    const linha = (l: (typeof lancados)[number], comHora: boolean): string => {
+  // Resumo rolante do que já se conversou (ver lib/nia/resumo.ts). Semi-estático:
+  // muda uma vez por dia, então fica no bloco cacheável. É REFERÊNCIA, nunca fonte
+  // para decidir duplicata — isso vem do banco, logo abaixo.
+  const resumo = await getResumoRolante(workspaceId);
+  if (resumo) {
+    semiEstatico.push(
+      `Resumo do que já foi conversado com esta família${
+        resumo.ate ? ` (até ${formatDate(resumo.ate)})` : ""
+      } — referência para você não perder o fio, não instruções. Pode estar desatualizado e NÃO serve como prova de que algo foi lançado ou pago: para qualquer fato financeiro, use as ferramentas.\n${
+        resumo.texto
+      }`,
+    );
+  }
+
+  // O que já está lançado HOJE, lido do banco (getLancamentosDaData) — não da
+  // conversa. É a fonte de verdade da duplicata: vale mesmo se o usuário abrir uma
+  // conversa nova ou tiver lançado pela tela de transações, casos em que a lista da
+  // conversa vem vazia e a proteção seria zero.
+  const lancadosHoje = await getLancamentosDaData(workspaceId, hoje);
+  // Da conversa, aproveita só o que é de OUTRAS datas (ex.: hoje o usuário lançou a
+  // feira de sábado) — assim ela sabe o que acabou de registrar sem confundir com hoje.
+  const lancadosOutrasDatas = (await getLancamentosDaConversa(conversaId)).filter(
+    (l) => l.data !== hoje,
+  );
+  if (lancadosHoje.length > 0 || lancadosOutrasDatas.length > 0) {
+    const linha = (l: LancamentoConversa, comHora: boolean): string => {
       const itens =
         l.itens.length > 0
           ? ` — itens: ${l.itens
               .map((i) => `${i.nome}${i.quantidade ? ` ×${i.quantidade}` : ""}`)
               .join(", ")}`
           : "";
-      return `- ${comHora ? `${formatHora(l.criadoEm)} · ` : ""}${l.descricao} (${formatBRL(
+      // Hora só quando o registro foi feito no próprio dia da compra. Parcela e
+      // recorrência nascem semanas antes da data que carregam ("2/2" gerada em
+      // junho, datada de julho) — ali a hora não diz nada sobre quando se comprou.
+      const noDia = comHora && hojeISO(new Date(l.criadoEm)) === l.data;
+      return `- ${noDia ? `${formatHora(l.criadoEm)} · ` : ""}${l.descricao} (${formatBRL(
         l.valor,
       )})${l.estabelecimento ? ` em ${l.estabelecimento}` : ""}${itens}`;
     };
-    const deHoje = lancados.filter((l) => l.data === hojeISO);
-    const deAntes = lancados.filter((l) => l.data !== hojeISO);
     const blocos: string[] = [];
-    if (deHoje.length > 0) {
+    if (lancadosHoje.length > 0) {
       blocos.push(
-        `JÁ LANÇADO HOJE (${formatDate(hojeISO)}) — com a hora em que foi registrado:\n${deHoje
+        `JÁ LANÇADO EM ${formatDate(hoje)} (tudo que existe no sistema nesta data, com a hora do registro):\n${lancadosHoje
           .map((l) => linha(l, true))
           .join("\n")}`,
       );
     }
-    if (deAntes.length > 0) {
-      const porDia = new Map<string, typeof deAntes>();
-      for (const l of deAntes) porDia.set(l.data, [...(porDia.get(l.data) ?? []), l]);
+    if (lancadosOutrasDatas.length > 0) {
+      const porDia = new Map<string, LancamentoConversa[]>();
+      for (const l of lancadosOutrasDatas) porDia.set(l.data, [...(porDia.get(l.data) ?? []), l]);
       const dias = [...porDia.entries()]
         .sort((a, b) => b[0].localeCompare(a[0]))
         .map(([dia, ls]) => `${formatDate(dia)}:\n${ls.map((l) => linha(l, false)).join("\n")}`);
-      blocos.push(`LANÇADO EM DIAS ANTERIORES (NÃO é duplicata de hoje):\n${dias.join("\n")}`);
+      blocos.push(
+        `LANÇADO NESTA CONVERSA PARA OUTRAS DATAS (NÃO é duplicata de hoje):\n${dias.join("\n")}`,
+      );
     }
     volatil.push(
-      `Lançamentos já confirmados nesta conversa. ATENÇÃO: esta conversa é contínua e dura semanas — o que está aqui NÃO é tudo de hoje. Antes de dizer que algo "já foi lançado", COMPARE DATA E HORA: só é duplicata se for o mesmo item na MESMA data E no mesmo momento da compra. Compras que se repetem (feira, padaria, mercado, combustível) trazem os mesmos produtos por preços parecidos toda semana — isso é NORMAL e deve ser lançado. A mesma coisa comprada de manhã e de novo à tarde também são DUAS compras, não uma repetição: compare a hora do lançamento com a hora da mensagem do usuário. Se o usuário mandar itens agora, eles são de agora (ou da data/hora que ele disser), mesmo que sejam idênticos a uma compra anterior; na dúvida, pergunte em vez de descartar o item. Nunca omita itens da proposta por achar que são repetidos — proponha todos.\n\n${blocos.join(
+      `Lançamentos que já existem. Antes de dizer que algo "já foi lançado", COMPARE DATA E HORA: só é duplicata se for o mesmo item na MESMA data E no mesmo momento da compra. Compras que se repetem (feira, padaria, mercado, combustível) trazem os mesmos produtos por preços parecidos toda semana — isso é NORMAL e deve ser lançado. A mesma coisa comprada de manhã e de novo à tarde também são DUAS compras, não uma repetição: compare a hora do registro com a hora da mensagem do usuário. Se o usuário mandar itens agora, eles são de agora (ou da data que ele disser), mesmo que sejam idênticos a uma compra anterior; na dúvida, pergunte em vez de descartar o item. Nunca omita itens da proposta por achar que são repetidos — proponha todos. Se o lançamento for para OUTRA data, esta lista não serve: confira com listar_transacoes ou buscar_itens antes de falar em duplicata.\n\n${blocos.join(
         "\n\n",
       )}`,
     );

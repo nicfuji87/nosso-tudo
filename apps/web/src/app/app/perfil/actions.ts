@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { getResumoRolante } from "@/lib/nia/resumo";
 
 const perfilSchema = z.object({
   nome: z.string().trim().min(2, "Informe seu nome").max(120),
@@ -152,6 +153,46 @@ export async function getPreferenciasNia(): Promise<string[]> {
     .maybeSingle();
   const prefs = (data as { preferencias: unknown } | null)?.preferencias;
   return Array.isArray(prefs) ? (prefs.filter((p) => typeof p === "string") as string[]) : [];
+}
+
+/**
+ * Resumo rolante das conversas (ver lib/nia/resumo.ts), exposto no perfil.
+ *
+ * Deixar isso visível não é enfeite: o resumo é re-resumido todo dia em cima de si
+ * mesmo, então sem uma tela onde o usuário lê e corrige, um erro que entre nele
+ * fica circulando para sempre sem ninguém nunca ver.
+ */
+export async function getResumoConversas(): Promise<{ texto: string; ate: string } | null> {
+  const { workspaceId } = await getWorkspaceId();
+  if (!workspaceId) return null;
+  return getResumoRolante(workspaceId);
+}
+
+/** Salva o resumo editado à mão (texto vazio = apaga e recomeça do zero amanhã). */
+export async function salvarResumoConversas(texto: string): Promise<{ error?: string; ok?: boolean }> {
+  const { workspaceId, error } = await getWorkspaceId();
+  if (error || !workspaceId) return { error: error ?? "Workspace não encontrado." };
+  const limpo = String(texto ?? "").trim().slice(0, 1500);
+
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("conversas_ia")
+    .select("id, contexto")
+    .eq("workspace_id", workspaceId)
+    .eq("arquivada", true)
+    .not("contexto->>resumo", "is", null)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const row = data as { id: string; contexto: Record<string, unknown> } | null;
+  if (!row) return { error: "Ainda não há resumo para editar." };
+
+  const contexto = limpo ? { ...row.contexto, resumo: limpo } : {};
+  const { error: e } = await supabase.from("conversas_ia").update({ contexto }).eq("id", row.id);
+  if (e) return { error: "Não foi possível salvar o resumo." };
+
+  revalidatePath("/app/perfil");
+  return { ok: true };
 }
 
 /** Salva as preferências editadas no perfil (substitui a lista). */

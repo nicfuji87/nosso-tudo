@@ -15,11 +15,15 @@ export async function getOrCreateConversa(
 ): Promise<string | null> {
   const supabase = createClient();
   if (conversaId) {
+    // `arquivada` também filtra aqui: a conversa é do dia e é encerrada na virada
+    // (rotacionarConversas). Sem isto, uma aba deixada aberta a noite toda mandaria
+    // o id de ontem e ressuscitaria a conversa já resumida.
     const { data } = await supabase
       .from("conversas_ia")
       .select("id")
       .eq("id", conversaId)
       .eq("workspace_id", workspaceId)
+      .eq("arquivada", false)
       .maybeSingle();
     if (data) return (data as { id: string }).id;
   }

@@ -268,9 +268,16 @@ export interface GastoContexto {
   dataReferencia: string | null;
   total: number;
   nTransacoes: number;
+  /** Janela de atividade — usada para esconder evento já encerrado (ver dashboard). */
+  primeiraData: string | null;
+  ultimaData: string | null;
 }
 
-/** Custo por contexto/evento (all-time) — "quanto custou o passeio inteiro". */
+/**
+ * Custo por contexto/evento (all-time) — "quanto custou o passeio inteiro".
+ * O total é de propósito all-time; quem quiser só os eventos em andamento filtra
+ * por `ultimaData` (é o que o dashboard, que é uma tela do mês, faz).
+ */
 export async function getGastosPorContexto(workspaceId: string): Promise<GastoContexto[]> {
   const supabase = createClient();
   const { data } = await supabase.rpc("gastos_por_contexto", { p_workspace_id: workspaceId });
@@ -284,6 +291,8 @@ export async function getGastosPorContexto(workspaceId: string): Promise<GastoCo
         data_referencia: string | null;
         total: number;
         n_transacoes: number;
+        primeira_data: string | null;
+        ultima_data: string | null;
       }[]
     | null) ?? []).map((r) => ({
     contextoId: r.contexto_id,
@@ -294,6 +303,8 @@ export async function getGastosPorContexto(workspaceId: string): Promise<GastoCo
     dataReferencia: r.data_referencia,
     total: Number(r.total),
     nTransacoes: Number(r.n_transacoes),
+    primeiraData: r.primeira_data,
+    ultimaData: r.ultima_data,
   }));
 }
 
@@ -1183,6 +1194,69 @@ export async function getLancamentosDaConversa(
     }));
 }
 
+/**
+ * Tudo que já está lançado numa DATA, lido direto de `transacoes`.
+ *
+ * Esta é a fonte de verdade para "já lancei isso?". A lista da conversa
+ * (getLancamentosDaConversa) não serve para isso: ela depende de qual conversa
+ * está aberta, então some inteira quando o usuário começa uma conversa nova — e
+ * aí a proteção contra duplicata é zero. Aqui não: vale para qualquer conversa,
+ * inclusive para o que foi lançado pela tela de transações.
+ */
+export async function getLancamentosDaData(
+  workspaceId: string,
+  data: string,
+): Promise<LancamentoConversa[]> {
+  const supabase = createClient();
+  const { data: txs } = await supabase
+    .from("transacoes")
+    .select("id, descricao, valor, data_transacao, created_at, estabelecimento:estabelecimentos(nome)")
+    .eq("workspace_id", workspaceId)
+    .eq("data_transacao", data)
+    .order("created_at", { ascending: true });
+  const rows =
+    (txs as
+      | {
+          id: string;
+          descricao: string;
+          valor: number;
+          data_transacao: string;
+          created_at: string;
+          estabelecimento: { nome: string } | null;
+        }[]
+      | null) ?? [];
+  if (rows.length === 0) return [];
+
+  const { data: itens } = await supabase
+    .from("itens_transacao")
+    .select("transacao_id, descricao_original, quantidade, unidade")
+    .in(
+      "transacao_id",
+      rows.map((t) => t.id),
+    );
+  const itensPorTx = new Map<string, LancamentoConversa["itens"]>();
+  for (const it of (itens as
+    | { transacao_id: string; descricao_original: string; quantidade: number | null; unidade: string | null }[]
+    | null) ?? []) {
+    const arr = itensPorTx.get(it.transacao_id) ?? [];
+    arr.push({
+      nome: it.descricao_original,
+      quantidade: it.quantidade != null ? Number(it.quantidade) : null,
+      unidade: it.unidade,
+    });
+    itensPorTx.set(it.transacao_id, arr);
+  }
+
+  return rows.map((t) => ({
+    data: t.data_transacao,
+    criadoEm: t.created_at,
+    descricao: t.descricao,
+    valor: Number(t.valor),
+    estabelecimento: t.estabelecimento?.nome ?? null,
+    itens: itensPorTx.get(t.id) ?? [],
+  }));
+}
+
 export interface MensagemHistorico {
   id: string;
   autor: "user" | "nia";
@@ -1192,18 +1266,39 @@ export interface MensagemHistorico {
   anexos?: { tipo: string; nome: string }[];
 }
 
-/** Conversa mais recente (não arquivada) do workspace — base da continuidade do chat. */
-export async function getConversaAtiva(workspaceId: string): Promise<string | null> {
+/**
+ * Conversa aberta mais recente do workspace e o dia da última mensagem dela.
+ *
+ * Ordena pela última MENSAGEM, não por `conversas_ia.updated_at`: essa coluna
+ * nunca é atualizada (fica igual ao created_at), então ordenar por ela devolvia a
+ * conversa criada por último, não a usada por último.
+ */
+export async function getConversaAberta(
+  workspaceId: string,
+): Promise<{ id: string; ultimoDia: string } | null> {
   const supabase = createClient();
   const { data } = await supabase
-    .from("conversas_ia")
-    .select("id")
+    .from("mensagens_ia")
+    .select("conversa_id, created_at, conversa:conversas_ia!inner(arquivada)")
     .eq("workspace_id", workspaceId)
-    .eq("arquivada", false)
-    .order("updated_at", { ascending: false })
+    .eq("conversa.arquivada", false)
+    .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  return (data as { id: string } | null)?.id ?? null;
+  const row = data as { conversa_id: string; created_at: string } | null;
+  if (!row) return null;
+  return { id: row.conversa_id, ultimoDia: hojeISO(new Date(row.created_at)) };
+}
+
+/**
+ * Conversa ativa do chat: a aberta mais recente, mas SÓ se ainda for do dia de
+ * hoje. A conversa passou a ser do dia — ver `lib/nia/resumo.ts`. Uma conversa de
+ * ontem é encerrada (com resumo) no próximo turno, então aqui ela já não vale.
+ */
+export async function getConversaAtiva(workspaceId: string): Promise<string | null> {
+  const aberta = await getConversaAberta(workspaceId);
+  if (!aberta) return null;
+  return aberta.ultimoDia === hojeISO() ? aberta.id : null;
 }
 
 /** Todas as mensagens de uma conversa, em ordem cronológica, no shape do chat. */

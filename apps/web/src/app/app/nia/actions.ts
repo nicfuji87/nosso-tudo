@@ -70,35 +70,28 @@ async function carregarAcao(acaoId: string): Promise<AcaoRow | null> {
 const JANELA_DEDUPE_MIN = 30;
 
 /**
- * Itens (nome + valor) lançados nesta conversa na MESMA DATA e nos últimos
- * JANELA_DEDUPE_MIN minutos — base do dedupe ao confirmar.
+ * Itens (nome + valor) lançados na MESMA DATA e nos últimos JANELA_DEDUPE_MIN
+ * minutos — base do dedupe ao confirmar.
  *
- * Os dois filtros são essenciais e por motivos diferentes. Data: a conversa nunca
- * é fechada (dura semanas), então sem ela uma compra recorrente — feira, padaria,
- * mercado — bate com a da semana passada (mesmo produto, mesmo preço) e o item é
- * descartado em silêncio. Hora: dentro do mesmo dia, a compra da tarde bate com a
- * da manhã pelo mesmo motivo.
+ * Olha o workspace inteiro, não a conversa: prender ao `conversa_id` deixava a
+ * proteção zerada assim que o usuário começava uma conversa nova, e ignorava o que
+ * tinha sido lançado pela tela de transações.
+ *
+ * Os dois filtros são essenciais e por motivos diferentes. Data: sem ela uma compra
+ * recorrente — feira, padaria, mercado — bate com a da semana passada (mesmo
+ * produto, mesmo preço) e o item é descartado em silêncio. Janela: dentro do mesmo
+ * dia, a compra da tarde bate com a da manhã pelo mesmo motivo.
  */
-async function itensLancadosNaConversa(
+async function itensLancadosRecentemente(
   supabase: ReturnType<typeof createClient>,
-  conversaId: string,
-  exceto: string,
+  workspaceId: string,
   data: string,
 ): Promise<{ nome: string; valorTotal: number | null }[]> {
-  const { data: acoes } = await supabase
-    .from("nia_acoes")
-    .select("registro_id")
-    .eq("conversa_id", conversaId)
-    .eq("status", "executada")
-    .neq("id", exceto)
-    .not("registro_id", "is", null);
-  const ids = ((acoes as { registro_id: string }[] | null) ?? []).map((a) => a.registro_id);
-  if (ids.length === 0) return [];
   const desde = new Date(Date.now() - JANELA_DEDUPE_MIN * 60_000).toISOString();
   const { data: txs } = await supabase
     .from("transacoes")
     .select("id")
-    .in("id", ids)
+    .eq("workspace_id", workspaceId)
     .eq("data_transacao", data)
     .gte("created_at", desde);
   const idsRecentes = ((txs as { id: string }[] | null) ?? []).map((t) => t.id);
@@ -327,7 +320,7 @@ export async function confirmarTransacaoDetalhada(
   // nesta conversa no mesmo dia e nos últimos minutos, para não duplicar quando a
   // Nia repropõe uma cesta que ela acabou de registrar. A janela curta é o que
   // deixa passar compra recorrente (feira semanal) e a mesma compra manhã/tarde.
-  const lancadosPrev = await itensLancadosNaConversa(supabase, acao.conversa_id, acaoId, data);
+  const lancadosPrev = await itensLancadosRecentemente(supabase, ws, data);
   const jaLancado = (nome: string, vTotal: number): boolean =>
     vTotal > 0 &&
     lancadosPrev.some(

@@ -8,24 +8,27 @@ import { Badge } from "@/components/ui/badge";
 import { PerfilForm } from "@/components/perfil/perfil-form";
 import { ListaCuradaCard } from "@/components/perfil/memoria-nia-card";
 import { PerfilFamiliaCard } from "@/components/perfil/perfil-familia-card";
+import { ResumoConversasCard } from "@/components/perfil/resumo-conversas-card";
 import {
   getMemoriaNia,
   getPerfilFamilia,
   getPreferenciasNia,
+  getResumoConversas,
   salvarMemoriaNia,
   salvarPreferenciasNia,
 } from "./actions";
-import { formatBRL } from "@/lib/format";
+import { formatBRL, formatDate } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Perfil" };
 
 export default async function PerfilPage() {
   const { profile, workspace, plan, role } = await getWorkspaceContext();
   const isPro = plan.slug === "pro";
-  const [perfilFamilia, memoria, preferencias] = await Promise.all([
+  const [perfilFamilia, memoria, preferencias, resumo] = await Promise.all([
     getPerfilFamilia(),
     getMemoriaNia(),
     getPreferenciasNia(),
+    getResumoConversas(),
   ]);
 
   return (
@@ -135,6 +138,26 @@ export default async function PerfilPage() {
           />
         </CardContent>
       </Card>
+
+      {/* Resumo rolante das conversas — visível justamente porque é reescrito
+          todo dia em cima de si mesmo e precisa de alguém para corrigir a deriva */}
+      {resumo && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Sparkles className="size-4 text-accent" /> Resumo das conversas
+            </CardTitle>
+            <CardDescription>
+              O fio das conversas com a Nia{resumo.ate ? ` até ${formatDate(resumo.ate)}` : ""}, reescrito a cada
+              virada de dia para ela não perder o contexto. Ele não guarda valores nem serve de prova de lançamento —
+              isso vem sempre do banco. Se algo aqui estiver errado, corrija ou apague.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ResumoConversasCard resumoInicial={resumo.texto} />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Preferências — como a família gosta que as coisas sejam feitas */}
       <Card>

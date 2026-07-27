@@ -25,7 +25,7 @@ import { EssencialidadeCard } from "@/components/dashboard/essencialidade-card";
 import { GastoPorPessoa } from "@/components/dashboard/gasto-por-pessoa";
 import { AtividadeRecente } from "@/components/dashboard/atividade-recente";
 import { EventosLista } from "@/components/dashboard/eventos-lista";
-import { greeting, formatBRL, formatDate } from "@/lib/format";
+import { greeting, formatBRL, formatDate, hojeISO } from "@/lib/format";
 import { getDescobertas } from "@/lib/insights";
 
 const PALETTE = ["#3D6D84", "#8FA993", "#FF7043", "#7E57C2", "#EC407A", "#C4B8B0"];
@@ -48,7 +48,12 @@ export default async function HomePage() {
   ]);
 
   const totalEssenc = essenc.reduce((s, e) => s + e.total, 0);
-  const eventosTop = eventos.slice(0, 6);
+  // Só eventos com movimentação no mês corrente. Esta tela é do mês (o cabeçalho,
+  // o resumo e as categorias também são) — deixar Eventos all-time fazia a viagem
+  // de maio ficar ocupando espaço em julho e os eventos só se acumularem. O total
+  // exibido continua sendo o do evento inteiro, não o do mês.
+  const inicioDoMes = `${hojeISO().slice(0, 7)}-01`;
+  const eventosTop = eventos.filter((ev) => (ev.ultimaData ?? "") >= inicioDoMes).slice(0, 6);
 
   const colecoes =
     (colecoesRes.data as { id: string; nome: string; cor: string | null; icone: string | null }[] | null) ?? [];
