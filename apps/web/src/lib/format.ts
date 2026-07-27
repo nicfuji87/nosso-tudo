@@ -62,6 +62,33 @@ export function initials(name: string | null | undefined): string {
   return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
 }
 
+/**
+ * Hoje em ISO (YYYY-MM-DD) no fuso de Brasília. O servidor roda em UTC, então
+ * `new Date().toISOString().slice(0,10)` vira o dia seguinte a partir das 21h —
+ * um lançamento feito à noite ia parar em amanhã.
+ */
+export function hojeISO(date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+/**
+ * Hora curta ("14:37") no fuso de Brasília. Use com timestamp completo
+ * (created_at), nunca com data só-data (YYYY-MM-DD).
+ */
+export function formatHora(input: Date | string): string {
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(typeof input === "string" ? new Date(input) : input);
+}
+
 /** Saudação conforme a hora em Brasília (o servidor roda em UTC). */
 export function greeting(date = new Date()): string {
   const h =

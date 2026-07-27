@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { formatBRL } from "@/lib/format";
+import { formatBRL, formatDate, formatHora, hojeISO } from "@/lib/format";
 import { avancarDataRecorrencia } from "@/lib/recorrencias";
 import type { NiaWidget } from "@/lib/nia/schemas";
 import { LABEL_FREQUENCIA } from "@/lib/types/db";
@@ -1058,8 +1058,20 @@ export async function getHistoricoRecente(
     .order("created_at", { ascending: false })
     .limit(limite);
   const rows =
-    (data as { papel: string; conteudo: string | null; midias: { leitura?: string | null }[] | null }[] | null) ?? [];
+    (data as
+      | {
+          papel: string;
+          conteudo: string | null;
+          midias: { leitura?: string | null }[] | null;
+          created_at: string;
+        }[]
+      | null) ?? [];
   const msgs: TurnoHistorico[] = [];
+  // A conversa nunca é fechada: estas 10 mensagens podem estar espalhadas por
+  // semanas. Sem marcar a virada de dia, a Nia lê tudo como se fosse a conversa
+  // de hoje — e trata a compra da semana passada como se fosse a de agora.
+  const hoje = hojeISO();
+  let diaAnterior = "";
   for (const r of rows.reverse()) {
     // Leitura do anexo (imagem/PDF) injetada como contexto invisível — a Nia "lembra"
     // da nota mesmo nos turnos seguintes, sem reenviar o arquivo bruto.
@@ -1069,6 +1081,16 @@ export async function getHistoricoRecente(
     let content = (r.conteudo ?? "").trim();
     if (leitura) content = `${content}\n\n[Conteúdo do anexo enviado: ${leitura}]`.trim();
     if (!content) continue;
+    // Hora em toda mensagem, dia só quando vira: dentro do mesmo dia a hora
+    // separa a compra da manhã da compra da tarde (mesmo item, mesmo preço).
+    const dia = hojeISO(new Date(r.created_at));
+    const hora = formatHora(r.created_at);
+    if (dia !== diaAnterior) {
+      diaAnterior = dia;
+      content = `[${dia === hoje ? "hoje" : formatDate(dia)} ${hora}] ${content}`;
+    } else {
+      content = `[${hora}] ${content}`;
+    }
     msgs.push({ role: r.papel === "assistant" ? "assistant" : "user", content: content.slice(0, 6000) });
   }
   // Anthropic exige que a 1ª mensagem seja do usuário.
@@ -1077,6 +1099,9 @@ export async function getHistoricoRecente(
 }
 
 export interface LancamentoConversa {
+  data: string;
+  /** Quando foi registrado (timestamp) — separa a compra da manhã da da tarde. */
+  criadoEm: string;
   descricao: string;
   valor: number;
   estabelecimento: string | null;
@@ -1087,6 +1112,10 @@ export interface LancamentoConversa {
  * Lançamentos (despesas/receitas) já confirmados NESTA conversa, via nia_acoes
  * (status 'executada' → registro_id). Vira memória de curto prazo da Nia: o route
  * injeta isso no contexto para ela não repropor a mesma compra/itens já lançados.
+ *
+ * DATA E HORA são obrigatórias aqui. A conversa é contínua (dura semanas): sem a
+ * data a Nia lê a feira da semana passada como se fosse a de hoje; sem a hora ela
+ * confunde a compra da manhã com a da tarde do mesmo dia (mesmo item, mesmo preço).
  */
 export async function getLancamentosDaConversa(
   conversaId: string,
@@ -1108,7 +1137,7 @@ export async function getLancamentosDaConversa(
   const [{ data: txs }, { data: itens }] = await Promise.all([
     supabase
       .from("transacoes")
-      .select("id, descricao, valor, estabelecimento:estabelecimentos(nome)")
+      .select("id, descricao, valor, data_transacao, created_at, estabelecimento:estabelecimentos(nome)")
       .in("id", ids),
     supabase
       .from("itens_transacao")
@@ -1131,13 +1160,22 @@ export async function getLancamentosDaConversa(
 
   const txRows =
     (txs as
-      | { id: string; descricao: string; valor: number; estabelecimento: { nome: string } | null }[]
+      | {
+          id: string;
+          descricao: string;
+          valor: number;
+          data_transacao: string;
+          created_at: string;
+          estabelecimento: { nome: string } | null;
+        }[]
       | null) ?? [];
   // Preserva a ordem de `ids` (mais recente primeiro).
   return ids
     .map((id) => txRows.find((t) => t.id === id))
     .filter((t): t is NonNullable<typeof t> => Boolean(t))
     .map((t) => ({
+      data: t.data_transacao,
+      criadoEm: t.created_at,
       descricao: t.descricao,
       valor: Number(t.valor),
       estabelecimento: t.estabelecimento?.nome ?? null,

@@ -32,6 +32,7 @@ import {
 import { atualizarAcao, votar } from "@/lib/nia/store";
 import { avancarDataRecorrencia, primeiraGeracao } from "@/lib/recorrencias";
 import { normalizarTexto } from "@/lib/normalize";
+import { hojeISO } from "@/lib/format";
 import {
   classificarItem,
   registrarCompraProduto,
@@ -60,11 +61,29 @@ async function carregarAcao(acaoId: string): Promise<AcaoRow | null> {
   return (data as AcaoRow | null) ?? null;
 }
 
-/** Itens (nome + valor) já lançados nesta conversa — base do dedupe ao confirmar. */
+/**
+ * Janela do dedupe: só conta como repetição o que foi registrado nos últimos
+ * minutos. O que essa rede pega é a Nia repropondo uma cesta que ela acabou de
+ * lançar — isso acontece em segundos, no mesmo assunto. Comprar a mesma coisa de
+ * manhã e de novo à tarde são DUAS compras e têm que passar.
+ */
+const JANELA_DEDUPE_MIN = 30;
+
+/**
+ * Itens (nome + valor) lançados nesta conversa na MESMA DATA e nos últimos
+ * JANELA_DEDUPE_MIN minutos — base do dedupe ao confirmar.
+ *
+ * Os dois filtros são essenciais e por motivos diferentes. Data: a conversa nunca
+ * é fechada (dura semanas), então sem ela uma compra recorrente — feira, padaria,
+ * mercado — bate com a da semana passada (mesmo produto, mesmo preço) e o item é
+ * descartado em silêncio. Hora: dentro do mesmo dia, a compra da tarde bate com a
+ * da manhã pelo mesmo motivo.
+ */
 async function itensLancadosNaConversa(
   supabase: ReturnType<typeof createClient>,
   conversaId: string,
   exceto: string,
+  data: string,
 ): Promise<{ nome: string; valorTotal: number | null }[]> {
   const { data: acoes } = await supabase
     .from("nia_acoes")
@@ -75,10 +94,19 @@ async function itensLancadosNaConversa(
     .not("registro_id", "is", null);
   const ids = ((acoes as { registro_id: string }[] | null) ?? []).map((a) => a.registro_id);
   if (ids.length === 0) return [];
+  const desde = new Date(Date.now() - JANELA_DEDUPE_MIN * 60_000).toISOString();
+  const { data: txs } = await supabase
+    .from("transacoes")
+    .select("id")
+    .in("id", ids)
+    .eq("data_transacao", data)
+    .gte("created_at", desde);
+  const idsRecentes = ((txs as { id: string }[] | null) ?? []).map((t) => t.id);
+  if (idsRecentes.length === 0) return [];
   const { data: itens } = await supabase
     .from("itens_transacao")
     .select("descricao_original, valor_total")
-    .in("transacao_id", ids);
+    .in("transacao_id", idsRecentes);
   return ((itens as { descricao_original: string; valor_total: number | null }[] | null) ?? []).map((i) => ({
     nome: i.descricao_original,
     valorTotal: i.valor_total != null ? Number(i.valor_total) : null,
@@ -180,7 +208,7 @@ export async function confirmarTransacao(
     tipo: d.tipo,
     descricao: d.descricao,
     valor: d.valor,
-    data_transacao: d.data_transacao ?? new Date().toISOString().slice(0, 10),
+    data_transacao: d.data_transacao ?? hojeISO(),
     categoria_id: categoriaId,
     meio_pagamento: d.meio_pagamento,
     cartao_id: pag.cartaoId,
@@ -217,7 +245,7 @@ export async function carregarPropostaEditavel(acaoId: string): Promise<Transaca
     tipo: d.tipo,
     descricao: d.descricao,
     valor: d.valor,
-    data_transacao: d.data_transacao ?? new Date().toISOString().slice(0, 10),
+    data_transacao: d.data_transacao ?? hojeISO(),
     categoria_id: cat?.id ?? "",
     meio_pagamento: d.meio_pagamento,
     cartao_id: pag.cartaoId ?? "",
@@ -293,11 +321,13 @@ export async function confirmarTransacaoDetalhada(
 
   const supabase = createClient();
   const ws = acao.workspace_id;
-  const data = d.data_transacao ?? new Date().toISOString().slice(0, 10);
+  const data = d.data_transacao ?? hojeISO();
 
-  // Rede de segurança: ignora itens idênticos (mesmo nome + mesmo valor) já lançados
-  // nesta conversa, para não duplicar quando a Nia repropõe uma cesta já registrada.
-  const lancadosPrev = await itensLancadosNaConversa(supabase, acao.conversa_id, acaoId);
+  // Rede de segurança: ignora itens idênticos (mesmo nome + mesmo valor) lançados
+  // nesta conversa no mesmo dia e nos últimos minutos, para não duplicar quando a
+  // Nia repropõe uma cesta que ela acabou de registrar. A janela curta é o que
+  // deixa passar compra recorrente (feira semanal) e a mesma compra manhã/tarde.
+  const lancadosPrev = await itensLancadosNaConversa(supabase, acao.conversa_id, acaoId, data);
   const jaLancado = (nome: string, vTotal: number): boolean =>
     vTotal > 0 &&
     lancadosPrev.some(
@@ -310,7 +340,7 @@ export async function confirmarTransacaoDetalhada(
   const inclusosIdx = selecionadosIdx.filter(({ it }) => !jaLancado(it.nome, valorItem(it)));
   const pulados = selecionadosIdx.length - inclusosIdx.length;
   if (inclusosIdx.length === 0) {
-    return { error: "Esses itens já tinham sido lançados nesta conversa." };
+    return { error: "Esses itens acabaram de ser lançados (mesmo dia, últimos minutos)." };
   }
 
   const valor = Number(inclusosIdx.reduce((s, { it }) => s + valorItem(it), 0).toFixed(2));
@@ -477,7 +507,7 @@ export async function confirmarConciliacao(
 
   // Faltando → lança como despesa de crédito, já conciliada e ligada à fatura.
   let lancados = 0;
-  const hoje = new Date().toISOString().slice(0, 10);
+  const hoje = hojeISO();
   for (const i of criarIdx) {
     const f = p.faltando[i];
     if (!f) continue;
@@ -531,7 +561,7 @@ export async function confirmarRecorrencia(acaoId: string): Promise<{ error?: st
 
   const supabase = createClient();
   const ws = acao.workspace_id;
-  const hoje = new Date().toISOString().slice(0, 10);
+  const hoje = hojeISO();
   const dataInicio = d.data_inicio ?? hoje;
   const cat = await resolverCategoriaCanonica(supabase, ws, d.categoria);
 

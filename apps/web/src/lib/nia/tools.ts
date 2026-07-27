@@ -21,7 +21,7 @@ import {
   listTransacoes,
   listarEventos,
 } from "@/lib/db/queries";
-import { formatBRL, formatDate } from "@/lib/format";
+import { formatBRL, formatDate, hojeISO } from "@/lib/format";
 import { FREQUENCIAS_RECORRENCIA, LABEL_ESSENCIALIDADE, LABEL_FREQUENCIA } from "@/lib/types/db";
 import { normalizarTexto } from "@/lib/normalize";
 import {
@@ -301,7 +301,7 @@ const lancarTransacao: NiaTool = {
   },
   async executar(args, ctx) {
     const d = valida(lancarTransacaoArgs, args);
-    const data = d.data_transacao ?? new Date().toISOString().slice(0, 10);
+    const data = d.data_transacao ?? hojeISO();
 
     // Zona cinza de estabelecimento (0.60–0.94 e não-exato) → pergunta inline no chat.
     let match: { candidatoId: string; sugestao: string; score: number } | null = null;
@@ -411,7 +411,7 @@ const lancarTransacaoDetalhada: NiaTool = {
   },
   async executar(args, ctx) {
     const d = valida(lancarTransacaoDetalhadaArgs, args);
-    const data = d.data_transacao ?? new Date().toISOString().slice(0, 10);
+    const data = d.data_transacao ?? hojeISO();
     const acaoId = await registrarAcao({
       workspaceId: ctx.workspaceId,
       profileId: ctx.profileId,
@@ -471,7 +471,7 @@ const criarRecorrencia: NiaTool = {
   },
   async executar(args, ctx) {
     const d = valida(criarRecorrenciaArgs, args);
-    const dataInicio = d.data_inicio ?? new Date().toISOString().slice(0, 10);
+    const dataInicio = d.data_inicio ?? hojeISO();
     const acaoId = await registrarAcao({
       workspaceId: ctx.workspaceId,
       profileId: ctx.profileId,
@@ -954,7 +954,7 @@ const conciliarFatura: NiaTool = {
     // Só linhas de compra (ignora créditos/pagamentos da fatura).
     const linhas = d.linhas.filter((l) => l.valor > 0);
     const datas = linhas.map((l) => l.data).filter((x): x is string => !!x).sort();
-    const hoje = new Date().toISOString().slice(0, 10);
+    const hoje = hojeISO();
     const lo = datas.length ? addDiasISO(datas[0]!, -7) : addDiasISO(hoje, -120);
     const hi = datas.length ? addDiasISO(datas[datas.length - 1]!, 7) : hoje;
 

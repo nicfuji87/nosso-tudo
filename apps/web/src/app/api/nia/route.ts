@@ -7,7 +7,7 @@ import {
   listCategorias,
   listRecorrencias,
 } from "@/lib/db/queries";
-import { formatBRL } from "@/lib/format";
+import { formatBRL, formatDate, formatHora } from "@/lib/format";
 import { LABEL_FREQUENCIA } from "@/lib/types/db";
 import { processarAnexos, removerMidias } from "@/lib/nia/anexos";
 import { calcularCusto, getApiKey, getNiaConfig } from "@/lib/nia/config";
@@ -264,22 +264,44 @@ async function handlePost(req: Request): Promise<Response> {
 
   // Lançamentos já confirmados nesta conversa: a Nia precisa saber o que já
   // registrou para não repropor a mesma compra/itens (ver getLancamentosDaConversa).
+  // A conversa NUNCA é fechada — ela dura semanas. Por isso cada linha vem com a
+  // data e a regra é comparar por data: sem isso a Nia lê a feira da semana
+  // passada como se fosse a de hoje e recusa itens que o usuário acabou de mandar
+  // (compra recorrente, mesmos produtos, preço parecido — falso positivo garantido).
   const lancados = await getLancamentosDaConversa(conversaId);
   if (lancados.length > 0) {
-    const linhas = lancados.map((l) => {
+    const linha = (l: (typeof lancados)[number], comHora: boolean): string => {
       const itens =
         l.itens.length > 0
           ? ` — itens: ${l.itens
               .map((i) => `${i.nome}${i.quantidade ? ` ×${i.quantidade}` : ""}`)
               .join(", ")}`
           : "";
-      return `- ${l.descricao} (${formatBRL(l.valor)})${
-        l.estabelecimento ? ` em ${l.estabelecimento}` : ""
-      }${itens}`;
-    });
+      return `- ${comHora ? `${formatHora(l.criadoEm)} · ` : ""}${l.descricao} (${formatBRL(
+        l.valor,
+      )})${l.estabelecimento ? ` em ${l.estabelecimento}` : ""}${itens}`;
+    };
+    const deHoje = lancados.filter((l) => l.data === hojeISO);
+    const deAntes = lancados.filter((l) => l.data !== hojeISO);
+    const blocos: string[] = [];
+    if (deHoje.length > 0) {
+      blocos.push(
+        `JÁ LANÇADO HOJE (${formatDate(hojeISO)}) — com a hora em que foi registrado:\n${deHoje
+          .map((l) => linha(l, true))
+          .join("\n")}`,
+      );
+    }
+    if (deAntes.length > 0) {
+      const porDia = new Map<string, typeof deAntes>();
+      for (const l of deAntes) porDia.set(l.data, [...(porDia.get(l.data) ?? []), l]);
+      const dias = [...porDia.entries()]
+        .sort((a, b) => b[0].localeCompare(a[0]))
+        .map(([dia, ls]) => `${formatDate(dia)}:\n${ls.map((l) => linha(l, false)).join("\n")}`);
+      blocos.push(`LANÇADO EM DIAS ANTERIORES (NÃO é duplicata de hoje):\n${dias.join("\n")}`);
+    }
     volatil.push(
-      `Já lançado nesta conversa (NÃO reproponha estes lançamentos nem itens já registrados; se o usuário citar algo que já está aqui, avise que já foi lançado em vez de criar de novo):\n${linhas.join(
-        "\n",
+      `Lançamentos já confirmados nesta conversa. ATENÇÃO: esta conversa é contínua e dura semanas — o que está aqui NÃO é tudo de hoje. Antes de dizer que algo "já foi lançado", COMPARE DATA E HORA: só é duplicata se for o mesmo item na MESMA data E no mesmo momento da compra. Compras que se repetem (feira, padaria, mercado, combustível) trazem os mesmos produtos por preços parecidos toda semana — isso é NORMAL e deve ser lançado. A mesma coisa comprada de manhã e de novo à tarde também são DUAS compras, não uma repetição: compare a hora do lançamento com a hora da mensagem do usuário. Se o usuário mandar itens agora, eles são de agora (ou da data/hora que ele disser), mesmo que sejam idênticos a uma compra anterior; na dúvida, pergunte em vez de descartar o item. Nunca omita itens da proposta por achar que são repetidos — proponha todos.\n\n${blocos.join(
+        "\n\n",
       )}`,
     );
   }
