@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Chip, ChipRow } from "@/components/nia/chip";
 import { Input } from "@/components/ui/input";
 import { TransacaoEditSheet } from "@/components/transacoes/transacao-edit-sheet";
 import { MoneyInput } from "@/components/transacoes/money-input";
@@ -46,6 +47,8 @@ import {
   rejeitarAcao,
   votarMensagem,
 } from "@/app/app/nia/actions";
+import { acharPagamento, ATALHOS_VAZIOS, type AtalhosNia } from "@/lib/nia/atalhos";
+import type { AjustesTransacao } from "@/app/app/nia/actions";
 import {
   LABEL_COMPORTAMENTO,
   LABEL_MEIO_PAGAMENTO,
@@ -150,6 +153,7 @@ export function NiaChat({
   mensagensIniciais = [],
   statusAcoes = {},
   perfilVazio = false,
+  atalhos = ATALHOS_VAZIOS,
 }: {
   nome: string;
   workspaceId: string;
@@ -159,6 +163,8 @@ export function NiaChat({
   statusAcoes?: Record<string, string>;
   /** Perfil da família ainda vazio → saudação de boas-vindas que abre a entrevista. */
   perfilVazio?: boolean;
+  /** Balões de resposta rápida (beneficiário e pagamento) montados dos cadastros. */
+  atalhos?: AtalhosNia;
 }) {
   const saudacao = perfilVazio
     ? `Oi, ${nome}! Sou a Nia, sua assistente aqui no Nosso Tudo 💚 Eu organizo os gastos da família, leio notas e faturas, cuido das contas fixas e respondo suas perguntas — sempre pedindo sua confirmação. Pra eu te conhecer e ajudar melhor, me conta rapidinho: quem mora com você e quem são as pessoas da família?`
@@ -185,6 +191,10 @@ export function NiaChat({
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [anexos, setAnexos] = useState<PendingAnexo[]>([]);
+  // Chips do compositor: viram texto na hora do envio, não no campo — assim o
+  // usuário pode digitar e marcar em qualquer ordem, e desmarcar sem apagar.
+  const [chipBenef, setChipBenef] = useState<string | null>(null);
+  const [chipPag, setChipPag] = useState<number | null>(null);
   const [gravando, setGravando] = useState(false);
   const [transcrevendo, setTranscrevendo] = useState(false);
   const conversaId = useRef<string | undefined>(conversaIdInicial);
@@ -214,6 +224,8 @@ export function NiaChat({
     conversaId.current = undefined;
     setInput("");
     setAnexos([]);
+    setChipBenef(null);
+    setChipPag(null);
     setMsgs(
       bolhaAlertas
         ? [bolhaAlertas, { id: "intro", autor: "nia", texto: saudacao, widgets: [] }]
@@ -314,13 +326,17 @@ export function NiaChat({
   }
 
   async function enviar() {
-    const texto = input.trim();
+    const pagEscolhido = chipPag != null ? atalhos.pagamentos[chipPag] : null;
+    const extras = [chipBenef ? `para ${chipBenef}` : null, pagEscolhido?.frase ?? null];
+    const texto = [input.trim(), ...extras].filter(Boolean).join(", ");
     const prontos = anexos.filter((a) => a.pronto);
     if (loading || anexos.some((a) => !a.pronto)) return;
     if (!texto && prontos.length === 0) return;
     setInput("");
     if (inputRef.current) inputRef.current.style.height = "auto";
     setAnexos([]);
+    setChipBenef(null);
+    setChipPag(null);
     setMsgs((m) => [
       ...m,
       {
@@ -474,7 +490,12 @@ export function NiaChat({
                 </div>
               )}
               {m.widgets.map((w, i) => (
-                <WidgetView key={i} widget={w} statusAcoes={statusAcoesIniciais.current} />
+                <WidgetView
+                  key={i}
+                  widget={w}
+                  statusAcoes={statusAcoesIniciais.current}
+                  atalhos={atalhos}
+                />
               ))}
               {m.autor === "nia" && m.mensagemId && <Feedback mensagemId={m.mensagemId} />}
             </div>
@@ -534,6 +555,38 @@ export function NiaChat({
             e.target.value = "";
           }}
         />
+        {(atalhos.beneficiarios.length > 0 || atalhos.pagamentos.length > 0) && (
+          <div className="mb-1.5 space-y-1.5 px-1">
+            {atalhos.beneficiarios.length > 0 && (
+              <ChipRow>
+                {atalhos.beneficiarios.map((b) => (
+                  <Chip
+                    key={b}
+                    ativo={chipBenef === b}
+                    disabled={loading}
+                    onClick={() => setChipBenef((v) => (v === b ? null : b))}
+                  >
+                    {b}
+                  </Chip>
+                ))}
+              </ChipRow>
+            )}
+            {atalhos.pagamentos.length > 0 && (
+              <ChipRow>
+                {atalhos.pagamentos.map((p, i) => (
+                  <Chip
+                    key={p.label}
+                    ativo={chipPag === i}
+                    disabled={loading}
+                    onClick={() => setChipPag((v) => (v === i ? null : i))}
+                  >
+                    {p.label}
+                  </Chip>
+                ))}
+              </ChipRow>
+            )}
+          </div>
+        )}
         <textarea
           ref={inputRef}
           value={input}
@@ -588,7 +641,11 @@ export function NiaChat({
           <Button
             size="icon"
             onClick={enviar}
-            disabled={loading || anexos.some((a) => !a.pronto) || (!input.trim() && anexos.length === 0)}
+            disabled={
+              loading ||
+              anexos.some((a) => !a.pronto) ||
+              (!input.trim() && anexos.length === 0 && !chipBenef && chipPag == null)
+            }
             aria-label="Enviar"
           >
             <Send className="size-4" />
@@ -651,9 +708,11 @@ function estadoFromStatus(status: string | undefined): EstadoAcao {
 function WidgetView({
   widget,
   statusAcoes = {},
+  atalhos = ATALHOS_VAZIOS,
 }: {
   widget: NiaWidget;
   statusAcoes?: Record<string, string>;
+  atalhos?: AtalhosNia;
 }) {
   const acaoId = "acaoId" in widget ? widget.acaoId : undefined;
   const estadoInicial = estadoFromStatus(acaoId ? statusAcoes[acaoId] : undefined);
@@ -663,7 +722,14 @@ function WidgetView({
     case "resumo_periodo":
       return <ResumoPeriodoCard w={widget} />;
     case "confirmar_transacao":
-      return <ConfirmarTransacaoCard w={widget} estadoInicial={estadoInicial} historico={historico} />;
+      return (
+        <ConfirmarTransacaoCard
+          w={widget}
+          estadoInicial={estadoInicial}
+          historico={historico}
+          atalhos={atalhos}
+        />
+      );
     case "checklist_itens":
       return <ChecklistItensCard w={widget} estadoInicial={estadoInicial} />;
     case "conciliacao_fatura":
@@ -836,29 +902,48 @@ function ConfirmarTransacaoCard({
   w,
   estadoInicial = "idle",
   historico = false,
+  atalhos = ATALHOS_VAZIOS,
 }: {
   w: WidgetConfirmarTransacao;
   estadoInicial?: EstadoAcao;
   historico?: boolean;
+  atalhos?: AtalhosNia;
 }) {
   const [estado, setEstado] = useState<EstadoAcao>(estadoInicial);
   const [erro, setErro] = useState<string | null>(null);
   const [decisao, setDecisao] = useState<"mesmo" | "outro">("mesmo");
   const [editando, setEditando] = useState(false);
+  // Chips do card: abrem já marcados no que a Nia propôs; trocar aqui evita
+  // abrir o formulário só para corrigir "para quem" ou "como pagou".
+  const [benef, setBenef] = useState<string | null>(w.beneficiario);
+  const [pag, setPag] = useState<number | null>(() =>
+    acharPagamento(atalhos.pagamentos, w.meioPagamento, w.pagamento),
+  );
 
+  const pagEscolhido = pag != null ? atalhos.pagamentos[pag] : null;
   const detalhes = [LABEL_TIPO_TRANSACAO[w.tipoTransacao], w.categoria, w.estabelecimento]
     .filter(Boolean)
     .join(" · ");
-  const pagamento = [w.meioPagamento ? LABEL_MEIO_PAGAMENTO[w.meioPagamento] : null, w.pagamento]
-    .filter(Boolean)
-    .join(" · ");
-  const linha2 = [pagamento, w.beneficiario ? `para ${w.beneficiario}` : null, w.data ? formatDate(w.data) : null]
+  const pagamento = pagEscolhido
+    ? [LABEL_MEIO_PAGAMENTO[pagEscolhido.meio], pagEscolhido.cartao ?? pagEscolhido.conta]
+        .filter(Boolean)
+        .join(" · ")
+    : [w.meioPagamento ? LABEL_MEIO_PAGAMENTO[w.meioPagamento] : null, w.pagamento]
+        .filter(Boolean)
+        .join(" · ");
+  const linha2 = [pagamento, benef ? `para ${benef}` : null, w.data ? formatDate(w.data) : null]
     .filter(Boolean)
     .join(" · ");
 
   async function confirmar() {
     setEstado("salvando");
-    const r = await confirmarTransacao(w.acaoId, w.match ? decisao : undefined);
+    const ajustes: AjustesTransacao = {
+      beneficiario: benef ?? undefined,
+      meioPagamento: pagEscolhido?.meio,
+      cartao: pagEscolhido?.cartao,
+      conta: pagEscolhido?.conta,
+    };
+    const r = await confirmarTransacao(w.acaoId, w.match ? decisao : undefined, ajustes);
     if (r.error) {
       setErro(r.error);
       setEstado("erro");
@@ -958,6 +1043,42 @@ function ConfirmarTransacaoCard({
       {estado === "desfeito" && <p className="mt-3 text-body-sm text-muted-foreground">Desfeito.</p>}
       {estado === "descartado" && <p className="mt-3 text-body-sm text-muted-foreground">Descartado.</p>}
       {estado === "erro" && <p className="mt-3 text-body-sm text-destructive">{erro}</p>}
+
+      {editavel && atalhos.beneficiarios.length > 0 && (
+        <div className="mt-3">
+          <p className="mb-1.5 text-caption text-muted-foreground">Para quem?</p>
+          <ChipRow>
+            {atalhos.beneficiarios.map((b) => (
+              <Chip
+                key={b}
+                ativo={benef === b}
+                disabled={estado === "salvando"}
+                onClick={() => setBenef((v) => (v === b ? null : b))}
+              >
+                {b}
+              </Chip>
+            ))}
+          </ChipRow>
+        </div>
+      )}
+
+      {editavel && atalhos.pagamentos.length > 0 && (
+        <div className="mt-2">
+          <p className="mb-1.5 text-caption text-muted-foreground">Como pagou?</p>
+          <ChipRow>
+            {atalhos.pagamentos.map((p, i) => (
+              <Chip
+                key={p.label}
+                ativo={pag === i}
+                disabled={estado === "salvando"}
+                onClick={() => setPag((v) => (v === i ? null : i))}
+              >
+                {p.label}
+              </Chip>
+            ))}
+          </ChipRow>
+        </div>
+      )}
 
       {editavel && (
         <div className="mt-3 flex flex-wrap gap-2">

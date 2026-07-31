@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { NiaChat } from "@/components/nia/nia-chat";
 import { NIA_FEATURE } from "@/lib/nia/schemas";
+import { getAtalhos } from "@/lib/nia/atalhos-server";
 import { getPerfilFamilia } from "@/app/app/perfil/actions";
 
 export const metadata: Metadata = { title: "Nia · Nosso Tudo" };
@@ -39,10 +40,11 @@ export default async function NiaPage() {
   }
 
   const primeiroNome = ctx.profile.nome.split(" ")[0] ?? ctx.profile.nome;
-  const [alertas, conversaId, perfilFam] = await Promise.all([
+  const [alertas, conversaId, perfilFam, atalhos] = await Promise.all([
     getAlertas(ctx.workspace.id),
     getConversaAtiva(ctx.workspace.id),
     getPerfilFamilia(),
+    getAtalhos(ctx.workspace.id),
   ]);
   const perfilVazio =
     !perfilFam.sobre && !perfilFam.financas && !perfilFam.objetivos && !perfilFam.observacoes;
@@ -59,6 +61,7 @@ export default async function NiaPage() {
       mensagensIniciais={mensagens}
       statusAcoes={statusAcoes}
       perfilVazio={perfilVazio}
+      atalhos={atalhos}
     />
   );
 }
