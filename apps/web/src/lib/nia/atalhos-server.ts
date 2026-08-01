@@ -23,13 +23,12 @@ export async function getAtalhos(workspaceId: string): Promise<AtalhosNia> {
   const pagamentos: AtalhoPagamento[] = [
     ...cartoes.map((c) => ({
       label: c.apelido,
-      frase: `no ${c.apelido}`,
       meio: "cartao_credito" as MeioPagamento,
       cartao: c.apelido,
     })),
-    { label: "Pix", frase: "no Pix", meio: "pix", conta: contaUnica },
-    { label: "Débito", frase: "no débito", meio: "cartao_debito", conta: contaUnica },
-    { label: "Dinheiro", frase: "em dinheiro", meio: "dinheiro" },
+    { label: "Pix", meio: "pix", conta: contaUnica },
+    { label: "Débito", meio: "cartao_debito", conta: contaUnica },
+    { label: "Dinheiro", meio: "dinheiro" },
   ];
 
   return {

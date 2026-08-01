@@ -191,10 +191,6 @@ export function NiaChat({
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [anexos, setAnexos] = useState<PendingAnexo[]>([]);
-  // Chips do compositor: viram texto na hora do envio, não no campo — assim o
-  // usuário pode digitar e marcar em qualquer ordem, e desmarcar sem apagar.
-  const [chipBenef, setChipBenef] = useState<string | null>(null);
-  const [chipPag, setChipPag] = useState<number | null>(null);
   const [gravando, setGravando] = useState(false);
   const [transcrevendo, setTranscrevendo] = useState(false);
   const conversaId = useRef<string | undefined>(conversaIdInicial);
@@ -224,8 +220,6 @@ export function NiaChat({
     conversaId.current = undefined;
     setInput("");
     setAnexos([]);
-    setChipBenef(null);
-    setChipPag(null);
     setMsgs(
       bolhaAlertas
         ? [bolhaAlertas, { id: "intro", autor: "nia", texto: saudacao, widgets: [] }]
@@ -326,17 +320,13 @@ export function NiaChat({
   }
 
   async function enviar() {
-    const pagEscolhido = chipPag != null ? atalhos.pagamentos[chipPag] : null;
-    const extras = [chipBenef ? `para ${chipBenef}` : null, pagEscolhido?.frase ?? null];
-    const texto = [input.trim(), ...extras].filter(Boolean).join(", ");
+    const texto = input.trim();
     const prontos = anexos.filter((a) => a.pronto);
     if (loading || anexos.some((a) => !a.pronto)) return;
     if (!texto && prontos.length === 0) return;
     setInput("");
     if (inputRef.current) inputRef.current.style.height = "auto";
     setAnexos([]);
-    setChipBenef(null);
-    setChipPag(null);
     setMsgs((m) => [
       ...m,
       {
@@ -555,38 +545,6 @@ export function NiaChat({
             e.target.value = "";
           }}
         />
-        {(atalhos.beneficiarios.length > 0 || atalhos.pagamentos.length > 0) && (
-          <div className="mb-1.5 space-y-1.5 px-1">
-            {atalhos.beneficiarios.length > 0 && (
-              <ChipRow>
-                {atalhos.beneficiarios.map((b) => (
-                  <Chip
-                    key={b}
-                    ativo={chipBenef === b}
-                    disabled={loading}
-                    onClick={() => setChipBenef((v) => (v === b ? null : b))}
-                  >
-                    {b}
-                  </Chip>
-                ))}
-              </ChipRow>
-            )}
-            {atalhos.pagamentos.length > 0 && (
-              <ChipRow>
-                {atalhos.pagamentos.map((p, i) => (
-                  <Chip
-                    key={p.label}
-                    ativo={chipPag === i}
-                    disabled={loading}
-                    onClick={() => setChipPag((v) => (v === i ? null : i))}
-                  >
-                    {p.label}
-                  </Chip>
-                ))}
-              </ChipRow>
-            )}
-          </div>
-        )}
         <textarea
           ref={inputRef}
           value={input}
@@ -641,11 +599,7 @@ export function NiaChat({
           <Button
             size="icon"
             onClick={enviar}
-            disabled={
-              loading ||
-              anexos.some((a) => !a.pronto) ||
-              (!input.trim() && anexos.length === 0 && !chipBenef && chipPag == null)
-            }
+            disabled={loading || anexos.some((a) => !a.pronto) || (!input.trim() && anexos.length === 0)}
             aria-label="Enviar"
           >
             <Send className="size-4" />

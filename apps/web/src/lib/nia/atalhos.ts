@@ -10,8 +10,6 @@ import type { MeioPagamento } from "@/lib/types/db";
 export interface AtalhoPagamento {
   /** Rótulo curto do chip: "Nubank", "Pix", "Dinheiro". */
   label: string;
-  /** Como isso entra no texto da mensagem: "no Nubank", "no Pix". */
-  frase: string;
   meio: MeioPagamento;
   /** Apelido do cartão, quando o chip aponta para um cartão específico. */
   cartao?: string;
