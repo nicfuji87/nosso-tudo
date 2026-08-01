@@ -33,6 +33,7 @@ import { atualizarAcao, votar } from "@/lib/nia/store";
 import { avancarDataRecorrencia, primeiraGeracao } from "@/lib/recorrencias";
 import { normalizarTexto } from "@/lib/normalize";
 import { hojeISO } from "@/lib/format";
+import type { MeioPagamento } from "@/lib/types/db";
 import {
   classificarItem,
   registrarCompraProduto,
@@ -160,13 +161,28 @@ async function resolverPagamento(
 }
 
 /**
+ * Correções rápidas que o usuário faz pelos chips do card, sem abrir o
+ * formulário completo. Cada campo ausente mantém o que a Nia propôs.
+ */
+export interface AjustesTransacao {
+  beneficiario?: string;
+  meioPagamento?: MeioPagamento;
+  /** Apelido do cartão escolhido no chip. */
+  cartao?: string;
+  /** Apelido da conta escolhida no chip. */
+  conta?: string;
+}
+
+/**
  * Executa o lançamento proposto pela Nia, após confirmação do usuário.
  * `decisaoMatch` resolve a zona cinza de estabelecimento: "mesmo" vincula ao
  * candidato (e aprende o apelido); "outro" cria um estabelecimento novo.
+ * `ajustes` traz as trocas feitas nos chips (beneficiário / meio de pagamento).
  */
 export async function confirmarTransacao(
   acaoId: string,
   decisaoMatch?: "mesmo" | "outro",
+  ajustes?: AjustesTransacao,
 ): Promise<{ error?: string; ok?: boolean }> {
   const acao = await carregarAcao(acaoId);
   if (!acao) return { error: "Ação não encontrada." };
@@ -192,9 +208,18 @@ export async function confirmarTransacao(
     if (d.estabelecimento) await adicionarApelido(match.candidatoId, d.estabelecimento);
   }
 
-  const pag = await resolverPagamento(supabaseTx, acao.workspace_id, d.cartao, d.conta);
-  const beneficiarioId = d.beneficiario
-    ? await resolverEntidade(acao.workspace_id, d.beneficiario)
+  // Trocar o meio pelo chip descarta cartão/conta da proposta: senão sobraria o
+  // cartão antigo pendurado num pagamento que virou Pix.
+  const trocouPagamento = Boolean(ajustes?.meioPagamento);
+  const pag = await resolverPagamento(
+    supabaseTx,
+    acao.workspace_id,
+    trocouPagamento ? ajustes?.cartao : d.cartao,
+    trocouPagamento ? ajustes?.conta : d.conta,
+  );
+  const beneficiario = ajustes?.beneficiario ?? d.beneficiario;
+  const beneficiarioId = beneficiario
+    ? await resolverEntidade(acao.workspace_id, beneficiario)
     : undefined;
 
   const res = await criarTransacao({
@@ -203,7 +228,7 @@ export async function confirmarTransacao(
     valor: d.valor,
     data_transacao: d.data_transacao ?? hojeISO(),
     categoria_id: categoriaId,
-    meio_pagamento: d.meio_pagamento,
+    meio_pagamento: ajustes?.meioPagamento ?? d.meio_pagamento,
     cartao_id: pag.cartaoId,
     conta_id: pag.contaId,
     beneficiario_id: beneficiarioId,
