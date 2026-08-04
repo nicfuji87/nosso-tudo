@@ -10,6 +10,8 @@ import type { MeioPagamento } from "@/lib/types/db";
 export interface AtalhoPagamento {
   /** Rótulo curto do chip: "Nubank", "Pix", "Dinheiro". */
   label: string;
+  /** Como isso entra no texto da mensagem: "no Nubank", "no Pix". */
+  frase: string;
   meio: MeioPagamento;
   /** Apelido do cartão, quando o chip aponta para um cartão específico. */
   cartao?: string;
@@ -24,23 +26,3 @@ export interface AtalhosNia {
 }
 
 export const ATALHOS_VAZIOS: AtalhosNia = { beneficiarios: [], pagamentos: [] };
-
-/**
- * Índice do chip que corresponde ao pagamento já proposto pela Nia — para o
- * card abrir com a opção certa marcada. Casa por meio + apelido; se o apelido
- * não bate em nada, cai no primeiro chip do mesmo meio.
- */
-export function acharPagamento(
-  lista: AtalhoPagamento[],
-  meio: MeioPagamento | null,
-  apelido: string | null,
-): number | null {
-  if (!meio) return null;
-  const norm = (s: string) => s.trim().toLowerCase();
-  if (apelido) {
-    const exato = lista.findIndex((p) => p.meio === meio && norm(p.label) === norm(apelido));
-    if (exato >= 0) return exato;
-  }
-  const primeiro = lista.findIndex((p) => p.meio === meio);
-  return primeiro >= 0 ? primeiro : null;
-}
