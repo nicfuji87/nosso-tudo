@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2, MailCheck } from "lucide-react";
 import { cadastroSchema, type CadastroInput } from "@/lib/schemas/auth";
 import { createClient } from "@/lib/supabase/client";
+import { buildAuthRedirect } from "@/lib/auth-redirect";
 import { traduzErroAuth } from "@/lib/auth-errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,7 +31,7 @@ export function SignupForm() {
       password: values.senha,
       options: {
         data: { nome: values.nome },
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=/onboarding`,
+        emailRedirectTo: buildAuthRedirect("/onboarding"),
       },
     });
     if (error) {

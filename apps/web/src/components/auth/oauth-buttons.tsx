@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
+import { buildAuthRedirect } from "@/lib/auth-redirect";
 import { toast } from "@/components/ui/sonner";
 
 export function GoogleButton({ next = "/app" }: { next?: string }) {
@@ -14,7 +15,7 @@ export function GoogleButton({ next = "/app" }: { next?: string }) {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+        redirectTo: buildAuthRedirect(next),
         queryParams: { access_type: "offline", prompt: "consent" },
       },
     });

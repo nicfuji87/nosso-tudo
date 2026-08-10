@@ -8,6 +8,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2 } from "lucide-react";
 import { loginSchema, type LoginInput } from "@/lib/schemas/auth";
 import { createClient } from "@/lib/supabase/client";
+import { buildAuthRedirect } from "@/lib/auth-redirect";
 import { traduzErroAuth } from "@/lib/auth-errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,7 @@ export function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const next = params.get("redirect") || "/app";
+  const erro = params.get("erro");
   const [magicLoading, setMagicLoading] = useState(false);
 
   const {
@@ -53,7 +55,7 @@ export function LoginForm() {
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}` },
+      options: { emailRedirectTo: buildAuthRedirect(next) },
     });
     setMagicLoading(false);
     if (error) {
@@ -65,6 +67,16 @@ export function LoginForm() {
 
   return (
     <div className="space-y-5">
+      {erro && (
+        <p
+          role="alert"
+          className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-body-sm text-destructive"
+        >
+          {erro === "link_invalido"
+            ? "Esse link expirou ou já foi usado. Entre novamente."
+            : traduzErroAuth(erro)}
+        </p>
+      )}
       <GoogleButton next={next} />
       <Divider />
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>

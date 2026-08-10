@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2, MailCheck } from "lucide-react";
 import { esqueciSenhaSchema, type EsqueciSenhaInput } from "@/lib/schemas/auth";
 import { createClient } from "@/lib/supabase/client";
+import { buildAuthRedirect } from "@/lib/auth-redirect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,7 +23,7 @@ export function ForgotForm() {
   async function onSubmit(values: EsqueciSenhaInput) {
     const supabase = createClient();
     await supabase.auth.resetPasswordForEmail(values.email, {
-      redirectTo: `${window.location.origin}/auth/callback?next=/redefinir-senha`,
+      redirectTo: buildAuthRedirect("/redefinir-senha"),
     });
     // Sempre mostra sucesso (não revelar se o e-mail existe)
     setSent(true);

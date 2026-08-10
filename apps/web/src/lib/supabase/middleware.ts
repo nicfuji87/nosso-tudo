@@ -5,8 +5,31 @@ import { NextResponse, type NextRequest } from "next/server";
 const PROTECTED_PREFIXES = ["/app", "/onboarding"];
 /** Rotas de autenticação que usuários logados não devem ver. */
 const AUTH_ROUTES = ["/entrar", "/cadastrar"];
+/**
+ * Onde o GoTrue aterrissa quando recusa o `redirect_to` e cai no Site URL.
+ * Nesses casos o `?code=` chega numa página que não sabe trocá-lo por sessão.
+ */
+const CALLBACK_FALLBACK_PATHS = ["/", "/entrar", "/cadastrar"];
+
+/**
+ * Repassa para o handler de callback um `?code=`/`token_hash` que aterrissou na
+ * página errada. Rede de segurança: sem isso, uma allow-list de Redirect URLs
+ * incompleta no Supabase faz o login "não pegar" na primeira tentativa.
+ */
+function resgatarCallback(request: NextRequest): NextResponse | null {
+  const { pathname, searchParams } = request.nextUrl;
+  if (!CALLBACK_FALLBACK_PATHS.includes(pathname)) return null;
+  if (!searchParams.has("code") && !searchParams.has("token_hash")) return null;
+
+  const url = request.nextUrl.clone();
+  url.pathname = "/auth/callback";
+  return NextResponse.redirect(url);
+}
 
 export async function updateSession(request: NextRequest) {
+  const resgate = resgatarCallback(request);
+  if (resgate) return resgate;
+
   let response = NextResponse.next({ request });
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -44,14 +67,26 @@ export async function updateSession(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = "/entrar";
     url.searchParams.set("redirect", pathname);
-    return NextResponse.redirect(url);
+    return redirecionar(url, response);
   }
 
   if (user && isAuthRoute) {
     const url = request.nextUrl.clone();
     url.pathname = "/app";
-    return NextResponse.redirect(url);
+    url.searchParams.delete("redirect");
+    return redirecionar(url, response);
   }
 
   return response;
+}
+
+/**
+ * Redireciona preservando os cookies que o Supabase escreveu em `response`
+ * (o getUser pode ter rotacionado o token). Criar um NextResponse novo sem
+ * copiá-los descarta a sessão renovada e derruba o usuário no login.
+ */
+function redirecionar(url: URL, response: NextResponse): NextResponse {
+  const redirect = NextResponse.redirect(url);
+  response.cookies.getAll().forEach((cookie) => redirect.cookies.set(cookie));
+  return redirect;
 }
