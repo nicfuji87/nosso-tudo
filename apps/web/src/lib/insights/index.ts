@@ -49,10 +49,18 @@ const FATOR_ANUAL: Record<FrequenciaRecorrencia, number> = {
 /** Compras "miúdas" abaixo deste valor entram no radar de gastos invisíveis. */
 const LIMITE_INVISIVEL = 35;
 
-function inicioDoMes(): string {
-  const d = new Date();
-  d.setDate(1);
-  return d.toISOString().slice(0, 10);
+/**
+ * Mês em análise. O Início navega mês a mês, então as regras precisam saber
+ * qual janela olhar — e como se referir a ela no texto.
+ */
+export interface JanelaDescobertas {
+  /** YYYY-MM-DD inclusivo */
+  inicio: string;
+  /** YYYY-MM-DD exclusivo */
+  fim: string;
+  /** "Julho de 2026" — usado quando não é o mês corrente */
+  label: string;
+  ehMesAtual: boolean;
 }
 
 /**
@@ -111,7 +119,10 @@ async function assinaturasFantasma(workspaceId: string): Promise<Descoberta | nu
  * Soma das compras pequenas (< R$ 35) confirmadas no mês — os "vazamentos" que
  * não quebram numa compra só, mas somados pesam.
  */
-async function gastosInvisiveis(workspaceId: string): Promise<Descoberta | null> {
+async function gastosInvisiveis(
+  workspaceId: string,
+  janela: JanelaDescobertas,
+): Promise<Descoberta | null> {
   const supabase = createClient();
   // Cada "compra pequena" é uma transação inteira abaixo do limite (padaria,
   // café, app…). Itens dentro de uma compra grande não contam — esses são
@@ -122,7 +133,8 @@ async function gastosInvisiveis(workspaceId: string): Promise<Descoberta | null>
     .eq("workspace_id", workspaceId)
     .eq("tipo", "despesa")
     .eq("status_revisao", "confirmado")
-    .gte("data_transacao", inicioDoMes())
+    .gte("data_transacao", janela.inicio)
+    .lt("data_transacao", janela.fim)
     .gt("valor", 0)
     .lt("valor", LIMITE_INVISIVEL)
     .order("valor", { ascending: false });
@@ -139,7 +151,9 @@ async function gastosInvisiveis(workspaceId: string): Promise<Descoberta | null>
     severidade: "atencao",
     emoji: "💧",
     titulo: "Gastos invisíveis somam",
-    detalhe: `${rows.length} compras abaixo de ${limiteFmt} este mês — toque para ver`,
+    detalhe: `${rows.length} compras abaixo de ${limiteFmt} ${
+      janela.ehMesAtual ? "este mês" : `em ${janela.label.toLowerCase()}`
+    } — toque para ver`,
     valor: total,
     href: "/app/transacoes",
     itens: rows.map((r) => ({
@@ -152,11 +166,18 @@ async function gastosInvisiveis(workspaceId: string): Promise<Descoberta | null>
   };
 }
 
-/** Roda todas as regras em paralelo e devolve as descobertas encontradas. */
-export async function getDescobertas(workspaceId: string): Promise<Descoberta[]> {
+/**
+ * Roda as regras aplicáveis à janela e devolve as descobertas encontradas.
+ * Assinaturas fantasma só aparecem no mês corrente: é um retrato do que está
+ * ativo agora, não teria sentido "descobrir" isso olhando um mês fechado.
+ */
+export async function getDescobertas(
+  workspaceId: string,
+  janela: JanelaDescobertas,
+): Promise<Descoberta[]> {
   const resultados = await Promise.all([
-    assinaturasFantasma(workspaceId),
-    gastosInvisiveis(workspaceId),
+    janela.ehMesAtual ? assinaturasFantasma(workspaceId) : null,
+    gastosInvisiveis(workspaceId, janela),
   ]);
   return resultados.filter((d): d is Descoberta => d !== null);
 }

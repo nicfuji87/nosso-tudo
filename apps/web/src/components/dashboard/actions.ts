@@ -408,3 +408,50 @@ export async function removerLancamentoDoEvento(
   revalidatePath("/app/relatorios");
   return { ok: true };
 }
+
+/* ------------------------------------------------------------------ *
+ * Contas fixas — baixa manual e desfazer
+ * ------------------------------------------------------------------ */
+
+function revalidarContasFixas() {
+  revalidatePath("/app");
+  revalidatePath("/app/inbox");
+  revalidatePath("/app/transacoes");
+  revalidatePath("/app/relatorios");
+}
+
+/**
+ * Baixa manual: confirma o vencimento gerado pelo cron — o mesmo que
+ * aprovar na Pré-conferência. Para quando a conciliação automática não
+ * pegou (descrição muito solta) ou o usuário prefere resolver na hora.
+ */
+export async function marcarContaFixaPaga(
+  transacaoId: string,
+  valor?: number,
+): Promise<{ error?: string }> {
+  const supabase = createClient();
+  const patch: { status_revisao: "confirmado"; valor?: number } = { status_revisao: "confirmado" };
+  // Conta que varia (luz, água): confirma já com o valor certo.
+  if (valor !== undefined) {
+    if (!(valor > 0)) return { error: "Informe um valor maior que zero." };
+    patch.valor = valor;
+  }
+  // O RLS garante que só dá pra mexer em transação do próprio workspace.
+  const { error } = await supabase
+    .from("transacoes")
+    .update(patch)
+    .eq("id", transacaoId)
+    .eq("status_revisao", "sugerido");
+  if (error) return { error: "Não foi possível dar baixa." };
+  revalidarContasFixas();
+  return {};
+}
+
+/** Desfaz uma baixa feita pela conciliação automática (RPC 0038). */
+export async function desfazerBaixaContaFixa(transacaoId: string): Promise<{ error?: string }> {
+  const supabase = createClient();
+  const { error } = await supabase.rpc("desvincular_conta_fixa", { p_transacao_id: transacaoId });
+  if (error) return { error: "Não foi possível desfazer a baixa." };
+  revalidarContasFixas();
+  return {};
+}

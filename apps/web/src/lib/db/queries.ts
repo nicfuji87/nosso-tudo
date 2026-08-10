@@ -409,6 +409,9 @@ export interface TransacaoFilters {
   offset?: number;
   /** "data" (padrão, por data da compra) ou "criacao" (último lançado primeiro). */
   ordenarPor?: "data" | "criacao";
+  /** Recorte por data da transação: `inicio` inclusivo, `fim` exclusivo (YYYY-MM-DD). */
+  inicio?: string;
+  fim?: string;
 }
 
 export async function listTransacoes(
@@ -416,7 +419,13 @@ export async function listTransacoes(
   filters: TransacaoFilters = {},
 ): Promise<TransacaoComRelacoes[]> {
   const supabase = createClient();
-  let query = supabase.from("transacoes").select(TX_SELECT).eq("workspace_id", workspaceId);
+  // 'rejeitado' é linha aposentada, não lançamento: vencimento de conta fixa
+  // que outro lançamento já quitou (ver migration 0038). Nunca vai pra lista.
+  let query = supabase
+    .from("transacoes")
+    .select(TX_SELECT)
+    .eq("workspace_id", workspaceId)
+    .neq("status_revisao", "rejeitado");
   // "criacao" = ordem de lançamento (o que foi registrado por último vem primeiro).
   if (filters.ordenarPor === "criacao") {
     query = query.order("created_at", { ascending: false });
@@ -432,6 +441,8 @@ export async function listTransacoes(
   if (filters.tipo) query = query.eq("tipo", filters.tipo);
   if (filters.categoriaId) query = query.eq("categoria_id", filters.categoriaId);
   if (filters.busca) query = query.ilike("descricao", `%${filters.busca}%`);
+  if (filters.inicio) query = query.gte("data_transacao", filters.inicio);
+  if (filters.fim) query = query.lt("data_transacao", filters.fim);
 
   const { data } = await query;
   return (data as TransacaoComRelacoes[] | null) ?? [];
@@ -1414,4 +1425,127 @@ export async function listColecoes(workspaceId: string): Promise<ColecaoResumo[]
       valor: r.valor_final ?? r.valor_estimado ?? r.orcamento_previsto ?? null,
     };
   });
+}
+
+/* ------------------------------------------------------------------ *
+ * Contas fixas do mês (Início)
+ * ------------------------------------------------------------------ */
+
+export interface ContaFixaMes {
+  /** id da transação da ocorrência; null quando ainda é só previsão */
+  transacaoId: string | null;
+  recorrenciaId: string;
+  /** nome da conta fixa (descrição da recorrência) */
+  nome: string;
+  /** o que está escrito na transação — difere do nome quando a baixa veio
+   *  de um lançamento avulso ("Paguei a conta da Neoenergia") */
+  descricao: string | null;
+  valorPrevisto: number;
+  /** valor efetivamente lançado; null quando ainda é previsão */
+  valor: number | null;
+  /** vencimento (ou data do pagamento, quando pago) */
+  data: string;
+  paga: boolean;
+  /** venceu e ninguém deu baixa */
+  atrasada: boolean;
+  /** a baixa veio de um lançamento avulso, não da confirmação do vencimento */
+  baixaPorLancamento: boolean;
+}
+
+/**
+ * Contas fixas de um mês, ocorrência a ocorrência — quinzenal e semanal
+ * aparecem várias vezes, como devem.
+ *
+ * Combina duas fontes: os vencimentos que o cron já materializou (0019) e
+ * a projeção do que ainda vai vencer até o fim do mês. Sem a projeção, a
+ * tela mostraria só o que já passou — o cron não trabalha adiantado.
+ */
+export async function getContasFixasDoMes(
+  workspaceId: string,
+  janela: { inicio: string; fimMes: string },
+  hoje: string,
+): Promise<ContaFixaMes[]> {
+  const supabase = createClient();
+
+  const [ocorrRes, recRes] = await Promise.all([
+    supabase
+      .from("transacoes")
+      .select(
+        "id, descricao, valor, data_transacao, status_revisao, origem, recorrencia_id, recorrencia:recorrencias(id, descricao, valor_previsto)",
+      )
+      .eq("workspace_id", workspaceId)
+      .not("recorrencia_id", "is", null)
+      .in("status_revisao", ["confirmado", "sugerido"])
+      .gte("data_transacao", janela.inicio)
+      .lt("data_transacao", janela.fimMes),
+    supabase
+      .from("recorrencias")
+      .select("id, descricao, valor_previsto, frequencia, proxima_geracao, data_fim")
+      .eq("workspace_id", workspaceId)
+      .eq("ativa", true)
+      .eq("tipo", "despesa"),
+  ]);
+
+  type OcorrRow = {
+    id: string;
+    descricao: string;
+    valor: number;
+    data_transacao: string;
+    status_revisao: string;
+    origem: string | null;
+    recorrencia_id: string;
+    recorrencia: { id: string; descricao: string; valor_previsto: number } | null;
+  };
+
+  const linhas: ContaFixaMes[] = ((ocorrRes.data as OcorrRow[] | null) ?? [])
+    .filter((o) => o.recorrencia)
+    .map((o) => {
+      const paga = o.status_revisao === "confirmado";
+      return {
+        transacaoId: o.id,
+        recorrenciaId: o.recorrencia_id,
+        nome: o.recorrencia!.descricao,
+        descricao: o.descricao,
+        valorPrevisto: Number(o.recorrencia!.valor_previsto),
+        valor: Number(o.valor),
+        data: o.data_transacao,
+        paga,
+        atrasada: !paga && o.data_transacao < hoje,
+        baixaPorLancamento: paga && o.origem !== "recorrente",
+      };
+    });
+
+  // Projeção do que ainda vence neste mês e o cron não materializou.
+  type RecRow = {
+    id: string;
+    descricao: string;
+    valor_previsto: number;
+    frequencia: string;
+    proxima_geracao: string | null;
+    data_fim: string | null;
+  };
+  for (const r of (recRes.data as RecRow[] | null) ?? []) {
+    let d = r.proxima_geracao;
+    let guard = 0;
+    while (d && d < janela.fimMes && guard < 40) {
+      if (d >= janela.inicio && (!r.data_fim || d <= r.data_fim)) {
+        linhas.push({
+          transacaoId: null,
+          recorrenciaId: r.id,
+          nome: r.descricao,
+          descricao: null,
+          valorPrevisto: Number(r.valor_previsto),
+          valor: null,
+          data: d,
+          paga: false,
+          atrasada: false, // ainda não venceu: o cron materializa no dia
+          baixaPorLancamento: false,
+        });
+      }
+      d = avancarDataRecorrencia(d, r.frequencia);
+      guard++;
+    }
+  }
+
+  return linhas.sort((a, b) => a.data.localeCompare(b.data) || a.nome.localeCompare(b.nome));
 }

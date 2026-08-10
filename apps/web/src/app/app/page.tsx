@@ -4,6 +4,7 @@ import { getWorkspaceContext } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import {
   getComparativoPeriodo,
+  getContasFixasDoMes,
   getGastosPorCategoria,
   getGastosPorContexto,
   getGastosPorEssencialidade,
@@ -11,7 +12,7 @@ import {
   getResumoMes,
   listTransacoes,
 } from "@/lib/db/queries";
-import { resolverPeriodo } from "@/lib/periodo";
+import { resolverMes } from "@/lib/periodo";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -25,43 +26,67 @@ import { EssencialidadeCard } from "@/components/dashboard/essencialidade-card";
 import { GastoPorPessoa } from "@/components/dashboard/gasto-por-pessoa";
 import { AtividadeRecente } from "@/components/dashboard/atividade-recente";
 import { EventosLista } from "@/components/dashboard/eventos-lista";
-import { greeting, formatBRL, formatDate, hojeISO } from "@/lib/format";
+import { MesNavegador } from "@/components/dashboard/mes-navegador";
+import { ContasFixasCard } from "@/components/dashboard/contas-fixas-card";
+import { greeting, formatBRL, hojeISO } from "@/lib/format";
 import { getDescobertas } from "@/lib/insights";
 
 const PALETTE = ["#3D6D84", "#8FA993", "#FF7043", "#7E57C2", "#EC407A", "#C4B8B0"];
 
-export default async function HomePage() {
+export default async function HomePage({ searchParams }: { searchParams: { mes?: string } }) {
   const { profile, workspace, plan } = await getWorkspaceContext();
   const supabase = createClient();
 
-  const [resumo, gastos, essenc, pessoas, eventos, recentes, descobertas, comparativo, colecoesRes] =
-    await Promise.all([
-    getResumoMes(workspace.id),
-    getGastosPorCategoria(workspace.id),
-    getGastosPorEssencialidade(workspace.id),
-    getGastosPorPessoa(workspace.id),
+  // Mês exibido via URL (?mes=YYYY-MM); ausente/inválido/futuro = mês corrente.
+  const mes = resolverMes(searchParams.mes);
+
+  const [
+    resumo,
+    gastos,
+    essenc,
+    pessoas,
+    eventos,
+    recentes,
+    descobertas,
+    comparativo,
+    contasFixas,
+    colecoesRes,
+  ] = await Promise.all([
+    getResumoMes(workspace.id, mes.mesRef),
+    getGastosPorCategoria(workspace.id, mes.mesRef),
+    getGastosPorEssencialidade(workspace.id, mes.mesRef),
+    getGastosPorPessoa(workspace.id, mes.mesRef),
     getGastosPorContexto(workspace.id),
-    listTransacoes(workspace.id, { limit: 6, ordenarPor: "criacao" }),
-    getDescobertas(workspace.id),
-    getComparativoPeriodo(workspace.id, resolverPeriodo({})),
+    // No mês corrente a lista é "o que foi lançado por último" (inclusive compra
+    // antiga registrada hoje). Num mês fechado isso não faz sentido: aí é o que
+    // aconteceu naquele mês, por data.
+    mes.ehMesAtual
+      ? listTransacoes(workspace.id, { limit: 6, ordenarPor: "criacao" })
+      : listTransacoes(workspace.id, { limit: 6, inicio: mes.inicio, fim: mes.fimMes }),
+    getDescobertas(workspace.id, {
+      inicio: mes.inicio,
+      fim: mes.fimMes,
+      label: mes.label,
+      ehMesAtual: mes.ehMesAtual,
+    }),
+    getComparativoPeriodo(workspace.id, mes),
+    getContasFixasDoMes(workspace.id, mes, hojeISO()),
     supabase.from("v_colecoes_em_aberto").select("*").eq("workspace_id", workspace.id).limit(4),
   ]);
 
   const totalEssenc = essenc.reduce((s, e) => s + e.total, 0);
-  // Só eventos com movimentação no mês corrente. Esta tela é do mês (o cabeçalho,
+  // Só eventos com movimentação no mês exibido. Esta tela é do mês (o cabeçalho,
   // o resumo e as categorias também são) — deixar Eventos all-time fazia a viagem
   // de maio ficar ocupando espaço em julho e os eventos só se acumularem. O total
   // exibido continua sendo o do evento inteiro, não o do mês.
-  const inicioDoMes = `${hojeISO().slice(0, 7)}-01`;
-  const eventosTop = eventos.filter((ev) => (ev.ultimaData ?? "") >= inicioDoMes).slice(0, 6);
+  const eventosTop = eventos
+    .filter((ev) => (ev.ultimaData ?? "") >= mes.inicio && (ev.primeiraData ?? "") < mes.fimMes)
+    .slice(0, 6);
 
   const colecoes =
     (colecoesRes.data as { id: string; nome: string; cor: string | null; icone: string | null }[] | null) ?? [];
   const primeiroNome = profile.nome.split(" ")[0];
   const semDados = resumo.total_transacoes === 0;
-
-  const mesAno = formatDate(new Date(), "MMMM 'de' yyyy");
-  const mesLabel = mesAno.charAt(0).toUpperCase() + mesAno.slice(1);
 
   const categoriasResumo = gastos.map((g, i) => ({
     id: g.categoria_id,
@@ -78,7 +103,11 @@ export default async function HomePage() {
           <p className="text-body-sm text-muted-foreground">
             {greeting()}, {primeiroNome}
           </p>
-          <h1 className="text-h3 font-semibold tracking-tight">{mesLabel}</h1>
+          {/* -ml-2 alinha o texto do título com o parágrafo acima, apesar do
+              padding do botão de seta. */}
+          <div className="-ml-2">
+            <MesNavegador mes={mes} />
+          </div>
         </div>
         {plan.slug === "free" && (
           <Badge variant="tech" className="hidden sm:inline-flex">
@@ -102,6 +131,9 @@ export default async function HomePage() {
 
       {/* Descobertas da semana — o app entrega a conclusão */}
       <DescobertasCard descobertas={descobertas} />
+
+      {/* Contas fixas do mês — o que já foi pago e o que falta */}
+      <ContasFixasCard contas={contasFixas} />
 
       {/* Comparativo mês a mês (mesmo período) */}
       {!semDados && <ComparativoCard comparativo={comparativo} />}
