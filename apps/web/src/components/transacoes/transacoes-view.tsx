@@ -60,12 +60,15 @@ export function TransacoesView({
   itensPorTx: itensIniciais = {},
   temMaisInicial = false,
   pageSize = 50,
+  qtdFuturos = 0,
 }: {
   transacoes: TransacaoComRelacoes[];
   categorias: Categoria[];
   itensPorTx?: Record<string, ItemDeTransacao[]>;
   temMaisInicial?: boolean;
   pageSize?: number;
+  /** Quantos lançamentos existem com data futura — 0 esconde o filtro. */
+  qtdFuturos?: number;
 }) {
   const router = useRouter();
   // Lista paginada: começa na 1ª página e cresce com "carregar mais". Resetada
@@ -84,6 +87,10 @@ export function TransacoesView({
   const [categoria, setCategoria] = useState("todas");
   // "avulsos" (padrão) esconde as contas fixas geradas para não poluir a lista.
   const [origem, setOrigem] = useState("avulsos");
+  // Parcela a vencer é compromisso, não extrato. O corte é no servidor: se
+  // fosse só no cliente, as futuras comeriam a paginação e cada "carregar
+  // mais" traria pouca linha do passado.
+  const [incluirFuturos, setIncluirFuturos] = useState(false);
   const [excluindo, setExcluindo] = useState<TransacaoComRelacoes | null>(null);
   const [editando, setEditando] = useState<string | null>(null);
   const [editandoItens, setEditandoItens] = useState<string | null>(null);
@@ -107,9 +114,20 @@ export function TransacoesView({
     [transacoes],
   );
 
+  /** Alterna o corte de futuros e recarrega do começo. */
+  async function alternarFuturos(mostrar: boolean) {
+    setIncluirFuturos(mostrar);
+    setCarregandoMais(true);
+    const r = await carregarTransacoes(0, mostrar);
+    setCarregandoMais(false);
+    setTransacoes(r.transacoes);
+    setItensPorTx(r.itens);
+    setTemMais(r.transacoes.length === pageSize);
+  }
+
   async function carregarMais() {
     setCarregandoMais(true);
-    const r = await carregarTransacoes(transacoes.length);
+    const r = await carregarTransacoes(transacoes.length, incluirFuturos);
     setCarregandoMais(false);
     setTransacoes((prev) => [...prev, ...r.transacoes]);
     setItensPorTx((prev) => ({ ...prev, ...r.itens }));
@@ -167,6 +185,20 @@ export function TransacoesView({
             ))}
           </SelectContent>
         </Select>
+        {qtdFuturos > 0 && (
+          <Select
+            value={incluirFuturos ? "com" : "sem"}
+            onValueChange={(v) => void alternarFuturos(v === "com")}
+          >
+            <SelectTrigger className="sm:w-52">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="sem">Até hoje</SelectItem>
+              <SelectItem value="com">Incluir futuros ({qtdFuturos})</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
         {totalFixas > 0 && (
           <Select value={origem} onValueChange={setOrigem}>
             <SelectTrigger className="sm:w-44">

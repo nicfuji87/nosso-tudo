@@ -401,6 +401,12 @@ export async function getItensPorTransacao(
 export const PAGINA_TRANSACOES = 50;
 
 export interface TransacaoFilters {
+  /**
+   * Corta lançamentos datados no futuro (parcelas e vencimentos a vencer).
+   * Opt-in de propósito: só a lista de Transações quer isso. Início, relatórios
+   * e a busca da Nia continuam enxergando o futuro — é lá que ele importa.
+   */
+  ateHoje?: boolean;
   tipo?: string;
   categoriaId?: string;
   busca?: string;
@@ -443,6 +449,9 @@ export async function listTransacoes(
   if (filters.busca) query = query.ilike("descricao", `%${filters.busca}%`);
   if (filters.inicio) query = query.gte("data_transacao", filters.inicio);
   if (filters.fim) query = query.lt("data_transacao", filters.fim);
+  // Parcela a vencer é compromisso, não extrato: quem pede `ateHoje` não quer
+  // o mês atual enterrado sob 11 linhas de uma compra em 12x.
+  if (filters.ateHoje) query = query.lte("data_transacao", hojeISO());
 
   const { data } = await query;
   return (data as TransacaoComRelacoes[] | null) ?? [];
@@ -1548,4 +1557,158 @@ export async function getContasFixasDoMes(
   }
 
   return linhas.sort((a, b) => a.data.localeCompare(b.data) || a.nome.localeCompare(b.nome));
+}
+
+// =====================================================================
+// FATURAS + CONTAS FIXAS
+// ---------------------------------------------------------------------
+// As faturas existiam no banco sem nenhuma tela: R$ 87 mil conciliados e
+// invisíveis. Aqui elas viram um calendário do que vence, com a checagem
+// de conferência (soma dos lançamentos × total impresso na fatura) — que
+// é o que dá confiança de que a importação fechou.
+// =====================================================================
+
+export interface FaturaResumo {
+  id: string;
+  cartaoId: string;
+  cartao: string;
+  banco: string | null;
+  ultimosDigitos: string | null;
+  mesReferencia: string;
+  vencimento: string | null;
+  total: number;
+  lancado: number;
+  qtdLancamentos: number;
+  status: string;
+  confere: boolean;
+  paga: boolean;
+}
+
+export interface VencimentoContaFixa {
+  id: string;
+  descricao: string;
+  data: string;
+  valorPrevisto: number;
+  valorLancado: number;
+  emAberto: boolean;
+}
+
+export interface FaturasEContasFixas {
+  faturas: FaturaResumo[];
+  totalEmAberto: number;
+  totalPago: number;
+  divergentes: number;
+  vencimentosAbertos: VencimentoContaFixa[];
+  vencimentosPagos: VencimentoContaFixa[];
+}
+
+/**
+ * Faturas com a soma real dos lançamentos vinculados + o estado das contas
+ * fixas. Uma consulta só porque as duas coisas respondem a mesma pergunta:
+ * "o que já está comprometido e o que ainda está aberto".
+ */
+export async function getFaturasEContasFixas(workspaceId: string): Promise<FaturasEContasFixas> {
+  const supabase = createClient();
+
+  const [{ data: fatData }, { data: txData }, { data: recData }] = await Promise.all([
+    supabase
+      .from("faturas_cartao")
+      .select(
+        "id, cartao_id, mes_referencia, data_vencimento, valor_total, status, cartao:cartoes(apelido, banco, ultimos_digitos)",
+      )
+      .eq("workspace_id", workspaceId)
+      .order("data_vencimento", { ascending: false }),
+    supabase
+      .from("transacoes")
+      .select("fatura_id, valor, tipo")
+      .eq("workspace_id", workspaceId)
+      .not("fatura_id", "is", null),
+    supabase
+      .from("transacoes")
+      .select("id, descricao, data_transacao, valor, status_revisao, recorrencia:recorrencias(valor_previsto)")
+      .eq("workspace_id", workspaceId)
+      .eq("origem", "recorrente")
+      .not("recorrencia_id", "is", null)
+      .order("data_transacao", { ascending: true }),
+  ]);
+
+  // Soma o que está lançado em cada fatura para confrontar com o total do PDF.
+  const somas = new Map<string, { valor: number; qtd: number }>();
+  for (const t of (txData as { fatura_id: string; valor: number; tipo: string }[] | null) ?? []) {
+    const acc = somas.get(t.fatura_id) ?? { valor: 0, qtd: 0 };
+    acc.valor += Number(t.valor) * (t.tipo === "despesa" ? 1 : -1);
+    acc.qtd += 1;
+    somas.set(t.fatura_id, acc);
+  }
+
+  type FatRow = {
+    id: string;
+    cartao_id: string;
+    mes_referencia: string;
+    data_vencimento: string | null;
+    valor_total: number | null;
+    status: string;
+    cartao: { apelido: string; banco: string | null; ultimos_digitos: string | null } | null;
+  };
+
+  const faturas: FaturaResumo[] = ((fatData as unknown as FatRow[] | null) ?? []).map((f) => {
+    const acc = somas.get(f.id) ?? { valor: 0, qtd: 0 };
+    const total = Number(f.valor_total ?? 0);
+    const lancado = Math.round(acc.valor * 100) / 100;
+    return {
+      id: f.id,
+      cartaoId: f.cartao_id,
+      cartao: f.cartao?.apelido ?? "Cartão",
+      banco: f.cartao?.banco ?? null,
+      ultimosDigitos: f.cartao?.ultimos_digitos ?? null,
+      mesReferencia: f.mes_referencia,
+      vencimento: f.data_vencimento,
+      total,
+      lancado,
+      qtdLancamentos: acc.qtd,
+      status: f.status,
+      confere: Math.abs(lancado - total) < 0.01,
+      paga: f.status === "paga",
+    };
+  });
+
+  type RecRow = {
+    id: string;
+    descricao: string;
+    data_transacao: string;
+    valor: number;
+    status_revisao: string;
+    recorrencia: { valor_previsto: number } | null;
+  };
+
+  const vencimentos: VencimentoContaFixa[] = ((recData as unknown as RecRow[] | null) ?? []).map((o) => ({
+    id: o.id,
+    descricao: o.descricao,
+    data: o.data_transacao,
+    valorPrevisto: Number(o.recorrencia?.valor_previsto ?? o.valor),
+    valorLancado: Number(o.valor),
+    // 'sugerido' = o cron materializou o vencimento e ninguém deu baixa nele.
+    emAberto: o.status_revisao === "sugerido",
+  }));
+
+  return {
+    faturas,
+    totalEmAberto: faturas.filter((f) => !f.paga).reduce((s, f) => s + f.total, 0),
+    totalPago: faturas.filter((f) => f.paga).reduce((s, f) => s + f.total, 0),
+    divergentes: faturas.filter((f) => !f.confere).length,
+    vencimentosAbertos: vencimentos.filter((v) => v.emAberto),
+    vencimentosPagos: vencimentos.filter((v) => !v.emAberto).reverse(),
+  };
+}
+
+/** Quantos lançamentos estão datados no futuro — usado para oferecer o filtro. */
+export async function contarLancamentosFuturos(workspaceId: string): Promise<number> {
+  const supabase = createClient();
+  const { count } = await supabase
+    .from("transacoes")
+    .select("id", { count: "exact", head: true })
+    .eq("workspace_id", workspaceId)
+    .neq("status_revisao", "rejeitado")
+    .gt("data_transacao", hojeISO());
+  return count ?? 0;
 }

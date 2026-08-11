@@ -1,6 +1,12 @@
 import type { Metadata } from "next";
 import { getWorkspaceContext } from "@/lib/auth";
-import { getItensPorTransacao, listCategorias, listTransacoes, PAGINA_TRANSACOES } from "@/lib/db/queries";
+import {
+  contarLancamentosFuturos,
+  getItensPorTransacao,
+  listCategorias,
+  listTransacoes,
+  PAGINA_TRANSACOES,
+} from "@/lib/db/queries";
 import { PageHeader } from "@/components/patterns/page-header";
 import { TransacoesView } from "@/components/transacoes/transacoes-view";
 
@@ -8,9 +14,10 @@ export const metadata: Metadata = { title: "Transações" };
 
 export default async function TransacoesPage() {
   const { workspace } = await getWorkspaceContext();
-  const [transacoes, categorias] = await Promise.all([
-    listTransacoes(workspace.id, { limit: PAGINA_TRANSACOES }),
+  const [transacoes, categorias, qtdFuturos] = await Promise.all([
+    listTransacoes(workspace.id, { limit: PAGINA_TRANSACOES, ateHoje: true }),
     listCategorias(workspace.id),
+    contarLancamentosFuturos(workspace.id),
   ]);
   const itensPorTx = await getItensPorTransacao(
     workspace.id,
@@ -29,6 +36,7 @@ export default async function TransacoesPage() {
         itensPorTx={itensPorTx}
         temMaisInicial={transacoes.length === PAGINA_TRANSACOES}
         pageSize={PAGINA_TRANSACOES}
+        qtdFuturos={qtdFuturos}
       />
     </div>
   );

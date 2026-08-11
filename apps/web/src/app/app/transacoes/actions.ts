@@ -12,10 +12,15 @@ import { resolverContexto } from "@/lib/classificacao";
  *  lista nunca trunca silenciosamente — o cliente pede mais conforme rola. */
 export async function carregarTransacoes(
   offset: number,
+  incluirFuturos = false,
 ): Promise<{ transacoes: TransacaoComRelacoes[]; itens: Record<string, ItemDeTransacao[]> }> {
   const { workspaceId } = await getWorkspaceId();
   if (!workspaceId) return { transacoes: [], itens: {} };
-  const transacoes = await listTransacoes(workspaceId, { limit: PAGINA_TRANSACOES, offset });
+  const transacoes = await listTransacoes(workspaceId, {
+    limit: PAGINA_TRANSACOES,
+    offset,
+    ateHoje: !incluirFuturos,
+  });
   const itens = await getItensPorTransacao(
     workspaceId,
     transacoes.map((t) => t.id),
