@@ -36,6 +36,17 @@ describe("payload do Pin", () => {
     expect(p.link).toBe(base.link);
     expect(p.media_source).toEqual({ source_type: "image_url", url: base.media_url });
   });
+  it("envia ai_disclosures e board_section_id só quando aplicável", () => {
+    const comIa = montarPayloadPin({ ...base, ai_modified: true, board_section_id: "987" });
+    expect(comIa.ai_disclosures).toEqual({ values: ["AI_MODIFIED"] });
+    expect(comIa.board_section_id).toBe("987");
+    expect(montarPayloadPin({ ...base, ai_modified: false })).not.toHaveProperty("ai_disclosures");
+    expect(montarPayloadPin({ ...base, ai_modified: true, enviar_ai_disclosure: false })).not.toHaveProperty("ai_disclosures");
+    expect(montarPayloadPin({ ...base, board_section_id: "abc" })).not.toHaveProperty("board_section_id");
+    // nenhum campo fora do schema PinCreate
+    const permitidos = ["board_id", "board_section_id", "title", "description", "link", "alt_text", "media_source", "ai_disclosures"];
+    expect(Object.keys(comIa).every((k) => permitidos.includes(k))).toBe(true);
+  });
   it("omite alt_text vazio", () => {
     expect(montarPayloadPin({ ...base, alt_text: "" })).not.toHaveProperty("alt_text");
   });

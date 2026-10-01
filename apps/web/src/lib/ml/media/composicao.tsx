@@ -10,12 +10,12 @@ import { ImageResponse } from "next/og";
  * (imagem gerada em tela cheia + faixa com a headline).
  */
 
-const LARGURA = 1000;
-const ALTURA = 1500;
+export const LARGURA = 1000;
+export const ALTURA = 1500;
 
 let fontes: { name: string; data: ArrayBuffer; weight: 400 | 700; style: "normal" }[] | null = null;
 
-async function carregarFontes() {
+export async function carregarFontes() {
   if (fontes) return fontes;
   const base = path.join(process.cwd(), "node_modules", "geist", "dist", "fonts", "geist-sans");
   const [bold, regular] = await Promise.all([readFile(path.join(base, "Geist-Bold.ttf")), readFile(path.join(base, "Geist-Regular.ttf"))]);
@@ -37,11 +37,11 @@ export interface Composicao {
   corDestaque: string;
 }
 
-function dataUri(img: { bytes: Buffer; mime: string }): string {
+export function dataUri(img: { bytes: Buffer; mime: string }): string {
   return `data:${img.mime};base64,${img.bytes.toString("base64")}`;
 }
 
-function tamanhoFonte(texto: string): number {
+export function tamanhoFonte(texto: string): number {
   const n = texto.length;
   if (n <= 22) return 88;
   if (n <= 36) return 74;

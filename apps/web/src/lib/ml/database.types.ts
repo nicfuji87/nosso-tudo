@@ -1415,10 +1415,14 @@ export type Database = {
           created_at: string
           created_by: string | null
           deactivated_at: string | null
+          final_host: string | null
+          final_url: string | null
           id: string
           label: string | null
+          last_checked_at: string | null
           original_url: string | null
           product_id: string
+          redirect_status: string
           source: string
           validated_at: string | null
           validation: Json | null
@@ -1429,10 +1433,14 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           deactivated_at?: string | null
+          final_host?: string | null
+          final_url?: string | null
           id?: string
           label?: string | null
+          last_checked_at?: string | null
           original_url?: string | null
           product_id: string
+          redirect_status?: string
           source?: string
           validated_at?: string | null
           validation?: Json | null
@@ -1443,10 +1451,14 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           deactivated_at?: string | null
+          final_host?: string | null
+          final_url?: string | null
           id?: string
           label?: string | null
+          last_checked_at?: string | null
           original_url?: string | null
           product_id?: string
+          redirect_status?: string
           source?: string
           validated_at?: string | null
           validation?: Json | null
@@ -1765,9 +1777,12 @@ export type Database = {
           creative_id: string
           height: number | null
           id: string
+          image_hash: string | null
+          kind: string
           mime: string | null
           mode: string
           model: string | null
+          parent_asset_id: string | null
           prompt: string | null
           public_url: string
           sha256: string | null
@@ -1781,9 +1796,12 @@ export type Database = {
           creative_id: string
           height?: number | null
           id?: string
+          image_hash?: string | null
+          kind?: string
           mime?: string | null
           mode: string
           model?: string | null
+          parent_asset_id?: string | null
           prompt?: string | null
           public_url: string
           sha256?: string | null
@@ -1797,9 +1815,12 @@ export type Database = {
           creative_id?: string
           height?: number | null
           id?: string
+          image_hash?: string | null
+          kind?: string
           mime?: string | null
           mode?: string
           model?: string | null
+          parent_asset_id?: string | null
           prompt?: string | null
           public_url?: string
           sha256?: string | null
@@ -1819,6 +1840,113 @@ export type Database = {
             columns: ["creative_id"]
             isOneToOne: false
             referencedRelation: "ml_creatives"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ml_creative_assets_parent_asset_id_fkey"
+            columns: ["parent_asset_id"]
+            isOneToOne: false
+            referencedRelation: "ml_creative_assets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ml_creative_families: {
+        Row: {
+          affiliate_link_id: string | null
+          angle_id: string | null
+          archived_at: string | null
+          batch_job_id: string | null
+          cost_estimated_usd: number | null
+          created_at: string
+          created_by: string | null
+          default_board_id: string | null
+          hypothesis: string | null
+          id: string
+          name: string
+          objective: string | null
+          plan: Json
+          product_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          affiliate_link_id?: string | null
+          angle_id?: string | null
+          archived_at?: string | null
+          batch_job_id?: string | null
+          cost_estimated_usd?: number | null
+          created_at?: string
+          created_by?: string | null
+          default_board_id?: string | null
+          hypothesis?: string | null
+          id?: string
+          name: string
+          objective?: string | null
+          plan?: Json
+          product_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          affiliate_link_id?: string | null
+          angle_id?: string | null
+          archived_at?: string | null
+          batch_job_id?: string | null
+          cost_estimated_usd?: number | null
+          created_at?: string
+          created_by?: string | null
+          default_board_id?: string | null
+          hypothesis?: string | null
+          id?: string
+          name?: string
+          objective?: string | null
+          plan?: Json
+          product_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ml_creative_families_affiliate_link_id_fkey"
+            columns: ["affiliate_link_id"]
+            isOneToOne: false
+            referencedRelation: "ml_affiliate_links"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ml_creative_families_angle_id_fkey"
+            columns: ["angle_id"]
+            isOneToOne: false
+            referencedRelation: "ml_creative_angles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ml_creative_families_batch_job_id_fkey"
+            columns: ["batch_job_id"]
+            isOneToOne: false
+            referencedRelation: "ml_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ml_creative_families_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ml_creative_families_default_board_id_fkey"
+            columns: ["default_board_id"]
+            isOneToOne: false
+            referencedRelation: "ml_pinterest_boards"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ml_creative_families_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "ml_products"
             referencedColumns: ["id"]
           },
         ]
@@ -1867,100 +1995,172 @@ export type Database = {
       }
       ml_creatives: {
         Row: {
+          ai_modified: boolean
           alt_text: string | null
           angle_id: string | null
           approved_at: string | null
           approved_by: string | null
+          base_asset_id: string | null
           board_id: string | null
+          board_section_id: string | null
           copy_status: string
+          copy_template_version: string | null
+          cost_actual_usd: number | null
+          cost_estimated_usd: number | null
           created_at: string
           created_by: string | null
           cta: string | null
           current_asset_id: string | null
           description: string | null
+          disclosure_text: string | null
+          editorial_points: string[]
+          family_id: string | null
+          fidelity_checked_at: string | null
+          fidelity_mode: string
+          fidelity_notes: Json | null
+          fidelity_score: number | null
+          fidelity_status: string
           format: string
+          has_text_overlay: boolean
           headline: string | null
           id: string
+          image_hash: string | null
           image_mode: string
           image_prompt: string | null
           image_status: string
+          interests: string[]
           keywords: string[]
           last_error: string | null
           model: string | null
+          package_errors: Json | null
+          package_status: string
+          package_updated_at: string | null
+          package_version: number
           product_id: string
           prompt_version: string | null
           quality_notes: Json | null
           quality_score: number | null
           reference_image_url: string | null
           rejection_reason: string | null
+          scene_preset_id: string | null
+          source_media_ids: string[]
           status: string
           title: string | null
           updated_at: string
           variant_of: string | null
+          visual_type: string
         }
         Insert: {
+          ai_modified?: boolean
           alt_text?: string | null
           angle_id?: string | null
           approved_at?: string | null
           approved_by?: string | null
+          base_asset_id?: string | null
           board_id?: string | null
+          board_section_id?: string | null
           copy_status?: string
+          copy_template_version?: string | null
+          cost_actual_usd?: number | null
+          cost_estimated_usd?: number | null
           created_at?: string
           created_by?: string | null
           cta?: string | null
           current_asset_id?: string | null
           description?: string | null
+          disclosure_text?: string | null
+          editorial_points?: string[]
+          family_id?: string | null
+          fidelity_checked_at?: string | null
+          fidelity_mode?: string
+          fidelity_notes?: Json | null
+          fidelity_score?: number | null
+          fidelity_status?: string
           format?: string
+          has_text_overlay?: boolean
           headline?: string | null
           id?: string
+          image_hash?: string | null
           image_mode?: string
           image_prompt?: string | null
           image_status?: string
+          interests?: string[]
           keywords?: string[]
           last_error?: string | null
           model?: string | null
+          package_errors?: Json | null
+          package_status?: string
+          package_updated_at?: string | null
+          package_version?: number
           product_id: string
           prompt_version?: string | null
           quality_notes?: Json | null
           quality_score?: number | null
           reference_image_url?: string | null
           rejection_reason?: string | null
+          scene_preset_id?: string | null
+          source_media_ids?: string[]
           status?: string
           title?: string | null
           updated_at?: string
           variant_of?: string | null
+          visual_type?: string
         }
         Update: {
+          ai_modified?: boolean
           alt_text?: string | null
           angle_id?: string | null
           approved_at?: string | null
           approved_by?: string | null
+          base_asset_id?: string | null
           board_id?: string | null
+          board_section_id?: string | null
           copy_status?: string
+          copy_template_version?: string | null
+          cost_actual_usd?: number | null
+          cost_estimated_usd?: number | null
           created_at?: string
           created_by?: string | null
           cta?: string | null
           current_asset_id?: string | null
           description?: string | null
+          disclosure_text?: string | null
+          editorial_points?: string[]
+          family_id?: string | null
+          fidelity_checked_at?: string | null
+          fidelity_mode?: string
+          fidelity_notes?: Json | null
+          fidelity_score?: number | null
+          fidelity_status?: string
           format?: string
+          has_text_overlay?: boolean
           headline?: string | null
           id?: string
+          image_hash?: string | null
           image_mode?: string
           image_prompt?: string | null
           image_status?: string
+          interests?: string[]
           keywords?: string[]
           last_error?: string | null
           model?: string | null
+          package_errors?: Json | null
+          package_status?: string
+          package_updated_at?: string | null
+          package_version?: number
           product_id?: string
           prompt_version?: string | null
           quality_notes?: Json | null
           quality_score?: number | null
           reference_image_url?: string | null
           rejection_reason?: string | null
+          scene_preset_id?: string | null
+          source_media_ids?: string[]
           status?: string
           title?: string | null
           updated_at?: string
           variant_of?: string | null
+          visual_type?: string
         }
         Relationships: [
           {
@@ -1985,6 +2185,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "ml_creatives_base_asset_id_fkey"
+            columns: ["base_asset_id"]
+            isOneToOne: false
+            referencedRelation: "ml_creative_assets"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "ml_creatives_board_id_fkey"
             columns: ["board_id"]
             isOneToOne: false
@@ -1999,10 +2206,24 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "ml_creatives_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "ml_creative_families"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "ml_creatives_product_id_fkey"
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "ml_products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ml_creatives_scene_preset_id_fkey"
+            columns: ["scene_preset_id"]
+            isOneToOne: false
+            referencedRelation: "ml_scene_presets"
             referencedColumns: ["id"]
           },
           {
@@ -2422,9 +2643,12 @@ export type Database = {
       ml_pins: {
         Row: {
           affiliate_link_id: string | null
+          ai_disclosure_sent: boolean | null
+          ai_modified: boolean
           alt_text: string | null
           attempts: number
           board_id: string | null
+          board_section_id: string | null
           created_at: string
           created_by: string | null
           creative_id: string
@@ -2433,6 +2657,7 @@ export type Database = {
           environment: string | null
           external_pin_id: string | null
           external_url: string | null
+          family_id: string | null
           id: string
           idempotency_key: string
           last_error: string | null
@@ -2450,9 +2675,12 @@ export type Database = {
         }
         Insert: {
           affiliate_link_id?: string | null
+          ai_disclosure_sent?: boolean | null
+          ai_modified?: boolean
           alt_text?: string | null
           attempts?: number
           board_id?: string | null
+          board_section_id?: string | null
           created_at?: string
           created_by?: string | null
           creative_id: string
@@ -2461,6 +2689,7 @@ export type Database = {
           environment?: string | null
           external_pin_id?: string | null
           external_url?: string | null
+          family_id?: string | null
           id?: string
           idempotency_key?: string
           last_error?: string | null
@@ -2478,9 +2707,12 @@ export type Database = {
         }
         Update: {
           affiliate_link_id?: string | null
+          ai_disclosure_sent?: boolean | null
+          ai_modified?: boolean
           alt_text?: string | null
           attempts?: number
           board_id?: string | null
+          board_section_id?: string | null
           created_at?: string
           created_by?: string | null
           creative_id?: string
@@ -2489,6 +2721,7 @@ export type Database = {
           environment?: string | null
           external_pin_id?: string | null
           external_url?: string | null
+          family_id?: string | null
           id?: string
           idempotency_key?: string
           last_error?: string | null
@@ -2538,6 +2771,13 @@ export type Database = {
             columns: ["duplicated_from"]
             isOneToOne: false
             referencedRelation: "ml_pins"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ml_pins_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "ml_creative_families"
             referencedColumns: ["id"]
           },
           {
@@ -2602,6 +2842,98 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      ml_product_media: {
+        Row: {
+          captured_at: string
+          checksum: string | null
+          created_at: string
+          cutout_note: string | null
+          cutout_path: string | null
+          cutout_status: string
+          cutout_url: string | null
+          error: string | null
+          height: number | null
+          id: string
+          is_primary: boolean
+          media_role: string
+          mime_type: string | null
+          product_id: string
+          provenance_note: string | null
+          public_url: string | null
+          reference_priority: number | null
+          role_source: string
+          sort_order: number
+          source_type: string
+          source_url: string | null
+          status: string
+          storage_path: string | null
+          updated_at: string
+          width: number | null
+        }
+        Insert: {
+          captured_at?: string
+          checksum?: string | null
+          created_at?: string
+          cutout_note?: string | null
+          cutout_path?: string | null
+          cutout_status?: string
+          cutout_url?: string | null
+          error?: string | null
+          height?: number | null
+          id?: string
+          is_primary?: boolean
+          media_role?: string
+          mime_type?: string | null
+          product_id: string
+          provenance_note?: string | null
+          public_url?: string | null
+          reference_priority?: number | null
+          role_source?: string
+          sort_order?: number
+          source_type: string
+          source_url?: string | null
+          status?: string
+          storage_path?: string | null
+          updated_at?: string
+          width?: number | null
+        }
+        Update: {
+          captured_at?: string
+          checksum?: string | null
+          created_at?: string
+          cutout_note?: string | null
+          cutout_path?: string | null
+          cutout_status?: string
+          cutout_url?: string | null
+          error?: string | null
+          height?: number | null
+          id?: string
+          is_primary?: boolean
+          media_role?: string
+          mime_type?: string | null
+          product_id?: string
+          provenance_note?: string | null
+          public_url?: string | null
+          reference_priority?: number | null
+          role_source?: string
+          sort_order?: number
+          source_type?: string
+          source_url?: string | null
+          status?: string
+          storage_path?: string | null
+          updated_at?: string
+          width?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ml_product_media_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "ml_products"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       ml_product_rankings: {
         Row: {
@@ -2801,6 +3133,8 @@ export type Database = {
           last_checked_at: string | null
           last_promoted_at: string | null
           last_seen_at: string
+          media_count: number
+          media_imported_at: string | null
           original_price: number | null
           paused_from: string | null
           permalink: string | null
@@ -2861,6 +3195,8 @@ export type Database = {
           last_checked_at?: string | null
           last_promoted_at?: string | null
           last_seen_at?: string
+          media_count?: number
+          media_imported_at?: string | null
           original_price?: number | null
           paused_from?: string | null
           permalink?: string | null
@@ -2921,6 +3257,8 @@ export type Database = {
           last_checked_at?: string | null
           last_promoted_at?: string | null
           last_seen_at?: string
+          media_count?: number
+          media_imported_at?: string | null
           original_price?: number | null
           paused_from?: string | null
           permalink?: string | null
@@ -2979,6 +3317,101 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      ml_prompt_templates: {
+        Row: {
+          active: boolean
+          body: string
+          created_at: string
+          created_by: string | null
+          id: string
+          key: string
+          notes: string | null
+          version: number
+        }
+        Insert: {
+          active?: boolean
+          body: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          key: string
+          notes?: string | null
+          version: number
+        }
+        Update: {
+          active?: boolean
+          body?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          key?: string
+          notes?: string | null
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ml_prompt_templates_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ml_scene_presets: {
+        Row: {
+          active: boolean
+          category_hint: string | null
+          created_at: string
+          environment: string
+          id: string
+          key: string
+          lighting: string | null
+          name: string
+          palette: string | null
+          realism: string
+          restrictions: string | null
+          sort: number
+          style: string | null
+          text_area: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          category_hint?: string | null
+          created_at?: string
+          environment: string
+          id?: string
+          key: string
+          lighting?: string | null
+          name: string
+          palette?: string | null
+          realism?: string
+          restrictions?: string | null
+          sort?: number
+          style?: string | null
+          text_area?: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          category_hint?: string | null
+          created_at?: string
+          environment?: string
+          id?: string
+          key?: string
+          lighting?: string | null
+          name?: string
+          palette?: string | null
+          realism?: string
+          restrictions?: string | null
+          sort?: number
+          style?: string | null
+          text_area?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       ml_schedule_runs: {
         Row: {
@@ -5737,6 +6170,20 @@ export type Database = {
           saves: number
         }[]
       }
+      ml_analytics_cohort: {
+        Args: { p_dias: number; p_dimension: string; p_filters?: Json }
+        Returns: {
+          ctr: number
+          dimension: string
+          impressions: number
+          key: string
+          label: string
+          outbound_clicks: number
+          pin_clicks: number
+          pins: number
+          saves: number
+        }[]
+      }
       ml_analytics_summary: {
         Args: { p_filters?: Json; p_from: string; p_to: string }
         Returns: Json
@@ -5812,6 +6259,7 @@ export type Database = {
       }
       ml_cron_tick: { Args: never; Returns: undefined }
       ml_dashboard: { Args: never; Returns: Json }
+      ml_dashboard_v2: { Args: never; Returns: Json }
       ml_faixa_preco: { Args: { p: number }; Returns: string }
       ml_has_role: { Args: { p_min: string }; Returns: boolean }
       ml_integration_try_lock: {
@@ -5835,19 +6283,28 @@ export type Database = {
       ml_pins_filtrados: {
         Args: { p_filters?: Json }
         Returns: {
+          ai_modified: boolean
           angle_type: string
           board_id: string
           board_name: string
           category_id: string
           category_name: string
           creative_id: string
+          family_id: string
+          family_name: string
+          fidelity_mode: string
+          has_text: boolean
           headline: string
+          image_mode: string
           pin_id: string
           price: number
           price_band: string
           product_id: string
           published_at: string
+          scene_key: string
+          scene_name: string
           title: string
+          visual_type: string
         }[]
       }
       ml_pode_ler: { Args: never; Returns: boolean }

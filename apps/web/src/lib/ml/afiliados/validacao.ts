@@ -73,3 +73,15 @@ export function validarLinkAfiliado(entrada: string, opts: { urlOriginal?: strin
 
   return { ok: erros.length === 0, url: u.toString(), tipo, erros, avisos };
 }
+
+/** Status do redirect a partir do destino final (V2 §10): host do ML e, se possível, o mesmo produto. */
+export function classificarRedirect(
+  r: { ok: boolean; destino: string | null; conferido?: boolean },
+  codigos: string[],
+): "ok" | "ok_unverified" | "inconsistent" | "error" {
+  if (r.conferido === false) return "error";
+  if (!r.ok) return "inconsistent";
+  const destino = (r.destino ?? "").toUpperCase().replace(/-/g, "");
+  return codigos.some((c) => c && destino.includes(c.toUpperCase().replace(/-/g, ""))) ? "ok" : "ok_unverified";
+}
+

@@ -45,6 +45,7 @@ export async function processarPipeline(lote: number): Promise<Record<string, un
   const { data: travados } = await db
     .from("ml_creatives")
     .select("id, copy_status, image_status")
+    .is("family_id", null) // variantes V2 têm o próprio retomador (abaixo)
     .in("status", ["to_generate", "generating"])
     .lt("updated_at", new Date(Date.now() - 30 * 60_000).toISOString())
     .limit(lote);
@@ -53,6 +54,22 @@ export async function processarPipeline(lote: number): Promise<Record<string, un
       await enfileirar({ tipo: "GENERATE_COPY", payload: { creative_id: c.id, then_image: true }, idempotencyKey: `copy:${c.id}`, entidade: { tipo: "creative", id: c.id } });
     } else if (c.image_status !== "ready" && c.image_status !== "waiting_manual") {
       await enfileirar({ tipo: "GENERATE_IMAGE", payload: { creative_id: c.id }, idempotencyKey: `image:${c.id}`, entidade: { tipo: "creative", id: c.id } });
+    }
+  }
+  // Variantes V2 paradas: o orquestrador decide o próximo passo pelo estado real.
+  const { data: v2 } = await db
+    .from("ml_creatives")
+    .select("id")
+    .not("family_id", "is", null)
+    .in("status", ["to_generate", "generating"])
+    .lt("updated_at", new Date(Date.now() - 30 * 60_000).toISOString())
+    .limit(lote);
+  const { avancarVariante } = await import("./variantes");
+  for (const { id } of (v2 ?? []) as { id: string }[]) {
+    try {
+      await avancarVariante(id);
+    } catch {
+      /* tenta na próxima varredura */
     }
   }
   // Categorias criadas só com o id (placeholder) ganham nome/caminho.
@@ -70,6 +87,7 @@ export async function processarPipeline(lote: number): Promise<Record<string, un
     enriquecer: (semEnriquecer ?? []).length,
     pontuar: (semScore ?? []).length,
     criativos_retomados: (travados ?? []).length,
+    variantes_retomadas: (v2 ?? []).length,
     categorias,
   };
 }
@@ -78,18 +96,8 @@ export async function processarPipeline(lote: number): Promise<Record<string, un
 export async function gerarCriativosPendentes(porExecucao: number): Promise<Record<string, unknown>> {
   const auto = await lerConfig("automacao");
   if (!auto.auto_gerar_criativos) return { ignorado: "Geração automática de criativos desligada." };
-  const { data } = await mlDb().from("ml_products").select("id").eq("status", "ready_for_creative").order("score", { ascending: false }).limit(porExecucao);
-  let n = 0;
-  for (const { id } of (data ?? []) as { id: string }[]) {
-    const { criado } = await enfileirar({
-      tipo: "GENERATE_CREATIVES",
-      payload: { product_id: id, auto: true },
-      idempotencyKey: `creatives:${id}`,
-      entidade: { tipo: "product", id },
-    });
-    if (criado) n++;
-  }
-  return { produtos: n };
+  const { gerarLotesElegiveis } = await import("./variantes");
+  return gerarLotesElegiveis(porExecucao, { actorType: "automation" });
 }
 
 /** REFRESH_TOKENS: renova antes de expirar e marca "expirando" com antecedência. */

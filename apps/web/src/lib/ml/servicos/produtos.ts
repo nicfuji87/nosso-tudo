@@ -233,6 +233,8 @@ export async function aprovarProduto(id: string, ator: Ator & { motivo?: string;
   });
   await mlDb().from("ml_feedback").insert({ entity_type: "product", entity_id: id, kind: "approve", created_by: ator.actorId ?? null, note: ator.motivo ?? null });
   await auditar({ acao: "produto.aprovar", entidade: "product", entidadeId: id, metadata: { motivo: ator.motivo, ...(ator.metadata ?? {}) }, actorId: ator.actorId, actorType: ator.actorType });
+  // V2: imagens reais do anúncio entram na galeria assim que o produto é aprovado
+  await enfileirar({ tipo: "IMPORT_PRODUCT_MEDIA", payload: { product_id: id }, idempotencyKey: `media:${id}`, entidade: { tipo: "product", id }, criadoPor: ator.actorId ?? null });
   return recalcularStatus(id, ator);
 }
 

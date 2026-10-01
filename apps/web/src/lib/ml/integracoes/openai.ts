@@ -165,18 +165,23 @@ export async function gerarImagem(p: {
   prompt: string;
   qualidade: "low" | "medium" | "high";
   referencia?: { bytes: Buffer; mime: string } | null;
-}): Promise<{ bytes: Buffer; mime: string; modelo: string }> {
+  /** V2: várias referências (a primeira é a principal). */
+  referencias?: { bytes: Buffer; mime: string }[];
+}): Promise<{ bytes: Buffer; mime: string; modelo: string; uso: Record<string, unknown> | null }> {
   const k = await chaveObrigatoria();
-  let data: { data?: { b64_json?: string }[] };
-  if (p.referencia) {
+  let data: { data?: { b64_json?: string }[]; usage?: Record<string, unknown> };
+  const refs = p.referencias?.length ? p.referencias.slice(0, 8) : p.referencia ? [p.referencia] : [];
+  if (refs.length) {
     const form = new FormData();
     form.set("model", p.modelo);
     form.set("prompt", p.prompt);
     form.set("size", "1024x1536");
     form.set("quality", p.qualidade);
     form.set("output_format", "png");
-    const ext = p.referencia.mime.split("/")[1] ?? "png";
-    form.append("image[]", new Blob([new Uint8Array(p.referencia.bytes)], { type: p.referencia.mime }), `referencia.${ext}`);
+    for (const [i, r] of refs.entries()) {
+      const ext = r.mime.split("/")[1] ?? "png";
+      form.append("image[]", new Blob([new Uint8Array(r.bytes)], { type: r.mime }), `referencia-${i + 1}.${ext}`);
+    }
     ({ data } = await chamarApi({
       provider: PROVIDER,
       operation: "images.edits",
@@ -199,5 +204,5 @@ export async function gerarImagem(p: {
   }
   const b64 = data.data?.[0]?.b64_json;
   if (!b64) throw new Error("A API de imagem não devolveu imagem.");
-  return { bytes: Buffer.from(b64, "base64"), mime: "image/png", modelo: p.modelo };
+  return { bytes: Buffer.from(b64, "base64"), mime: "image/png", modelo: p.modelo, uso: data.usage ?? null };
 }

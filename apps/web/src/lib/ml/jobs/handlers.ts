@@ -23,6 +23,20 @@ import {
   sincronizarBoards,
 } from "../servicos/manutencao";
 import { sincronizarCategoria, sincronizarRaiz } from "../servicos/categorias";
+import { importarMidia, prepararRecorte } from "../servicos/midia";
+import {
+  aplicarOverlay,
+  avancarVariante,
+  checarFidelidade,
+  comporVariante,
+  gerarFundo,
+  gerarLote,
+  gerarPacote,
+  gerarPorReferencia,
+  planejarFamilia,
+  revalidarPacote,
+} from "../servicos/variantes";
+import { validarRedirectLink, validarRedirectsLote } from "../servicos/afiliados";
 import { lerConfig } from "../config";
 import { mlDb } from "../db";
 import { lerIntegracao } from "../integracoes/estado";
@@ -149,6 +163,77 @@ export const HANDLERS: RegistroHandlers = {
   REFRESH_TOKENS: () => renovarTokens(),
   SYNC_BOARDS: async (ctx) => (await exigirIntegracao(ctx, "pinterest", "Pinterest")) ?? sincronizarBoards(),
   DIAGNOSTICS: async (ctx) => ({ ...(await diagnosticar(ctx)) }),
+  // ---------------------------------------------------------------- V2
+  IMPORT_PRODUCT_MEDIA: async (ctx) => {
+    const p = payload(ctx, comProduto.extend({ refresh: z.boolean().optional() }));
+    return importarMidia(p.product_id, { refresh: p.refresh, ctx });
+  },
+  REFRESH_PRODUCT_MEDIA: async (ctx) => {
+    const p = payload(ctx, z.object({ product_id: uuid.optional(), batch: z.number().int().min(1).max(200).default(30) }).passthrough());
+    if (p.product_id) return importarMidia(p.product_id, { refresh: true, ctx });
+    // agendado: produtos em produção com fotos importadas há mais de 7 dias (ou nunca)
+    const semana = new Date(Date.now() - 7 * 86_400_000).toISOString();
+    const { data } = await mlDb()
+      .from("ml_products")
+      .select("id")
+      .in("status", ["approved", "waiting_affiliate_link", "ready_for_creative", "creative_draft", "ready_to_schedule", "scheduled", "published"])
+      .or(`media_imported_at.is.null,media_imported_at.lt.${semana}`)
+      .limit(p.batch);
+    const { enfileirar } = await import("./fila");
+    for (const { id } of (data ?? []) as { id: string }[]) {
+      await enfileirar({ tipo: "IMPORT_PRODUCT_MEDIA", payload: { product_id: id, refresh: true }, idempotencyKey: `media:${id}`, entidade: { tipo: "product", id }, parentId: ctx.job.id });
+    }
+    return { produtos: (data ?? []).length };
+  },
+  PREPARE_PRODUCT_CUTOUT: async (ctx) => {
+    const p = payload(ctx, z.object({ media_id: uuid }));
+    const r = await prepararRecorte(p.media_id, ctx);
+    // retoma as variantes do produto que esperavam o recorte
+    const { data: m } = await mlDb().from("ml_product_media").select("product_id").eq("id", p.media_id).single();
+    const { data: esperando } = await mlDb()
+      .from("ml_creatives")
+      .select("id")
+      .eq("product_id", (m as { product_id: string }).product_id)
+      .not("family_id", "is", null)
+      .is("base_asset_id", null)
+      .in("status", ["to_generate", "generating"]);
+    for (const { id } of (esperando ?? []) as { id: string }[]) await avancarVariante(id);
+    return { ...r, variantes_retomadas: (esperando ?? []).length };
+  },
+  PLAN_CREATIVE_FAMILY: async (ctx) => planejarFamilia(payload(ctx, z.object({ family_id: uuid })).family_id, ctx),
+  GENERATE_CREATIVE_BATCH: async (ctx) => gerarLote(payload(ctx, z.object({ family_id: uuid })).family_id, ctx),
+  GENERATE_LIFESTYLE_BACKGROUND: async (ctx) => gerarFundo(payload(ctx, comCriativo).creative_id, ctx),
+  GENERATE_REFERENCE_IMAGE: async (ctx) => gerarPorReferencia(payload(ctx, comCriativo).creative_id, ctx),
+  COMPOSE_EXACT_PRODUCT: async (ctx) => comporVariante(payload(ctx, comCriativo).creative_id, ctx),
+  APPLY_TEXT_OVERLAY: async (ctx) => aplicarOverlay(payload(ctx, comCriativo).creative_id, ctx),
+  CHECK_CREATIVE_FIDELITY: async (ctx) => checarFidelidade(payload(ctx, comCriativo).creative_id, ctx),
+  GENERATE_PINTEREST_PACKAGE: async (ctx) => {
+    const p = payload(ctx, z.object({ creative_id: uuid.optional(), batch: z.number().int().min(1).max(100).default(20) }).passthrough());
+    if (p.creative_id) return gerarPacote(p.creative_id, ctx);
+    // agendado: aprovados com pacote faltando/incompleto/inválido → gera ou revalida
+    const { data } = await mlDb()
+      .from("ml_creatives")
+      .select("id, package_status")
+      .not("family_id", "is", null)
+      .eq("status", "approved")
+      .in("package_status", ["missing", "incomplete", "invalid"])
+      .limit(p.batch);
+    let gerados = 0;
+    for (const c of (data ?? []) as { id: string; package_status: string }[]) {
+      if (ctx.restanteMs() < 20_000) break;
+      if (c.package_status === "missing") await gerarPacote(c.id, ctx);
+      else await revalidarPacote(c.id);
+      gerados++;
+    }
+    return { processados: gerados };
+  },
+  VALIDATE_AFFILIATE_REDIRECT: async (ctx) => {
+    const p = payload(ctx, z.object({ link_id: uuid.optional(), batch: z.number().int().min(1).max(500).default(50) }).passthrough());
+    if (p.link_id) return validarRedirectLink(p.link_id);
+    return validarRedirectsLote(p.batch);
+  },
+  // §15: o rollup diário por família/variante/cena/tipo é o mesmo cálculo de performance (dimensões ampliadas na ml05)
+  ROLLUP_CREATIVE_PERFORMANCE: () => calcularPerformance(),
   CLEANUP: async (ctx) => {
     const p = payload(ctx, z.object({ retention_days: z.number().int().min(1).max(3650).default(30) }).passthrough());
     return limpar(p.retention_days);

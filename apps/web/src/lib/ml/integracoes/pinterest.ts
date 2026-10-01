@@ -252,8 +252,34 @@ export interface PinCriado {
 export { LIMITES, montarPayloadPin, type NovoPin } from "./pinterest-payload";
 import { montarPayloadPin, type NovoPin } from "./pinterest-payload";
 
-export const criarPin = (p: NovoPin) =>
-  api<PinCriado>("pins.create", "/pins", { method: "POST", json: montarPayloadPin(p), timeoutMs: 60_000 });
+/**
+ * Cria o Pin. Se a conta recusar `ai_disclosures` (campo novo), registra a
+ * limitação, mantém o flag interno e repete sem ele — nunca falha o Pin por isso.
+ */
+export async function criarPin(p: NovoPin): Promise<PinCriado & { aiDisclosureEnviado: boolean }> {
+  const integ = await lerIntegracao(PROVIDER);
+  const suportado = integ.config.ai_disclosure_suportado !== false;
+  const enviar = Boolean(p.ai_modified) && p.enviar_ai_disclosure !== false && suportado;
+  try {
+    const r = await api<PinCriado>("pins.create", "/pins", {
+      method: "POST",
+      json: montarPayloadPin({ ...p, enviar_ai_disclosure: enviar }),
+      timeoutMs: 60_000,
+    });
+    return { ...r, aiDisclosureEnviado: enviar };
+  } catch (e) {
+    if (enviar && e instanceof ErroApiExterna && e.status === 400 && /ai_disclosure/i.test(`${e.message} ${e.corpo ?? ""}`)) {
+      await atualizarIntegracao(PROVIDER, { config: { ...integ.config, ai_disclosure_suportado: false } });
+      const r = await api<PinCriado>("pins.create", "/pins", {
+        method: "POST",
+        json: montarPayloadPin({ ...p, enviar_ai_disclosure: false }),
+        timeoutMs: 60_000,
+      });
+      return { ...r, aiDisclosureEnviado: false };
+    }
+    throw e;
+  }
+}
 
 /** Pins recentes do board — usado para não duplicar após falha ambígua (timeout). */
 export async function pinsRecentesDoBoard(boardId: string): Promise<PinCriado[]> {

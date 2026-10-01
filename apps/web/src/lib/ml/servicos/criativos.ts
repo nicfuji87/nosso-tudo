@@ -351,8 +351,12 @@ export async function gerarImagem(creativeId: string, opts: { userId?: string | 
 }
 
 /** Upload manual (modo ChatGPT ou upload/substituição). */
-export async function receberImagemManual(creativeId: string, bytes: Buffer, userId: string | null): Promise<{ avisos: string[] }> {
+export async function receberImagemManual(creativeId: string, bytes: Buffer, userId: string | null, opts: { feitaComIA?: boolean } = {}): Promise<{ avisos: string[] }> {
   const c = await lerCriativo(creativeId);
+  if (c.family_id) {
+    const { receberImagemVariante } = await import("./variantes");
+    return receberImagemVariante(creativeId, bytes, { userId, feitaComIA: opts.feitaComIA });
+  }
   if (c.status === "published" || c.status === "archived") throw new Error("Criativo publicado/arquivado não pode trocar de imagem.");
   if (c.current_asset_id) await revisao(c, "replace_image", userId);
   const modo: ModoImagem = c.image_mode === "manual_chatgpt" ? "manual_chatgpt" : "upload";
@@ -419,6 +423,23 @@ export async function aprovarCriativo(id: string, ator: Ator & { motivo?: string
   const c = await lerCriativo(id);
   if (c.status === "approved") return;
   if (!c.current_asset_id || !c.title) throw new Error("O criativo precisa de imagem e título antes de ser aprovado.");
+  if (c.family_id) {
+    // V2: fidelidade (§5.2) e pacote Pinterest completo (§9) antes de aprovar
+    const [geral, cfg] = await Promise.all([lerConfig("geral"), lerConfig("criativos_v2")]);
+    const { fidelidadeLiberaAprovacao } = await import("../familias/pacote");
+    const lib = fidelidadeLiberaAprovacao({
+      modo: c.fidelity_mode,
+      imagemManualOuIa: c.image_mode === "manual_chatgpt" || c.image_mode === "upload",
+      status: c.fidelity_status,
+      exigirRevisao: cfg.exigir_revisao_referencia,
+      automatico: ator.actorType === "automation",
+      nivelAutomacao: geral.nivel_automacao,
+    });
+    if (!lib.ok) throw new Error(lib.motivo);
+    const { revalidarPacote } = await import("./variantes");
+    const pacote = await revalidarPacote(id);
+    if (pacote.status !== "ready") throw new Error(`Pacote Pinterest ${pacote.status === "invalid" ? "inválido" : "incompleto"}: ${pacote.erros.map((e) => e.mensagem).join(" ")}`);
+  }
   await mudarStatusCriativo(id, "approved", {
     ...ator,
     motivo: ator.motivo ?? "Aprovado",
@@ -495,6 +516,16 @@ export async function editarCriativo(id: string, e: EdicaoCriativo, userId: stri
     .eq("creative_id", id)
     .in("status", ["draft", "pending_approval", "scheduled", "blocked", "paused", "failed"]);
   await auditar({ acao: "criativo.editar", entidade: "creative", entidadeId: id, actorId: userId, antes: { title: c.title, headline: c.headline }, depois: { title: final.titulo, headline: final.headline } });
+  if (c.family_id) {
+    const v2 = await import("./variantes");
+    // headline mudou numa variante com texto na arte → reaplica o overlay
+    if (c.has_text_overlay && e.headline !== undefined && final.headline !== c.headline && c.base_asset_id) {
+      await mlDb().from("ml_creatives").update({ current_asset_id: c.base_asset_id }).eq("id", id);
+      if (c.status === "approved") await mudarStatusCriativo(id, "review", { motivo: "Headline da arte alterada", actorId: userId });
+      await enfileirar({ tipo: "APPLY_TEXT_OVERLAY", payload: { creative_id: id }, idempotencyKey: `v2:APPLY_TEXT_OVERLAY:${id}`, entidade: { tipo: "creative", id }, criadoPor: userId });
+    }
+    await v2.revalidarPacote(id);
+  }
   return final.alteracoes;
 }
 

@@ -84,6 +84,13 @@ export const configSchemas = {
   ia: z.object({
     modelo_texto: z.string().min(1).default("gpt-6-luna"),
     modelo_imagem: z.string().min(1).default("gpt-image-2.5-flare"),
+    modelo_visao: z.string().min(1).default("gpt-6-luna"),
+    // preços estimados (USD) para custo de lote — ajuste conforme a tabela vigente da OpenAI
+    preco_imagem_low: z.number().min(0).default(0.02),
+    preco_imagem_medium: z.number().min(0).default(0.06),
+    preco_imagem_high: z.number().min(0).default(0.2),
+    preco_texto: z.number().min(0).default(0.002),
+    preco_visao: z.number().min(0).default(0.004),
     modo: z.enum(["economico", "qualidade"]).default("economico"),
     qualidade_imagem: z.enum(["low", "medium", "high"]).default("medium"),
     variacao: z.enum(["conservadora", "equilibrada", "criativa"]).default("equilibrada"),
@@ -97,6 +104,38 @@ export const configSchemas = {
     cta_padrao: z.string().max(40).default("Veja no Mercado Livre"),
     cor_fundo: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#F7F6F2"),
     cor_destaque: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#3D6D84"),
+  }),
+  criativos_v2: z.object({
+    quantidade_padrao: z.number().int().min(1).max(12).default(6),
+    mix: z
+      .object({
+        lifestyle_no_text: z.number().int().min(0).max(12).default(3),
+        lifestyle_text: z.number().int().min(0).max(12).default(2),
+        editorial: z.number().int().min(0).max(12).default(1),
+        product_layout: z.number().int().min(0).max(12).default(0),
+      })
+      .default({}),
+    modo_fidelidade_padrao: z.enum(["exact_composition", "reference_generation", "original_layout"]).default("exact_composition"),
+    exigir_revisao_referencia: z.boolean().default(true),
+    texto_programatico: z.boolean().default(true),
+    formato: z.literal("2:3").default("2:3"),
+    resolucao: z.enum(["1000x1500", "1024x1536"]).default("1000x1500"),
+    limite_custo_lote_usd: z.number().min(0).max(100).default(1.5),
+    cooldown_variantes_horas: z.number().int().min(0).max(24 * 60).default(72),
+    max_variantes_ativas_familia: z.number().int().min(1).max(30).default(8),
+    retencao_rejeitados_dias: z.number().int().min(1).max(365).default(30),
+    limite_board_dia: z.number().int().min(1).max(50).default(3),
+    similaridade_visual_max: z.number().int().min(0).max(32).default(6),
+    similaridade_headline_max: z.number().min(0).max(1).default(0.85),
+    atraso_maximo_min: z.number().int().min(5).max(1440).default(90),
+    auto_selecionar_referencias: z.boolean().default(true),
+  }),
+  pinterest_copy: z.object({
+    tom: z.string().max(200).default("próximo, prático e inspirador, sem exageros"),
+    regras_titulo: z.string().max(500).default("Comece pelo benefício ou problema resolvido; inclua a palavra-chave principal."),
+    regras_descricao: z.string().max(800).default("Explique o uso no dia a dia em 2 a 3 frases; termine com um convite para ver o produto."),
+    regra_alt: z.string().max(300).default("Descreva o que aparece na imagem: produto, ambiente e uso. Sem palavras-chave repetidas."),
+    enviar_ai_disclosure: z.boolean().default(true),
   }),
   runtime: z.object({
     app_url: z.string().url().nullable().default(null),

@@ -9,6 +9,8 @@ import { ErroApiExterna } from "../http";
 import { validarLinkAfiliado } from "../afiliados/validacao";
 import { problemasDeTexto } from "../conteudo/guardrails";
 import { proximoHorarioLivre, type RegrasPublicacao } from "../publicacao/janelas";
+import { avaliarRepeticao, escolherVariante, inicioAposCooldown, type PinExistente, type RegrasRepeticao } from "../publicacao/repeticao";
+import { diaNoFuso } from "../tempo";
 import * as ml from "../integracoes/mercadolivre";
 import * as pinterest from "../integracoes/pinterest";
 import { lerIntegracao } from "../integracoes/estado";
@@ -84,25 +86,58 @@ async function escolherBoard(produto: ProdutoRow, boardId?: string | null): Prom
   return lista.find((b) => b.is_default) ?? null;
 }
 
-/** Regras anti-repetição (spec §11/§22). Retorna motivos que impedem. */
-async function conflitosRepeticao(productId: string, boardId: string | null, ignorarPinId?: string): Promise<string[]> {
-  const pub = await lerConfig("publicacao");
-  const db = mlDb();
-  const motivos: string[] = [];
-  const desdeSemana = new Date(Date.now() - 7 * 86_400_000).toISOString();
-  let q = db.from("ml_pins").select("id, board_id, status, published_at, scheduled_at").eq("product_id", productId).in("status", ["scheduled", "publishing", "published", "pending_approval"]);
+/** Regras anti-repetição (spec §11/§22 + V2 §16). */
+async function regrasRepeticao(): Promise<RegrasRepeticao> {
+  const [pub, cfg, geral] = await Promise.all([lerConfig("publicacao"), lerConfig("criativos_v2"), lerConfig("geral")]);
+  return {
+    maxPinsProdutoSemana: pub.max_pins_produto_semana,
+    cooldownHoras: cfg.cooldown_variantes_horas,
+    janelaDuplicacaoDias: pub.janela_duplicacao_dias,
+    limiteBoardDia: cfg.limite_board_dia,
+    similaridadeVisualMax: cfg.similaridade_visual_max,
+    similaridadeHeadlineMax: cfg.similaridade_headline_max,
+    diaNoFuso: (d: Date) => diaNoFuso(d, geral.timezone),
+  };
+}
+
+/** Pins relevantes (mesmo produto ou mesmo board) num raio em torno de `quando`. */
+async function pinsParaRepeticao(productId: string, boardId: string | null, quando: Date, raioDias: number, ignorarPinId?: string): Promise<PinExistente[]> {
+  const de = new Date(quando.getTime() - raioDias * 86_400_000).toISOString();
+  const ate = new Date(quando.getTime() + raioDias * 86_400_000).toISOString();
+  let q = mlDb()
+    .from("ml_pins")
+    .select("id, product_id, board_id, creative_id, published_at, scheduled_at")
+    .in("status", ["scheduled", "publishing", "published", "pending_approval"])
+    .or(boardId ? `product_id.eq.${productId},board_id.eq.${boardId}` : `product_id.eq.${productId}`)
+    .limit(1000);
   if (ignorarPinId) q = q.neq("id", ignorarPinId);
   const { data } = await q;
-  const pins = (data ?? []) as { board_id: string | null; published_at: string | null; scheduled_at: string | null }[];
-  const naSemana = pins.filter((p) => (p.published_at ?? p.scheduled_at ?? "") >= desdeSemana).length;
-  if (naSemana >= pub.max_pins_produto_semana) motivos.push(`Produto já tem ${naSemana} Pin(s) nos últimos 7 dias (limite ${pub.max_pins_produto_semana}).`);
-  if (boardId && pub.janela_duplicacao_dias > 0) {
-    const desde = new Date(Date.now() - pub.janela_duplicacao_dias * 86_400_000).toISOString();
-    if (pins.some((p) => p.board_id === boardId && (p.published_at ?? p.scheduled_at ?? "") >= desde)) {
-      motivos.push(`Mesmo produto já foi para este board nos últimos ${pub.janela_duplicacao_dias} dias.`);
-    }
-  }
-  return motivos;
+  const rows = ((data ?? []) as { id: string; product_id: string; board_id: string | null; creative_id: string; published_at: string | null; scheduled_at: string | null }[]).filter((r) => {
+    const t = r.published_at ?? r.scheduled_at;
+    return Boolean(t) && t! >= de && t! <= ate;
+  });
+  const ids = Array.from(new Set(rows.map((r) => r.creative_id)));
+  const { data: cr } = ids.length ? await mlDb().from("ml_creatives").select("id, image_hash, headline").in("id", ids) : { data: [] };
+  const porId = new Map(((cr ?? []) as { id: string; image_hash: string | null; headline: string | null }[]).map((c) => [c.id, c]));
+  return rows.map((r) => ({
+    id: r.id,
+    productId: r.product_id,
+    boardId: r.board_id,
+    quando: new Date((r.published_at ?? r.scheduled_at)!),
+    imageHash: porId.get(r.creative_id)?.image_hash ?? null,
+    headline: porId.get(r.creative_id)?.headline ?? null,
+    creativeId: r.creative_id,
+  }));
+}
+
+async function conflitosRepeticao(
+  cand: { productId: string; boardId: string | null; creativeId: string; quando: Date },
+  ignorarPinId?: string,
+): Promise<{ codigo: string; mensagem: string }[]> {
+  const regras = await regrasRepeticao();
+  const c = await lerCriativo(cand.creativeId);
+  const pins = await pinsParaRepeticao(cand.productId, cand.boardId, cand.quando, Math.max(regras.janelaDuplicacaoDias, 7), ignorarPinId);
+  return avaliarRepeticao({ ...cand, imageHash: c.image_hash, headline: c.headline }, pins, regras);
 }
 
 export interface OpcoesCriarPin extends Ator {
@@ -126,16 +161,50 @@ export async function criarPin(creativeId: string, o: OpcoesCriarPin = {}): Prom
   if (!asset) throw new Error("O criativo não tem imagem.");
   const board = await escolherBoard(produto, o.boardId ?? c.board_id);
   if (!board) throw new Error("Nenhum board disponível. Sincronize os boards e defina um padrão ou o mapeamento por categoria.");
-  if (!o.ignorarRepeticao) {
-    const conflitos = await conflitosRepeticao(produto.id, board.id);
-    if (conflitos.length) throw new Error(conflitos.join(" "));
+  if (c.family_id) {
+    // V2 §9: só publica variante com pacote Pinterest completo e válido
+    const { revalidarPacote } = await import("./variantes");
+    const pacote = await revalidarPacote(c.id);
+    if (pacote.status !== "ready") throw new Error(`Pacote Pinterest ${pacote.status === "invalid" ? "inválido" : "incompleto"}: ${pacote.erros.map((e) => e.mensagem).join(" ")}`);
   }
 
   const aprovacaoDispensada = !pub.exigir_aprovacao || (produto.score != null && Number(produto.score) >= pub.autopublicar_score_min && o.actorType === "automation");
   let scheduledAt: Date | null = null;
   if (o.quando === "agora") scheduledAt = new Date();
   else if (o.quando instanceof Date) scheduledAt = o.quando;
-  else if (o.quando === "auto") scheduledAt = await proximoHorario();
+  else if (o.quando === "auto") {
+    // próxima janela livre que também respeite cooldown do produto e limite do board (V2 §16)
+    const regras = await regrasRepeticao();
+    const pinsProduto = await pinsParaRepeticao(produto.id, board.id, new Date(), 30);
+    let desde = inicioAposCooldown(new Date(), pinsProduto.filter((x) => x.productId === produto.id), regras.cooldownHoras);
+    for (let tentativa = 0; tentativa < 20; tentativa++) {
+      const slot = await proximoHorario(desde);
+      if (!slot) break;
+      const conf = o.ignorarRepeticao ? [] : await conflitosRepeticao({ productId: produto.id, boardId: board.id, creativeId: c.id, quando: slot });
+      if (!conf.length) {
+        scheduledAt = slot;
+        break;
+      }
+      const adiaveis = conf.filter((x) => x.codigo === "cooldown" || x.codigo === "board_dia" || x.codigo === "limite_produto");
+      if (adiaveis.length !== conf.length) throw new Error(conf.map((x) => x.mensagem).join(" "));
+      desde = new Date(slot.getTime() + 3 * 3_600_000);
+    }
+    if (!scheduledAt) throw new Error("Nenhum horário livre que respeite janelas, cooldown e limite do board nos próximos dias.");
+  }
+  if (scheduledAt && o.quando !== "auto" && !o.ignorarRepeticao) {
+    const conflitos = await conflitosRepeticao({ productId: produto.id, boardId: board.id, creativeId: c.id, quando: scheduledAt });
+    if (conflitos.length) {
+      await auditar({
+        acao: "variante.bloqueada",
+        entidade: "creative",
+        entidadeId: c.id,
+        actorId: o.actorId,
+        actorType: o.actorType,
+        metadata: { evento: conflitos.some((x) => x.codigo === "cooldown") ? "bloqueada_cooldown" : "bloqueada_repeticao", conflitos },
+      });
+      throw new Error(conflitos.map((x) => x.mensagem).join(" "));
+    }
+  }
   const status: PinStatus = !scheduledAt ? "draft" : aprovacaoDispensada || o.actorType === "user" ? "scheduled" : "pending_approval";
 
   const { data, error } = await db
@@ -155,6 +224,9 @@ export async function criarPin(creativeId: string, o: OpcoesCriarPin = {}): Prom
       timezone: geral.timezone,
       environment: (await pinterest.ambiente()) ?? "production",
       validation: { preco_referencia: produto.current_price },
+      family_id: c.family_id,
+      board_section_id: c.board_section_id,
+      ai_modified: c.ai_modified,
       created_by: o.actorId ?? null,
     })
     .select("*")
@@ -356,9 +428,35 @@ export async function validarPin(pinId: string, opts: { checarProdutoOnline?: bo
     }
   } else add("imagem", false, "Sem imagem");
 
-  // Repetição
-  const conflitos = await conflitosRepeticao(pin.product_id, pin.board_id, pin.id);
-  add("repeticao", conflitos.length === 0, conflitos.length ? conflitos.join(" ") : "Sem repetição recente");
+  // Repetição (V2 §16): no horário em que o Pin vai sair
+  const quandoPin = pin.scheduled_at && new Date(pin.scheduled_at).getTime() > Date.now() ? new Date(pin.scheduled_at) : new Date();
+  const conflitos = await conflitosRepeticao({ productId: pin.product_id, boardId: pin.board_id, creativeId: pin.creative_id, quando: quandoPin }, pin.id);
+  add("repeticao", conflitos.length === 0, conflitos.length ? conflitos.map((x) => x.mensagem).join(" ") : "Sem repetição recente");
+
+  // V2: pacote Pinterest, fidelidade e redirect do link
+  const cr = await lerCriativo(pin.creative_id);
+  if (cr.family_id) {
+    const { revalidarPacote } = await import("./variantes");
+    const pacote = await revalidarPacote(cr.id);
+    add("pacote", pacote.status === "ready", pacote.status === "ready" ? "Pacote Pinterest completo" : `Pacote ${pacote.status}: ${pacote.erros.map((e) => e.mensagem).join(" ")}`);
+    const cfg = await lerConfig("criativos_v2");
+    const { fidelidadeLiberaAprovacao } = await import("../familias/pacote");
+    const lib = fidelidadeLiberaAprovacao({
+      modo: cr.fidelity_mode,
+      imagemManualOuIa: cr.image_mode === "manual_chatgpt" || cr.image_mode === "upload",
+      status: cr.fidelity_status,
+      exigirRevisao: cfg.exigir_revisao_referencia,
+      automatico: false,
+      nivelAutomacao: geral.nivel_automacao,
+    });
+    add("fidelidade", lib.ok && cr.fidelity_status !== "failed", lib.ok && cr.fidelity_status !== "failed" ? `Fidelidade: ${cr.fidelity_status}` : lib.motivo ?? "Fidelidade reprovada");
+  }
+  if (pin.affiliate_link_id) {
+    const { data: lk } = await mlDb().from("ml_affiliate_links").select("redirect_status, final_host").eq("id", pin.affiliate_link_id).maybeSingle();
+    const l = lk as { redirect_status: string; final_host: string | null } | null;
+    if (l) add("redirect", l.redirect_status !== "inconsistent", l.redirect_status === "inconsistent" ? `Link redireciona para destino inconsistente (${l.final_host ?? "?"})` : `Redirect: ${l.redirect_status}${l.final_host ? ` → ${l.final_host}` : ""}`);
+  }
+  add("ai_disclosure", true, cr.ai_modified ? "Conteúdo de IA: será declarado (ai_disclosures AI_MODIFIED)" : "Sem IA na imagem", false);
 
   // Textos e disclosure
   const textos = problemasDeTexto({ titulo: pin.title, descricao: pin.description, disclosure: geral.disclosure, exigirDisclosure: pub.exigir_disclosure });
@@ -419,6 +517,7 @@ export async function publicarPin(pinId: string, ctx: CtxJob): Promise<Record<st
   await mlDb().from("ml_pins").update({ attempts: pin.attempts + 1 }).eq("id", pinId);
   const { data: board } = await mlDb().from("ml_pinterest_boards").select("external_id").eq("id", pin.board_id!).single();
   try {
+    const pc = await lerConfig("pinterest_copy");
     const criado = await pinterest.criarPin({
       board_id: (board as { external_id: string }).external_id,
       title: pin.title ?? "",
@@ -426,11 +525,26 @@ export async function publicarPin(pinId: string, ctx: CtxJob): Promise<Record<st
       link: pin.link_url ?? "",
       alt_text: pin.alt_text ?? undefined,
       media_url: pin.media_url ?? "",
+      board_section_id: pin.board_section_id,
+      ai_modified: pin.ai_modified,
+      enviar_ai_disclosure: pc.enviar_ai_disclosure,
     });
+    await mlDb().from("ml_pins").update({ ai_disclosure_sent: criado.aiDisclosureEnviado }).eq("id", pinId);
     await marcarPublicado(pin, criado.id, ctx);
-    return { pin_id: criado.id };
+    return { pin_id: criado.id, ai_disclosure: criado.aiDisclosureEnviado };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    // V2 §10: Pinterest recusou o formato do link → pendência específica; o destino nunca é trocado em silêncio
+    if (e instanceof ErroApiExterna && e.status === 400 && /link|url/i.test(`${e.message} ${e.corpo ?? ""}`)) {
+      await abrirPendencia({
+        tipo: "publish_blocked",
+        titulo: "Pinterest recusou o link de afiliado",
+        detalhe: `${msg}. Gere outro link no painel de afiliados (não alteramos o destino automaticamente).`,
+        entidade: { tipo: "pin", id: pinId },
+        dedupeKey: `link_recusado:${pinId}`,
+        prioridade: 15,
+      });
+    }
     const ambigua = e instanceof ErroApiExterna && (e.tipo === "timeout" || e.tipo === "network");
     // Ambígua: mantém "publishing" para a próxima tentativa conferir o board antes.
     if (!ambigua) {
@@ -476,29 +590,75 @@ async function marcarPublicado(pin: PinRow, externalId: string, ctx: CtxJob): Pr
 // ---------------------------------------------------------------------------
 export async function despacharPublicacoes(): Promise<Record<string, unknown>> {
   const db = mlDb();
+  const cfg = await lerConfig("criativos_v2");
+  const agora = Date.now();
   const { data: vencidos } = await db
     .from("ml_pins")
-    .select("id")
+    .select("id, scheduled_at")
     .eq("status", "scheduled")
-    .lte("scheduled_at", new Date().toISOString())
+    .lte("scheduled_at", new Date(agora).toISOString())
     .is("external_pin_id", null)
-    .limit(20);
-  for (const p of (vencidos ?? []) as { id: string }[]) await enfileirarPublicacao(p.id, null);
+    .order("scheduled_at", { ascending: false })
+    .limit(50);
+  const lista = (vencidos ?? []) as { id: string; scheduled_at: string }[];
+  // V2 §16: fila atrasada (worker parado) não vira rajada — publica 1 dos muito atrasados e reagenda o resto
+  const limiteAtraso = agora - cfg.atraso_maximo_min * 60_000;
+  const emDia = lista.filter((p) => new Date(p.scheduled_at).getTime() >= limiteAtraso);
+  const atrasados = lista.filter((p) => new Date(p.scheduled_at).getTime() < limiteAtraso);
+  const publicar = [...emDia, ...atrasados.slice(0, emDia.length ? 0 : 1)];
+  for (const p of publicar) await enfileirarPublicacao(p.id, null);
+  let reagendados = 0;
+  for (const p of atrasados.filter((x) => !publicar.includes(x))) {
+    try {
+      await agendarPin(p.id, "auto", { actorType: "automation" });
+      reagendados++;
+    } catch {
+      /* sem horário livre: fica para a próxima rodada */
+    }
+  }
+  if (reagendados) await auditar({ acao: "publicacao.anti_flood", actorType: "automation", metadata: { evento: "bloqueada_repeticao", reagendados } });
 
-  // Automação: criativos aprovados sem Pin → agenda na próxima janela.
+  // Automação: da "piscina" de variantes aprovadas, agenda UMA por produto (diversidade + cooldown)
   let agendados = 0;
   const auto = await lerConfig("automacao");
   if (auto.auto_agendar && !auto.pausado) {
-    const { data: aprovados } = await db.from("ml_creatives").select("id").eq("status", "approved").limit(20);
-    for (const c of (aprovados ?? []) as { id: string }[]) {
+    const { data: aprovados } = await db
+      .from("ml_creatives")
+      .select("id, product_id, visual_type, scene_preset_id, quality_score, created_at")
+      .eq("status", "approved")
+      .order("created_at")
+      .limit(200);
+    const porProduto = new Map<string, { id: string; visual_type: string; scene_preset_id: string | null; quality_score: number | null; created_at: string }[]>();
+    for (const c of (aprovados ?? []) as { id: string; product_id: string; visual_type: string; scene_preset_id: string | null; quality_score: number | null; created_at: string }[]) {
       const { count } = await db.from("ml_pins").select("id", { count: "exact", head: true }).eq("creative_id", c.id).neq("status", "canceled");
-      if ((count ?? 0) === 0) {
-        await agendarCriativoAutomatico(c.id);
-        agendados++;
-      }
+      if ((count ?? 0) > 0) continue;
+      porProduto.set(c.product_id, [...(porProduto.get(c.product_id) ?? []), c]);
+    }
+    for (const [productId, cands] of porProduto) {
+      if (agendados >= 10) break;
+      const { data: ult } = await db
+        .from("ml_pins")
+        .select("creative_id, status")
+        .eq("product_id", productId)
+        .in("status", ["scheduled", "publishing", "published", "pending_approval"])
+        .order("created_at", { ascending: false })
+        .limit(5);
+      const ultIds = ((ult ?? []) as { creative_id: string }[]).map((u) => u.creative_id);
+      const { data: ultCr } = ultIds.length ? await db.from("ml_creatives").select("id, visual_type, scene_preset_id").in("id", ultIds) : { data: [] };
+      const ultimos = ultIds
+        .map((id) => ((ultCr ?? []) as { id: string; visual_type: string; scene_preset_id: string | null }[]).find((x) => x.id === id))
+        .filter((x): x is { id: string; visual_type: string; scene_preset_id: string | null } => Boolean(x))
+        .map((x) => ({ visualType: x.visual_type, sceneKey: x.scene_preset_id }));
+      const escolhida = escolherVariante(
+        cands.map((c) => ({ id: c.id, visualType: c.visual_type, sceneKey: c.scene_preset_id, qualidade: c.quality_score != null ? Number(c.quality_score) : null, criadoEm: c.created_at })),
+        ultimos,
+      );
+      if (!escolhida) continue;
+      await agendarCriativoAutomatico(escolhida.id);
+      agendados++;
     }
   }
-  return { publicacoes_enfileiradas: (vencidos ?? []).length, agendados };
+  return { publicacoes_enfileiradas: publicar.length, reagendados_anti_flood: reagendados, agendados };
 }
 
 /** Revalida os Pins que vão sair em breve (bloqueia + pendência se houver problema). */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validarLinkAfiliado } from "./validacao";
+import { classificarRedirect, validarLinkAfiliado } from "./validacao";
 import { descontoPct, tendenciasQueCasam } from "../scoring/sinais";
 
 describe("validarLinkAfiliado", () => {
@@ -54,5 +54,16 @@ describe("sinais", () => {
     expect(descontoPct(75, 100)).toBe(25);
     expect(descontoPct(100, 90)).toBe(0);
     expect(descontoPct(null, 100)).toBeNull();
+  });
+});
+
+describe("classificarRedirect", () => {
+  it("destino com o código do produto → ok; outro produto do ML → ok_unverified", () => {
+    expect(classificarRedirect({ ok: true, destino: "https://produto.mercadolivre.com.br/MLB-123456-kit" }, ["MLB123456"])).toBe("ok");
+    expect(classificarRedirect({ ok: true, destino: "https://www.mercadolivre.com.br/social/x" }, ["MLB123456"])).toBe("ok_unverified");
+  });
+  it("fora do ML → inconsistent; não conferido → error", () => {
+    expect(classificarRedirect({ ok: false, destino: "https://golpe.com" }, ["MLB1"])).toBe("inconsistent");
+    expect(classificarRedirect({ ok: true, destino: null, conferido: false }, ["MLB1"])).toBe("error");
   });
 });
