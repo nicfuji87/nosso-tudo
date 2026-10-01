@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { angulosPorRegra, copyPorTemplate, nomeCurto, type DadosProdutoConteudo } from "./angulos";
+import { angulosPorRegra, copyPorTemplate, nomeCurto, nomeGancho, type DadosProdutoConteudo } from "./angulos";
 
 const produto: DadosProdutoConteudo = {
   titulo: "Kit 6 Organizadores De Geladeira Acrílico Transparente (MLB123)",
@@ -25,6 +25,15 @@ describe("ângulos por regra", () => {
   });
   it("nomeCurto tira códigos e parênteses", () => {
     expect(nomeCurto(produto.titulo)).toBe("Kit 6 Organizadores De Geladeira");
+  });
+  it("nomeGancho tira kit/quantidade e fica curto", () => {
+    expect(nomeGancho(produto.titulo)).toBe("organizadores de geladeira acrílico");
+    expect(nomeGancho("Luminária De Mesa Led Articulada 10w")).toBe("luminária de mesa led");
+  });
+  it("título não repete o nome quando o gancho já o contém", () => {
+    const [a] = angulosPorRegra(produto, 1);
+    const c = copyPorTemplate(produto, a!, "Veja");
+    expect(c.titulo).toBe(`${a!.hook} | OrganizaJá`);
   });
 });
 

@@ -22,7 +22,9 @@ export async function agendarDescobertaPorCategoria(ctx: CtxJob): Promise<Record
     .order("priority", { ascending: false });
   const cats = ((data ?? []) as { id: string }[]).map((c) => c.id);
   if (!cats.length) {
-    throw new ErroPermanente("Nenhuma categoria acompanhada. Escolha categorias em Configurações › Categorias.");
+    const msg = "Nenhuma categoria acompanhada. Escolha categorias em Configurações › Categorias.";
+    if (ctx.job.created_by) throw new ErroPermanente(msg);
+    return { ignorado: msg };
   }
   const geral = await lerConfig("geral");
   const hoje = diaNoFuso(new Date(), geral.timezone);
@@ -50,7 +52,7 @@ export async function descobrirMaisVendidos(categoriaId: string, ctx: CtxJob): P
   const geral = await lerConfig("geral");
   const hoje = diaNoFuso(new Date(), geral.timezone);
 
-  let listas: { categoria: string; itens: ml.HighlightML[] }[] = [];
+  const listas: { categoria: string; itens: ml.HighlightML[] }[] = [];
   const principal = await ml.maisVendidos(categoriaId);
   if (principal && principal.length) {
     listas.push({ categoria: categoriaId, itens: principal });

@@ -20,7 +20,7 @@ import {
   PROMPT_VERSAO,
 } from "../conteudo/ia";
 import { baixarImagem, salvarAsset, salvarReferencia, variante } from "../media/storage";
-import { renderizarComposicao } from "../media/composicao";
+import { renderizarComposicao, renderizarRecorte } from "../media/composicao";
 import { dadosConteudo } from "./scoring";
 import { lerProduto, recalcularStatus } from "./produtos";
 import type { AnguloRow, CategoriaRow, CriativoRow, ProdutoRow } from "../tipos";
@@ -156,7 +156,8 @@ export async function gerarAngulos(productId: string, opts: { quantidade?: numbe
 // ---------------------------------------------------------------------------
 export async function modoPadrao(): Promise<ModoImagem> {
   const cr = await lerConfig("criativos");
-  if (cr.modo_imagem_padrao === "api" && !(await openai.configurada())) return "composition";
+  // spec §8: sem OpenAI, "Gerar criativos" abre o modo manual (ChatGPT)
+  if (cr.modo_imagem_padrao === "api" && !(await openai.configurada())) return "manual_chatgpt";
   return cr.modo_imagem_padrao;
 }
 
@@ -368,14 +369,19 @@ export async function receberImagemManual(creativeId: string, bytes: Buffer, use
 function qualidade(c: CriativoRow, asset: { width: number | null; height: number | null } | null): { score: number; notas: string[] } {
   let s = 100;
   const notas: string[] = [];
-  if (!c.title) (s -= 30), notas.push("Sem título");
-  if (!c.description || c.description.length < 80) (s -= 15), notas.push("Descrição curta");
-  if (!c.alt_text) (s -= 10), notas.push("Sem texto alternativo");
-  if ((c.keywords ?? []).length < 2) (s -= 10), notas.push("Poucas palavras-chave");
-  if (!asset) (s -= 40), notas.push("Sem imagem");
-  else if (asset.width && asset.height && asset.height / asset.width < 1.3) (s -= 15), notas.push("Imagem não vertical");
+  const penalizar = (cond: boolean, pontos: number, nota: string) => {
+    if (!cond) return;
+    s -= pontos;
+    notas.push(nota);
+  };
+  penalizar(!c.title, 30, "Sem título");
+  penalizar(!c.description || c.description.length < 80, 15, "Descrição curta");
+  penalizar(!c.alt_text, 10, "Sem texto alternativo");
+  penalizar((c.keywords ?? []).length < 2, 10, "Poucas palavras-chave");
+  penalizar(!asset, 40, "Sem imagem");
+  penalizar(Boolean(asset?.width && asset.height && asset.height / asset.width < 1.3), 15, "Imagem não vertical");
   const qn = (c.quality_notes as { headline_repetida?: boolean } | null) ?? {};
-  if (qn.headline_repetida) (s -= 15), notas.push("Headline parecida com outra recente");
+  penalizar(Boolean(qn.headline_repetida), 15, "Headline parecida com outra recente");
   return { score: Math.max(0, s), notas };
 }
 
@@ -560,4 +566,48 @@ export async function gerarVariacoes(productId: string, userId: string | null): 
   }
   const criados = await criarCriativos(productId, ids.slice(0, vagas), { actorId: userId, actorType: "user" });
   return criados.length;
+}
+
+/** "Imagem escolhida" no editor: volta para uma imagem anterior do histórico. */
+export async function usarAsset(creativeId: string, assetId: string, userId: string | null): Promise<void> {
+  const c = await lerCriativo(creativeId);
+  if (["published", "archived"].includes(c.status)) throw new Error("Criativo publicado/arquivado não pode trocar de imagem.");
+  const { data } = await mlDb().from("ml_creative_assets").select("id").eq("id", assetId).eq("creative_id", creativeId).maybeSingle();
+  if (!data) throw new Error("Imagem não pertence a este criativo.");
+  if (c.current_asset_id === assetId) return;
+  await revisao(c, "replace_image", userId);
+  await mlDb().from("ml_creatives").update({ current_asset_id: assetId, image_status: "ready" }).eq("id", creativeId);
+  await mlDb()
+    .from("ml_pins")
+    .update({ media_url: ((await mlDb().from("ml_creative_assets").select("public_url").eq("id", assetId).single()).data as { public_url: string }).public_url })
+    .eq("creative_id", creativeId)
+    .in("status", ["draft", "pending_approval", "scheduled", "blocked", "paused", "failed"]);
+  await auditar({ acao: "criativo.usar_imagem", entidade: "creative", entidadeId: creativeId, actorId: userId, metadata: { asset: assetId } });
+  if (c.status === "approved") await mudarStatusCriativo(creativeId, "review", { motivo: "Imagem trocada", actorId: userId });
+  await finalizarSePronto(creativeId, { actorId: userId, actorType: "user" });
+}
+
+/** Crop 2:3 por ponto focal sobre a imagem atual — gera um novo asset (histórico preservado). */
+export async function recortarImagem(creativeId: string, foco: { x: number; y: number; zoom: number }, userId: string | null): Promise<string> {
+  const c = await lerCriativo(creativeId);
+  if (!c.current_asset_id) throw new Error("O criativo ainda não tem imagem.");
+  if (["published", "archived"].includes(c.status)) throw new Error("Criativo publicado/arquivado não pode ser recortado.");
+  const { data } = await mlDb().from("ml_creative_assets").select("*").eq("id", c.current_asset_id).single();
+  const a = data as { public_url: string; width: number | null; height: number | null; mode: "api" | "manual_chatgpt" | "upload" | "composition" };
+  if (!a.width || !a.height) throw new Error("Dimensões da imagem desconhecidas — não é possível recortar.");
+  const img = await baixarImagem(a.public_url);
+  if (img.mime === "image/webp") throw new Error("Recorte não suporta WEBP; envie PNG ou JPG.");
+  const bytes = await renderizarRecorte({ ...img, largura: a.width, altura: a.height }, foco);
+  await revisao(c, "replace_image", userId);
+  const novo = await salvarAsset({ creativeId, bytes, modo: a.mode, prompt: c.image_prompt, userId });
+  await mlDb().from("ml_creatives").update({ current_asset_id: novo.id, image_status: "ready" }).eq("id", creativeId);
+  await mlDb()
+    .from("ml_pins")
+    .update({ media_url: novo.url })
+    .eq("creative_id", creativeId)
+    .in("status", ["draft", "pending_approval", "scheduled", "blocked", "paused", "failed"]);
+  await auditar({ acao: "criativo.recortar", entidade: "creative", entidadeId: creativeId, actorId: userId, metadata: { foco } });
+  if (c.status === "approved") await mudarStatusCriativo(creativeId, "review", { motivo: "Imagem recortada", actorId: userId });
+  await finalizarSePronto(creativeId, { actorId: userId, actorType: "user" });
+  return novo.id;
 }

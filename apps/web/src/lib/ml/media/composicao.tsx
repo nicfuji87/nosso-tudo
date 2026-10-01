@@ -166,3 +166,29 @@ export async function renderizarComposicao(c: Composicao): Promise<Buffer> {
   const resp = new ImageResponse(el, { width: LARGURA, height: ALTURA, fonts: await carregarFontes() });
   return Buffer.from(await resp.arrayBuffer());
 }
+
+/**
+ * Recorte 2:3 por ponto focal (crop do editor — spec §10): enquadra a imagem
+ * em 1000×1500 com "cover", deslocando pelo foco (0–1) e com zoom ≥ 1.
+ */
+export async function renderizarRecorte(
+  imagem: { bytes: Buffer; mime: string; largura: number; altura: number },
+  foco: { x: number; y: number; zoom: number },
+): Promise<Buffer> {
+  const zoom = Math.max(1, Math.min(foco.zoom, 4));
+  const escala = Math.max(LARGURA / imagem.largura, ALTURA / imagem.altura) * zoom;
+  const w = Math.round(imagem.largura * escala);
+  const h = Math.round(imagem.altura * escala);
+  const fx = Math.max(0, Math.min(1, foco.x));
+  const fy = Math.max(0, Math.min(1, foco.y));
+  const left = -Math.round((w - LARGURA) * fx);
+  const top = -Math.round((h - ALTURA) * fy);
+  const el = (
+    <div style={{ width: LARGURA, height: ALTURA, display: "flex", position: "relative", overflow: "hidden", background: "#FFFFFF" }}>
+      {/* eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text */}
+      <img src={dataUri(imagem)} width={w} height={h} style={{ position: "absolute", left, top, width: w, height: h }} />
+    </div>
+  );
+  const resp = new ImageResponse(el, { width: LARGURA, height: ALTURA, fonts: await carregarFontes() });
+  return Buffer.from(await resp.arrayBuffer());
+}

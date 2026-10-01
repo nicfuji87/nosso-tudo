@@ -1,6 +1,6 @@
 import "server-only";
-import { createHash, randomBytes } from "node:crypto";
 import { mlDb } from "../db";
+import { gerarState } from "./pkce";
 import type { Provider } from "../segredos";
 
 export type StatusIntegracao = "disconnected" | "connected" | "expiring" | "error" | "invalid" | "insufficient_scope";
@@ -53,13 +53,7 @@ export async function mesclarHints(provider: Provider, parcial: Record<string, s
 // ---------------------------------------------------------------------------
 // OAuth: state de uso único + PKCE
 // ---------------------------------------------------------------------------
-const b64url = (b: Buffer) => b.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-
-export function gerarPkce(): { verifier: string; challenge: string } {
-  const verifier = b64url(randomBytes(48));
-  const challenge = b64url(createHash("sha256").update(verifier).digest());
-  return { verifier, challenge };
-}
+export { gerarPkce } from "./pkce";
 
 export async function criarStateOAuth(p: {
   provider: "mercadolivre" | "pinterest";
@@ -67,7 +61,7 @@ export async function criarStateOAuth(p: {
   returnTo?: string;
   codeVerifier?: string | null;
 }): Promise<string> {
-  const state = b64url(randomBytes(24));
+  const state = gerarState();
   const { error } = await mlDb()
     .from("ml_oauth_states")
     .insert({

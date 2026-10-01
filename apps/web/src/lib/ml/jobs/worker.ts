@@ -6,6 +6,7 @@ import { executarJob, type ResultadoExecucao } from "./executor";
 import type { JobRow } from "./fila";
 import { JOB_TYPES, META_JOB, type JobType } from "./tipos";
 import { HANDLERS } from "./handlers";
+import { lerConfig } from "../config";
 
 /** Teto da função na Vercel (route `maxDuration`). Jobs só são pegos se couberem. */
 export const DURACAO_MAXIMA_MS = 290_000;
@@ -26,7 +27,7 @@ export interface ResumoBatida {
 export async function rodarBatida(opcoes: { orcamentoMs?: number; paralelo?: number } = {}): Promise<ResumoBatida> {
   const inicio = Date.now();
   const orcamento = opcoes.orcamentoMs ?? 50_000;
-  const paralelo = Math.max(1, Math.min(opcoes.paralelo ?? 3, 5));
+  const paralelo = Math.max(1, Math.min(opcoes.paralelo ?? (await lerConfig("runtime")).worker_paralelo, 5));
   const worker = `w-${randomBytes(4).toString("hex")}`;
   const db = mlDb();
   const executados: Record<ResultadoExecucao, number> = { succeeded: 0, retry: 0, dead: 0, canceled: 0, wait: 0 };

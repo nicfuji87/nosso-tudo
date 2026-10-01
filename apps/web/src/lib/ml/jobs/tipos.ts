@@ -46,7 +46,7 @@ export const META_JOB: Record<JobType, MetaJob> = {
   GENERATE_ANGLES: { label: "Gerar ângulos", prioridade: 60, timeoutSeg: 120, maxTentativas: 3 },
   GENERATE_CREATIVES: { label: "Gerar criativos", prioridade: 60, timeoutSeg: 60, maxTentativas: 3 },
   GENERATE_COPY: { label: "Gerar textos", prioridade: 60, timeoutSeg: 120, maxTentativas: 3 },
-  GENERATE_IMAGE: { label: "Gerar imagem", prioridade: 65, timeoutSeg: 280, maxTentativas: 3 },
+  GENERATE_IMAGE: { label: "Gerar imagem", prioridade: 65, timeoutSeg: 240, maxTentativas: 3 },
   GENERATE_PENDING_CREATIVES: { label: "Geração automática de criativos", prioridade: 70, timeoutSeg: 60, maxTentativas: 2 },
   DISPATCH_PUBLICATIONS: { label: "Despachar publicações", prioridade: 20, timeoutSeg: 60, maxTentativas: 2 },
   REVALIDATE_SCHEDULED: { label: "Revalidar agendados", prioridade: 25, timeoutSeg: 120, maxTentativas: 2 },

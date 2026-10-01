@@ -102,7 +102,7 @@ export async function pontuarProduto(id: string, opts: { reanalisarIA?: boolean 
 
   // Duplicata: mesmo anúncio vencedor / mesmo produto de catálogo já acompanhado.
   let duplicadoDe: string | null = null;
-  if (p.item_id || p.external_type === "item") {
+  if (desc.excluir_duplicatas && (p.item_id || p.external_type === "item")) {
     const chave = p.item_id ?? p.external_id;
     const { data: dup } = await db
       .from("ml_products")

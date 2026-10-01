@@ -38,6 +38,7 @@ export const configSchemas = {
     tendencias_palavras: z.number().int().min(0).max(20).default(5),
     tendencias_produtos_por_palavra: z.number().int().min(1).max(10).default(3),
     enriquecer_com_apify: z.boolean().default(false),
+    excluir_duplicatas: z.boolean().default(true),
   }),
   scoring: z.object({
     versao_ativa: z.number().int().min(1).default(1),
@@ -89,7 +90,7 @@ export const configSchemas = {
     instrucoes_extras: z.string().max(2000).default(""),
   }),
   criativos: z.object({
-    modo_imagem_padrao: z.enum(["composition", "api", "manual_chatgpt"]).default("composition"),
+    modo_imagem_padrao: z.enum(["composition", "api", "manual_chatgpt"]).default("api"),
     criativos_por_produto: z.number().int().min(1).max(5).default(1),
     variacoes: z.number().int().min(1).max(5).default(3),
     mostrar_preco_na_arte: z.boolean().default(false),
@@ -100,6 +101,7 @@ export const configSchemas = {
   runtime: z.object({
     app_url: z.string().url().nullable().default(null),
     tick_enabled: z.boolean().default(true),
+    worker_paralelo: z.number().int().min(1).max(5).default(3),
   }),
 } as const;
 

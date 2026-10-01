@@ -327,6 +327,14 @@ export async function validarPin(pinId: string, opts: { checarProdutoOnline?: bo
   }
   if (["rejected", "paused"].includes(produto.status)) add("produto_status", false, `Produto ${produto.status === "rejected" ? "descartado" : "pausado"}`);
 
+  // Criativo continua aprovado (pode ter voltado para revisão após edição/troca de imagem)
+  const criativo = await lerCriativo(pin.creative_id);
+  add(
+    "criativo_aprovado",
+    ["approved", "published"].includes(criativo.status),
+    ["approved", "published"].includes(criativo.status) ? "Criativo aprovado" : `Criativo em "${criativo.status}" — aprove antes de publicar`,
+  );
+
   // Link de afiliado
   const vl = pin.link_url ? validarLinkAfiliado(pin.link_url) : null;
   add("link_afiliado", Boolean(vl?.ok) || !geral.exigir_link_afiliado, vl?.ok ? "Link de afiliado válido" : `Link inválido ou ausente${vl ? `: ${vl.erros.join(" ")}` : ""}`);
@@ -540,4 +548,27 @@ export async function revalidarCatalogo(lote: number, ctx: CtxJob): Promise<Reco
     }
   }
   return { checados: (data ?? []).length, indisponiveis };
+}
+
+/**
+ * "Testar Pin sandbox" (spec §14): cria um Pin de teste no SANDBOX para provar a
+ * permissão de escrita. Recusado em produção para não publicar teste de verdade.
+ */
+export async function publicarPinDeTeste(boardId: string, userId: string | null): Promise<{ pinId: string }> {
+  if ((await pinterest.ambiente()) !== "sandbox") {
+    throw new Error("O Pin de teste só é criado no ambiente Sandbox (em produção ele ficaria público).");
+  }
+  const { data: board } = await mlDb().from("ml_pinterest_boards").select("external_id, name").eq("id", boardId).maybeSingle();
+  if (!board) throw new Error("Board não encontrado — sincronize os boards.");
+  const { data: asset } = await mlDb().from("ml_creative_assets").select("public_url").order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (!asset) throw new Error("Gere ao menos um criativo antes (o teste usa a imagem mais recente).");
+  const criado = await pinterest.criarPin({
+    board_id: (board as { external_id: string }).external_id,
+    title: "Pin de teste — Afiliados ML",
+    description: "Teste de integração criado pelo painel (sandbox).",
+    link: "https://www.mercadolivre.com.br",
+    media_url: (asset as { public_url: string }).public_url,
+  });
+  await auditar({ acao: "pinterest.pin_teste", entidade: "board", entidadeId: boardId, actorId: userId, metadata: { pin: criado.id } });
+  return { pinId: criado.id };
 }

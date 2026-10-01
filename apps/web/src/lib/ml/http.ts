@@ -2,6 +2,7 @@ import "server-only";
 import { mlDb } from "./db";
 import { contextoAtual } from "./contexto";
 import { redigirTexto, truncar, urlSegura } from "./redacao";
+import { ErroAguardar } from "./jobs/erros";
 
 /**
  * Cliente HTTP único para APIs externas: timeout, classificação de erro
@@ -97,7 +98,34 @@ async function registrar(
   }
 }
 
+/**
+ * Limite proativo por provedor (spec §23 "rate limiting por integração"),
+ * contado em ml_api_calls no último minuto — vale entre workers paralelos.
+ * Conservador frente aos limites oficiais (Pinterest org_write 100/min Standard).
+ */
+export const LIMITE_POR_MINUTO: Record<string, number> = { mercadolivre: 240, pinterest: 60, openai: 60, apify: 30 };
+
+async function respeitarLimite(provider: string): Promise<void> {
+  const limite = LIMITE_POR_MINUTO[provider];
+  if (!limite) return;
+  try {
+    const { count } = await mlDb()
+      .from("ml_api_calls")
+      .select("id", { count: "exact", head: true })
+      .eq("provider", provider)
+      .gte("created_at", new Date(Date.now() - 60_000).toISOString());
+    if ((count ?? 0) >= limite) {
+      // não gasta tentativa do job: só volta para a fila daqui a pouco
+      throw new ErroAguardar(`Limite local de ${limite} chamadas/min para ${provider} atingido.`, 30_000);
+    }
+  } catch (e) {
+    if (e instanceof ErroAguardar) throw e;
+    // falha ao contar não bloqueia a chamada
+  }
+}
+
 export async function chamarApi<T = unknown>(req: Requisicao): Promise<Resposta<T>> {
+  if (!req.semLog) await respeitarLimite(req.provider);
   const inicio = Date.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), req.timeoutMs ?? 30_000);

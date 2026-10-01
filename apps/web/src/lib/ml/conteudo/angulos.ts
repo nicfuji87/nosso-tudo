@@ -43,6 +43,25 @@ export function nomeCurto(titulo: string, maxPalavras = 5): string {
   return palavras.slice(0, maxPalavras).join(" ").replace(/[,;:-]+$/, "");
 }
 
+const VAZIAS = new Set(["de", "da", "do", "das", "dos", "e", "para", "com", "em", "a", "o"]);
+
+/** Nome para ganchos: sem "kit N"/quantidades, até 3 palavras de conteúdo, minúsculo. */
+export function nomeGancho(titulo: string): string {
+  const limpo = nomeCurto(titulo, 12)
+    .replace(/^(kit|conjunto|combo|jogo)\s+(c\/\s*)?\d+\s*/i, "")
+    .replace(/\d+\s*(p[eç]as|pcs|un|unidades)/gi, "")
+    .trim();
+  const out: string[] = [];
+  let conteudo = 0;
+  for (const p of limpo.split(/\s+/)) {
+    if (conteudo >= 3) break;
+    out.push(p);
+    if (!VAZIAS.has(p.toLowerCase())) conteudo++;
+  }
+  while (out.length && VAZIAS.has(out[out.length - 1]!.toLowerCase())) out.pop();
+  return out.join(" ").toLowerCase() || nomeCurto(titulo, 3).toLowerCase();
+}
+
 export interface AnguloSugerido {
   type: TipoAngulo;
   hook: string;
@@ -67,8 +86,8 @@ export function angulosPorRegra(p: DadosProdutoConteudo, quantidade = 4): Angulo
   for (const [re, tipos] of REGRAS) if (re.test(texto)) escolhidos.push(...tipos);
   escolhidos.push("problema_solucao", "dica_pratica", "descoberta", "inspiracao");
   const unicos = Array.from(new Set(escolhidos)).slice(0, quantidade);
-  const nome = nomeCurto(p.titulo);
-  const nomeMin = nome.toLowerCase();
+  const nomeMin = nomeGancho(p.titulo);
+  const nome = nomeMin.charAt(0).toUpperCase() + nomeMin.slice(1);
   const categoria = p.categoria[p.categoria.length - 1] ?? "casa";
   const ganchos: Record<TipoAngulo, string> = {
     problema_solucao: `Cansou da bagunça? ${nome} resolve`,
@@ -121,9 +140,10 @@ export function copyPorTemplate(p: DadosProdutoConteudo, angulo: { type: string;
     `${cta}.`,
   ].filter(Boolean);
   const palavras = [angulo.keyword ?? "", ...p.categoria.slice(-2), p.marca ?? ""].filter(Boolean) as string[];
+  const ganchoTemNome = angulo.hook.toLowerCase().includes(nomeGancho(p.titulo));
   return {
     headline: angulo.hook,
-    titulo: `${nome}: ${angulo.hook}`.slice(0, 100),
+    titulo: (ganchoTemNome ? `${angulo.hook}${p.marca ? ` | ${p.marca}` : ""}` : `${nome}: ${angulo.hook}`).slice(0, 100),
     descricao: linhas.join("\n"),
     alt_text: `Foto do produto ${p.titulo}`,
     palavras_chave: palavras,

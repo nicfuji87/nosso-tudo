@@ -13,7 +13,6 @@ import { obterTokenValido } from "./tokens";
  */
 const PROVIDER = "pinterest";
 export const ESCOPOS = ["boards:read", "boards:write", "pins:read", "pins:write", "user_accounts:read"];
-export const LIMITES = { titulo: 100, descricao: 800, link: 2048, altText: 500 } as const;
 
 export type AmbientePinterest = "production" | "sandbox";
 
@@ -250,25 +249,8 @@ export interface PinCriado {
   created_at?: string;
 }
 
-export interface NovoPin {
-  board_id: string;
-  title: string;
-  description: string;
-  link: string;
-  alt_text?: string;
-  media_url: string;
-}
-
-export function montarPayloadPin(p: NovoPin): Record<string, unknown> {
-  return {
-    board_id: p.board_id,
-    title: p.title.slice(0, LIMITES.titulo),
-    description: p.description.slice(0, LIMITES.descricao),
-    link: p.link,
-    ...(p.alt_text ? { alt_text: p.alt_text.slice(0, LIMITES.altText) } : {}),
-    media_source: { source_type: "image_url", url: p.media_url },
-  };
-}
+export { LIMITES, montarPayloadPin, type NovoPin } from "./pinterest-payload";
+import { montarPayloadPin, type NovoPin } from "./pinterest-payload";
 
 export const criarPin = (p: NovoPin) =>
   api<PinCriado>("pins.create", "/pins", { method: "POST", json: montarPayloadPin(p), timeoutMs: 60_000 });

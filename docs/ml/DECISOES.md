@@ -50,7 +50,9 @@ A única alteração em código existente é incluir `/ml` nas rotas protegidas 
 
 ### ADR-ML-011 — Quatro modos de imagem, fluxo único depois do asset
 **Decisão:** `api` (OpenAI), `manual_chatgpt` (prompt + referência + upload), `upload` e `composition` (foto real + layout + texto, renderizado com `next/og`, sem IA e sem custo). Todos terminam num `ml_creative_assets`; o resto do fluxo não sabe a origem.
-**Consequência:** o modo `composition` é o padrão quando não há OpenAI — o app funciona ponta a ponta sem IA paga.
+**Padrão:** `api`; sem OpenAI configurada, "Gerar criativos" cai no modo manual ChatGPT (spec §8). O modo
+`composition` pode ser escolhido como padrão em Configurações › Criativos para automação total sem custo de IA.
+**Consequência:** o app funciona ponta a ponta sem IA paga (composição) e sem depender do método de imagem.
 
 ### ADR-ML-012 — Copy com IA opcional e fallback determinístico
 **Decisão:** com OpenAI: Responses API + JSON Schema strict + validação Zod + guardrails (limites do Pinterest, disclosure, termos proibidos). Sem OpenAI: templates por ângulo usando só dados reais do produto. Saída da IA nunca é publicada sem passar pelos guardrails.

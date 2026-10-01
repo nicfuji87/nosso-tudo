@@ -114,7 +114,8 @@ describe("validarPesos", () => {
   });
   it("recusa negativo ou faltante", () => {
     expect(validarPesos({ ...PESOS_PADRAO, trend: -1 }).ok).toBe(false);
-    const { trend: _t, ...sem } = PESOS_PADRAO;
+    const sem: Partial<typeof PESOS_PADRAO> = { ...PESOS_PADRAO };
+    delete sem.trend;
     expect(validarPesos(sem).ok).toBe(false);
   });
 });

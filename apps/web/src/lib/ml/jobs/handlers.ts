@@ -25,6 +25,8 @@ import {
 import { sincronizarCategoria, sincronizarRaiz } from "../servicos/categorias";
 import { lerConfig } from "../config";
 import { mlDb } from "../db";
+import { lerIntegracao } from "../integracoes/estado";
+import type { Provider } from "../segredos";
 
 /** Valida o payload; payload inválido é erro permanente (retry não conserta). */
 function payload<T extends z.ZodTypeAny>(ctx: CtxJob, schema: T): z.infer<T> {
@@ -33,16 +35,31 @@ function payload<T extends z.ZodTypeAny>(ctx: CtxJob, schema: T): z.infer<T> {
   return r.data;
 }
 
+/**
+ * Integração necessária desconectada: execução AGENDADA vira "ignorada" (a
+ * Central de Pendências já mostra a configuração incompleta — sem falha diária
+ * repetida); execução MANUAL falha com mensagem clara.
+ */
+async function exigirIntegracao(ctx: CtxJob, provider: Provider, nome: string): Promise<Record<string, unknown> | null> {
+  const integ = await lerIntegracao(provider);
+  if (integ.status !== "disconnected") return null;
+  if (ctx.job.created_by) throw new ErroPermanente(`${nome} não está conectado. Conecte em Integrações.`);
+  await ctx.log("info", `${nome} não conectado — execução agendada ignorada.`);
+  return { ignorado: `${nome} não conectado` };
+}
+
 const uuid = z.string().uuid();
 const comProduto = z.object({ product_id: uuid }).passthrough();
 const comCriativo = z.object({ creative_id: uuid }).passthrough();
 
 export const HANDLERS: RegistroHandlers = {
   DISCOVER_BESTSELLERS: async (ctx) => {
+    const pular = await exigirIntegracao(ctx, "mercadolivre", "Mercado Livre");
+    if (pular) return pular;
     const p = payload(ctx, z.object({ category_id: z.string().optional() }).passthrough());
     return p.category_id ? descobrirMaisVendidos(p.category_id, ctx) : agendarDescobertaPorCategoria(ctx);
   },
-  DISCOVER_TRENDS: (ctx) => descobrirTendencias(ctx),
+  DISCOVER_TRENDS: async (ctx) => (await exigirIntegracao(ctx, "mercadolivre", "Mercado Livre")) ?? descobrirTendencias(ctx),
   SYNC_CATEGORIES: async (ctx) => {
     const p = payload(ctx, z.object({ category_id: z.string().optional() }).passthrough());
     if (p.category_id) {
@@ -113,6 +130,8 @@ export const HANDLERS: RegistroHandlers = {
     return revalidarAgendados(p.lead_minutes ?? pub.antecedencia_revalidacao_min);
   },
   REVALIDATE_CATALOG: async (ctx) => {
+    const pular = await exigirIntegracao(ctx, "mercadolivre", "Mercado Livre");
+    if (pular) return pular;
     const p = payload(ctx, z.object({ batch: z.number().int().min(1).max(500).default(50) }).passthrough());
     return revalidarCatalogo(p.batch, ctx);
   },
@@ -121,12 +140,14 @@ export const HANDLERS: RegistroHandlers = {
     return publicarPin(p.pin_id, ctx);
   },
   FETCH_PIN_ANALYTICS: async (ctx) => {
+    const pular = await exigirIntegracao(ctx, "pinterest", "Pinterest");
+    if (pular) return pular;
     const p = payload(ctx, z.object({ lookback_days: z.number().int().min(1).max(89).default(30), pin_id: uuid.optional() }).passthrough());
     return coletarMetricas(ctx, { lookbackDias: p.lookback_days, pinId: p.pin_id });
   },
   COMPUTE_PERFORMANCE: () => calcularPerformance(),
   REFRESH_TOKENS: () => renovarTokens(),
-  SYNC_BOARDS: () => sincronizarBoards(),
+  SYNC_BOARDS: async (ctx) => (await exigirIntegracao(ctx, "pinterest", "Pinterest")) ?? sincronizarBoards(),
   DIAGNOSTICS: async (ctx) => ({ ...(await diagnosticar(ctx)) }),
   CLEANUP: async (ctx) => {
     const p = payload(ctx, z.object({ retention_days: z.number().int().min(1).max(3650).default(30) }).passthrough());
