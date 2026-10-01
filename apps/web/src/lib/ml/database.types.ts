@@ -1,4 +1,3 @@
-// Gerado por `pnpm ml:types` (supabase gen types) — NÃO EDITAR À MÃO.
 export type Json =
   | string
   | number
@@ -5718,6 +5717,30 @@ export type Database = {
           n_transacoes: number
         }[]
       }
+      ml_analytics_breakdown: {
+        Args: {
+          p_dimension?: string
+          p_filters?: Json
+          p_from: string
+          p_to: string
+        }
+        Returns: {
+          commission: number
+          ctr: number
+          dimension: string
+          impressions: number
+          key: string
+          label: string
+          outbound_clicks: number
+          pin_clicks: number
+          pins: number
+          saves: number
+        }[]
+      }
+      ml_analytics_summary: {
+        Args: { p_filters?: Json; p_from: string; p_to: string }
+        Returns: Json
+      }
       ml_claim_due_schedules: {
         Args: { p_limit?: number }
         Returns: {
@@ -5788,6 +5811,8 @@ export type Database = {
         }
       }
       ml_cron_tick: { Args: never; Returns: undefined }
+      ml_dashboard: { Args: never; Returns: Json }
+      ml_faixa_preco: { Args: { p: number }; Returns: string }
       ml_has_role: { Args: { p_min: string }; Returns: boolean }
       ml_integration_try_lock: {
         Args: { p_provider: string; p_seconds?: number }
@@ -5796,6 +5821,39 @@ export type Database = {
       ml_integration_unlock: {
         Args: { p_provider: string }
         Returns: undefined
+      }
+      ml_members_list: {
+        Args: never
+        Returns: {
+          created_at: string
+          email: string
+          nome: string
+          profile_id: string
+          role: string
+        }[]
+      }
+      ml_pins_filtrados: {
+        Args: { p_filters?: Json }
+        Returns: {
+          angle_type: string
+          board_id: string
+          board_name: string
+          category_id: string
+          category_name: string
+          creative_id: string
+          headline: string
+          pin_id: string
+          price: number
+          price_band: string
+          product_id: string
+          published_at: string
+          title: string
+        }[]
+      }
+      ml_pode_ler: { Args: never; Returns: boolean }
+      ml_product_status_counts: {
+        Args: { p_categoria?: string; p_q?: string }
+        Returns: Json
       }
       ml_reap_jobs: { Args: never; Returns: number }
       ml_role: { Args: never; Returns: string }

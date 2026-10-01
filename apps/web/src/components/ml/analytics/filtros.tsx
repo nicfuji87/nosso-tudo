@@ -123,6 +123,7 @@ export function FiltrosAnalytics({
         {params.criativo && (
           <Chip href={hrefCom(BASE, params, { criativo: null })} rotulo={`Criativo: ${rotulos.criativo ?? "selecionado"}`} />
         )}
+        {params.headline && <Chip href={hrefCom(BASE, params, { headline: null })} rotulo={`Headline: ${params.headline}`} />}
         {temFiltro && (
           <Button asChild variant="ghost" size="sm">
             <Link href={hrefCom(BASE, { periodo: params.periodo, de: params.de, ate: params.ate }, {})} scroll={false}>

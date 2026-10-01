@@ -153,7 +153,7 @@ export default async function MlDashboardPage() {
     podeAdministrar
       ? supabase.from("ml_jobs").select("id").eq("type", "DIAGNOSTICS").eq("status", "succeeded").limit(1)
       : Promise.resolve({ data: [] as { id: string }[] }),
-    supabase.rpc("ml_analytics_breakdown", { p_from: de30, p_to: ate, p_dimension: "creative", p_filters: {} }),
+    supabase.rpc("ml_analytics_breakdown", { p_from: de30, p_to: ate, p_dimension: "pin", p_filters: {} }),
   ]);
 
   const c = mesclarContadores(dash.data);
@@ -164,7 +164,7 @@ export default async function MlDashboardPage() {
   const auditoria = (auditoriaR.data ?? []) as AuditoriaResumo[];
   const transicoes = (transicoesR.data ?? []) as TransicaoResumo[];
 
-  // ---- Melhores Pins (agregado no banco por criativo ≈ Pin) ----
+  // ---- Melhores Pins (agregado no banco, dimensão "pin") ----
   const topLinhas = ((breakdownR.data ?? []) as LinhaBreakdown[])
     .filter((l) => Number(l.outbound_clicks) > 0)
     .sort((a, b) => Number(b.outbound_clicks) - Number(a.outbound_clicks) || Number(b.impressions) - Number(a.impressions))
@@ -183,10 +183,7 @@ export default async function MlDashboardPage() {
       ? supabase
           .from("ml_pins")
           .select("id, creative_id, title, external_url, media_url, product_id, published_at")
-          .in("creative_id", topLinhas.map((l) => l.key))
-          .eq("status", "published")
-          .order("published_at", { ascending: false })
-          .limit(50)
+          .in("id", topLinhas.map((l) => l.key))
       : Promise.resolve({ data: [] }),
     idsProdutosAtividade.length
       ? supabase.from("ml_products").select("id, title").in("id", idsProdutosAtividade.slice(0, 40))
@@ -199,10 +196,9 @@ export default async function MlDashboardPage() {
     external_url: string | null;
     media_url: string | null;
   }[];
-  const pinPorCriativo = new Map<string, (typeof pinsTop)[number]>();
-  for (const p of pinsTop) if (!pinPorCriativo.has(p.creative_id)) pinPorCriativo.set(p.creative_id, p);
+  const pinPorId = new Map(pinsTop.map((p) => [p.id, p]));
   const top: PinTop[] = topLinhas.map((l) => {
-    const pin = pinPorCriativo.get(l.key);
+    const pin = pinPorId.get(l.key);
     const imp = Number(l.impressions) || 0;
     const oc = Number(l.outbound_clicks) || 0;
     return {

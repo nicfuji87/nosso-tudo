@@ -27,7 +27,7 @@ export interface Resumo {
   serie: PontoSerie[];
 }
 
-export type Dimensao = "category" | "product" | "board" | "angle" | "headline" | "creative" | "price_band";
+export type Dimensao = "category" | "product" | "board" | "angle" | "headline" | "creative" | "price_band" | "pin";
 
 export interface LinhaBreakdown {
   dimension: Dimensao;
@@ -53,10 +53,11 @@ export const FILTROS_URL = {
   angulo: "angle_type",
   faixa: "price_band",
   ambiente: "environment",
+  headline: "headline",
 } as const;
 export type FiltroUrl = keyof typeof FILTROS_URL;
 
-/** Dimensão do relatório → parâmetro de URL que filtra por ela (headline não tem filtro no banco). */
+/** Dimensão do relatório → parâmetro de URL que filtra por ela. */
 export const FILTRO_DA_DIMENSAO: Partial<Record<Dimensao, FiltroUrl>> = {
   category: "categoria",
   product: "produto",
@@ -64,6 +65,7 @@ export const FILTRO_DA_DIMENSAO: Partial<Record<Dimensao, FiltroUrl>> = {
   angle: "angulo",
   creative: "criativo",
   price_band: "faixa",
+  headline: "headline",
 };
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);

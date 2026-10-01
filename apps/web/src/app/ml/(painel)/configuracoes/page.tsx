@@ -62,22 +62,19 @@ async function carregarCategorias(supabase: Supa): Promise<CategoriaLite[]> {
 }
 
 async function carregarMembros(supabase: Supa): Promise<MembroLite[]> {
-  type Linha = { profile_id: string; role: string; created_at: string; profile?: { nome: string | null; email: string | null } | null };
-  const comPerfil = await supabase
-    .from("ml_members")
-    .select("profile_id, role, created_at, profile:profiles!ml_members_profile_id_fkey(nome, email)")
-    .order("created_at");
+  type Linha = { profile_id: string; role: string; created_at: string; nome: string | null; email: string | null };
+  // RPC security definer (admin+): a RLS de profiles esconderia nome/e-mail dos outros membros.
+  const viaRpc = await supabase.rpc("ml_members_list");
   let linhas: Linha[];
-  if (comPerfil.error) {
-    // Embed indisponível (FK/RLS) — lista sem nomes.
-    const simples = await supabase.from("ml_members").select("profile_id, role, created_at").order("created_at");
-    linhas = (simples.data ?? []) as Linha[];
+  if (!viaRpc.error && Array.isArray(viaRpc.data) && viaRpc.data.length) {
+    linhas = viaRpc.data as Linha[];
   } else {
-    linhas = (comPerfil.data ?? []) as unknown as Linha[];
+    const simples = await supabase.from("ml_members").select("profile_id, role, created_at").order("created_at");
+    linhas = ((simples.data ?? []) as Omit<Linha, "nome" | "email">[]).map((l) => ({ ...l, nome: null, email: null }));
   }
   const ordem = ["owner", "admin", "operator", "viewer"];
   return linhas
-    .map((l) => ({ profile_id: l.profile_id, role: l.role, created_at: l.created_at, nome: l.profile?.nome ?? null, email: l.profile?.email ?? null }))
+    .map((l) => ({ profile_id: l.profile_id, role: l.role, created_at: l.created_at, nome: l.nome, email: l.email }))
     .sort((a, b) => ordem.indexOf(a.role) - ordem.indexOf(b.role));
 }
 

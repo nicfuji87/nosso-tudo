@@ -52,6 +52,7 @@ const VALIDADORES: Record<FiltroUrl, (v: string) => boolean> = {
   angulo: (v) => v === "sem_angulo" || TIPOS_ANGULO.some((a) => a.tipo === v),
   faixa: (v) => (FAIXAS_PRECO as readonly string[]).includes(v),
   ambiente: (v) => v === "production" || v === "sandbox",
+  headline: (v) => v.length > 0 && v.length <= 120,
 };
 
 function diasEntre(de: string, ate: string) {

@@ -11,6 +11,7 @@ import * as pinterest from "@/lib/ml/integracoes/pinterest";
 import * as openai from "@/lib/ml/integracoes/openai";
 import * as apify from "@/lib/ml/integracoes/apify";
 import { salvarConfig } from "@/lib/ml/config";
+import { publicarPinDeTeste } from "@/lib/ml/servicos/publicacao";
 
 const revalidar = () => revalidatePath("/ml", "layout");
 const provedores = z.enum(["mercadolivre", "pinterest", "openai", "apify"]);
@@ -150,5 +151,13 @@ export async function resultadoDiagnostico(jobId: string) {
     const { data } = await mlDb().from("ml_jobs").select("status, result, progress, last_error").eq("id", z.string().uuid().parse(jobId)).maybeSingle();
     const j = data as { status: string; result: { itens?: unknown[] } | null; progress: { itens?: unknown[] } | null; last_error: string | null } | null;
     return { status: j?.status ?? "desconhecido", itens: (j?.result?.itens ?? j?.progress?.itens ?? []) as unknown[], erro: j?.last_error ?? null };
+  });
+}
+
+/** "Testar Pin no sandbox" (spec §14) — só no ambiente Sandbox. */
+export async function testarPinSandbox(boardId: string) {
+  return executarAcao("admin", async (s) => {
+    const r = await publicarPinDeTeste(z.string().uuid().parse(boardId), s.userId);
+    return { mensagem: `Pin de teste criado no sandbox (id ${r.pinId}). Escrita OK.` };
   });
 }

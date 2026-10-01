@@ -35,9 +35,18 @@ export async function aprovarCriativos(lista: string[]) {
 export async function rejeitarCriativos(lista: string[], motivo: string) {
   return executarAcao("operator", async (s) => {
     const m = z.string().min(2).max(300).parse(motivo);
-    for (const c of ids.parse(lista)) await criativos.rejeitarCriativo(c, m, { actorId: s.userId, actorType: "user" });
+    let feitos = 0;
+    const falhas: string[] = [];
+    for (const c of ids.parse(lista)) {
+      try {
+        await criativos.rejeitarCriativo(c, m, { actorId: s.userId, actorType: "user" });
+        feitos++;
+      } catch (e) {
+        falhas.push(e instanceof Error ? e.message : String(e));
+      }
+    }
     revalidar();
-    return { mensagem: "Rejeitado(s)." };
+    return { feitos, falhas, mensagem: `${feitos} rejeitado(s)${falhas.length ? ` · ${falhas.length} com erro: ${falhas[0]}` : ""}.` };
   });
 }
 
@@ -165,5 +174,24 @@ export async function gerarCriativosEmLote(productIds: string[]) {
     await auditar({ acao: "criativos.gerar_lote", actorId: s.userId, metadata: { produtos: productIds.length } });
     await chutarWorker();
     return { mensagem: `Geração enfileirada para ${productIds.length} produto(s).` };
+  });
+}
+
+/** "Imagem escolhida": volta para uma imagem anterior do histórico do criativo. */
+export async function usarImagem(creativeId: string, assetId: string) {
+  return executarAcao("operator", async (s) => {
+    await criativos.usarAsset(id.parse(creativeId), id.parse(assetId), s.userId);
+    revalidar();
+    return { mensagem: "Imagem trocada — criativo em revisão." };
+  });
+}
+
+/** Crop 2:3 por ponto focal (x/y de 0 a 1, zoom ≥ 1). Gera nova versão; a anterior fica no histórico. */
+export async function recortarImagem(creativeId: string, foco: { x: number; y: number; zoom: number }) {
+  return executarAcao("operator", async (s) => {
+    const f = z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), zoom: z.number().min(1).max(4) }).parse(foco);
+    await criativos.recortarImagem(id.parse(creativeId), f, s.userId);
+    revalidar();
+    return { mensagem: "Recorte aplicado." };
   });
 }

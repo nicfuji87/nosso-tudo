@@ -16,6 +16,7 @@ import {
   salvarAppPinterest,
   salvarTokenPinterest,
   sincronizarBoardsAgora,
+  testarPinSandbox,
   testarIntegracao,
 } from "@/app/ml/(painel)/integracoes/actions";
 import { CartaoIntegracao, Nota, Passo } from "./cartao-integracao";
@@ -107,12 +108,14 @@ export function IntegracaoPinterest({
   redirectUri,
   permissoes,
   boardsAtivos,
+  boardTesteId = null,
 }: {
   integ: IntegracaoView;
   tz: string;
   redirectUri: string;
   permissoes: Permissoes;
   boardsAtivos: number;
+  boardTesteId?: string | null;
 }) {
   const clientIdSalvo = cfgTexto(integ.config, "client_id");
   const ambienteSalvo: Ambiente = cfgTexto(integ.config, "environment") === "sandbox" ? "sandbox" : "production";
@@ -344,6 +347,16 @@ export function IntegracaoPinterest({
                 <Button size="sm" variant="secondary" onClick={() => setCriando(true)}>
                   <Plus /> Criar board
                 </Button>
+              )}
+              {permissoes.administrar && ambienteSalvo === "sandbox" && boardTesteId && (
+                <AcaoBotao
+                  size="sm"
+                  variant="secondary"
+                  acao={() => testarPinSandbox(boardTesteId)}
+                  confirmar="Criar um Pin de teste no sandbox (visível só para você) no board padrão?"
+                >
+                  <Wifi /> Testar Pin no sandbox
+                </AcaoBotao>
               )}
             </div>
           </div>

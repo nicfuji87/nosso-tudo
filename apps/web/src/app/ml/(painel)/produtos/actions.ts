@@ -165,7 +165,7 @@ export async function marcarAngulo(angleId: string, status: "selected" | "sugges
     const { error } = await mlDb().from("ml_creative_angles").update({ status: st }).eq("id", id.parse(angleId)).neq("status", "used");
     if (error) throw new Error(error.message);
     revalidar();
-    return {};
+    return { mensagem: st === "selected" ? "Ângulo selecionado." : st === "discarded" ? "Ângulo descartado." : "Seleção removida." };
   });
 }
 

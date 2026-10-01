@@ -56,7 +56,7 @@ export default async function IntegracoesPage({ searchParams }: { searchParams: 
     lerConfig("geral"),
     lerConfig("ia"),
     supabase.from("ml_integrations").select(COLUNAS),
-    supabase.from("ml_pinterest_boards").select("id", { count: "exact", head: true }).eq("active", true).is("removed_at", null),
+    supabase.from("ml_pinterest_boards").select("id, is_default", { count: "exact" }).eq("active", true).is("removed_at", null).order("is_default", { ascending: false }).limit(1),
     supabase.from("ml_categories").select("id", { count: "exact", head: true }).eq("tracked", true),
     temPapel(sessao.role, "operator")
       ? supabase.from("ml_jobs").select("id").eq("type", "DIAGNOSTICS").eq("status", "succeeded").limit(1)
@@ -99,7 +99,7 @@ export default async function IntegracoesPage({ searchParams }: { searchParams: 
 
       <IntegracaoMercadoLivre integ={ml} tz={tz} redirectUri={redirectUri("mercadolivre", origem)} permissoes={permissoes} />
 
-      <IntegracaoPinterest integ={pin} tz={tz} redirectUri={redirectUri("pinterest", origem)} permissoes={permissoes} boardsAtivos={boardsAtivos} />
+      <IntegracaoPinterest integ={pin} tz={tz} redirectUri={redirectUri("pinterest", origem)} permissoes={permissoes} boardsAtivos={boardsAtivos} boardTesteId={((boardsRes.data ?? []) as { id: string }[])[0]?.id ?? null} />
 
       <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
         <IntegracaoOpenAI integ={oai} tz={tz} permissoes={permissoes} modeloTexto={ia.modelo_texto} modeloImagem={ia.modelo_imagem} />

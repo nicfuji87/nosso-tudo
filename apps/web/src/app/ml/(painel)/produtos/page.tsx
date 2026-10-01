@@ -77,7 +77,12 @@ export default async function ProdutosPage({
   const tz = (await lerConfig("geral")).timezone;
 
   const abaParam = param(searchParams, "aba");
-  const aba: Aba = ABAS.find((a) => a.key === abaParam) ?? ABAS[0];
+  // ?status=<status> (links de outras telas) escolhe a aba que contém aquele status
+  const statusParam = param(searchParams, "status");
+  const aba: Aba =
+    ABAS.find((a) => a.key === abaParam) ??
+    (statusParam ? ABAS.find((a) => a.status?.some((s) => s === statusParam)) : undefined) ??
+    ABAS[0];
   const q = termoBusca(param(searchParams, "q"));
   const categoria = param(searchParams, "categoria");
   const ordemParam = param(searchParams, "ordem");
@@ -88,14 +93,17 @@ export default async function ProdutosPage({
   const paramsAtuais: Record<string, string | undefined> = {};
   for (const k of Object.keys(searchParams)) paramsAtuais[k] = param(searchParams, k);
 
-  const [lista, cats, ...contagens] = await Promise.all([
+  const [lista, cats, contagemR] = await Promise.all([
     base(supabase, "id, title, thumbnail, external_id, status, status_reason, score, score_confidence, current_price, category_id, updated_at", aba, q, categoria)
       .order(o.col, { ascending: o.asc, nullsFirst: false })
       .order("id", { ascending: true })
       .range((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA - 1),
     supabase.from("ml_categories").select("id, name, path").eq("tracked", true).order("name").limit(500),
-    ...ABAS.map((a) => base(supabase, "id", a, q, categoria, true)),
+    supabase.rpc("ml_product_status_counts", { p_q: q ?? undefined, p_categoria: categoria ?? undefined }),
   ]);
+  const porStatus = (contagemR.data ?? {}) as Record<string, number>;
+  const contar = (a: Aba) =>
+    a.status ? a.status.reduce((t, st) => t + (porStatus[st] ?? 0), 0) : Object.values(porStatus).reduce((t, n) => t + n, 0);
 
   const linhas = (lista.data ?? []) as unknown as Linha[];
   const total = lista.count ?? 0;
@@ -122,9 +130,9 @@ export default async function ProdutosPage({
 
       <nav aria-label="Filtrar por etapa" className="-mx-4 overflow-x-auto px-4 lg:mx-0 lg:px-0">
         <ul className="flex w-max gap-1 rounded-full bg-secondary p-1">
-          {ABAS.map((a, i) => {
+          {ABAS.map((a) => {
             const ativo = a.key === aba.key;
-            const qtd = contagens[i]?.count ?? 0;
+            const qtd = contar(a);
             return (
               <li key={a.key}>
                 <Link

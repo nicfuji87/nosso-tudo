@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Download, History, ImageOff, Loader2, RefreshCw, Save, Sparkles, Type } from "lucide-react";
 import { toast } from "sonner";
-import { editarCriativo, regerarCopy, regerarImagem } from "@/app/ml/(painel)/criativos/actions";
+import { editarCriativo, regerarCopy, regerarImagem, usarImagem } from "@/app/ml/(painel)/criativos/actions";
 import { historicoCriativo, type AssetHistorico, type RevisaoHistorico } from "@/app/ml/(painel)/criativos/consultas";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import { LIMITES_PIN } from "@/lib/ml/conteudo/guardrails";
 import { formatarNoFuso } from "@/lib/ml/tempo";
 import { cn } from "@/lib/utils";
 import { UploadImagem } from "./upload-imagem";
+import { RecorteImagem } from "./recorte-imagem";
 import { MODOS_IMAGEM, REVISAO_LABEL, baixarArquivo, editavel, labelModo, nomeArquivo, type BoardOpcao, type CriativoView } from "./rotulos";
 
 function Contador({ atual, max }: { atual: number; max: number }) {
@@ -221,6 +222,7 @@ export function EditorCriativo({
                 <Download /> Baixar imagem
               </Button>
             )}
+            {img && pode && <RecorteImagem creativeId={criativo.id} src={img.public_url} aoAplicar={() => setVersao((v) => v + 1)} />}
           </div>
 
           {/* Textos */}
@@ -239,7 +241,7 @@ export function EditorCriativo({
           >
             <fieldset disabled={!pode || salvando} className="space-y-4">
               <CampoContado label="Headline" atual={headline.length} max={LIMITES_PIN.headline} dica="Texto curto que vai na arte.">
-                <Input value={headline} onChange={(e) => setHeadline(e.target.value)} maxLength={80} />
+                <Input value={headline} onChange={(e) => setHeadline(e.target.value)} maxLength={LIMITES_PIN.headline} />
               </CampoContado>
               <CampoContado label="Título do Pin" atual={titulo.length} max={LIMITES_PIN.titulo}>
                 <Input value={titulo} onChange={(e) => setTitulo(e.target.value)} maxLength={LIMITES_PIN.titulo} />
@@ -361,6 +363,28 @@ export function EditorCriativo({
                           {labelModo(a.mode)}
                         </p>
                         <p className="text-overline text-muted-foreground tabular">{formatarNoFuso(a.created_at, tz)}</p>
+                        {pode && a.id !== criativo.asset?.id && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-full px-2 text-caption"
+                            disabled={regerando}
+                            onClick={() =>
+                              iniciarRegerar(async () => {
+                                const r = await usarImagem(criativo.id, a.id);
+                                if (!r.ok) toast.error(r.error);
+                                else {
+                                  toast.success(r.mensagem);
+                                  setVersao((v) => v + 1);
+                                  router.refresh();
+                                }
+                              })
+                            }
+                          >
+                            Usar esta
+                          </Button>
+                        )}
                       </li>
                     ))}
                   </ul>

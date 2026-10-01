@@ -32,9 +32,18 @@ export async function publicarAgora(pinId: string) {
 
 export async function aprovarPins(lista: string[]) {
   return executarAcao("operator", async (s) => {
-    for (const p of ids.parse(lista)) await pub.aprovarPin(p, ator(s.userId));
+    let feitos = 0;
+    const falhas: string[] = [];
+    for (const p of ids.parse(lista)) {
+      try {
+        await pub.aprovarPin(p, ator(s.userId));
+        feitos++;
+      } catch (e) {
+        falhas.push(e instanceof Error ? e.message : String(e));
+      }
+    }
     revalidar();
-    return { mensagem: "Publicação(ões) aprovada(s)." };
+    return { feitos, falhas, mensagem: `${feitos} aprovada(s)${falhas.length ? ` · ${falhas.length} com erro: ${falhas[0]}` : ""}.` };
   });
 }
 
@@ -56,9 +65,18 @@ export async function retomarPin(pinId: string) {
 
 export async function cancelarPins(lista: string[]) {
   return executarAcao("operator", async (s) => {
-    for (const p of ids.parse(lista)) await pub.cancelarPin(p, ator(s.userId));
+    let feitos = 0;
+    const falhas: string[] = [];
+    for (const p of ids.parse(lista)) {
+      try {
+        await pub.cancelarPin(p, ator(s.userId));
+        feitos++;
+      } catch (e) {
+        falhas.push(e instanceof Error ? e.message : String(e));
+      }
+    }
     revalidar();
-    return { mensagem: "Cancelado(s). O criativo continua disponível." };
+    return { feitos, falhas, mensagem: `${feitos} cancelado(s); os criativos continuam disponíveis${falhas.length ? ` · ${falhas.length} com erro: ${falhas[0]}` : ""}.` };
   });
 }
 

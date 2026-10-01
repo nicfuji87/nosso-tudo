@@ -76,6 +76,7 @@ interface Filtros {
   elegivel: "sim" | "nao" | "todos";
   scoreMin: number | null;
   scoreMax: number | null;
+  visualMin: number | null;
   precoMin: number | null;
   precoMax: number | null;
   periodo?: string;
@@ -107,6 +108,8 @@ function consulta(supabase: Cliente, f: Filtros, opts: { colunas: string; head?:
   else if (f.disponivel === "nao") q = q.eq("available", false);
   if (f.scoreMin != null) q = q.gte("score", f.scoreMin);
   if (f.scoreMax != null) q = q.lte("score", f.scoreMax);
+  // Score visual (spec §7): apelo visual da análise de IA (jsonb numérico)
+  if (f.visualMin != null) q = q.gte("ai_analysis->apelo_visual", f.visualMin);
   if (f.precoMin != null) q = q.gte("current_price", f.precoMin);
   if (f.precoMax != null) q = q.lte("current_price", f.precoMax);
   const dias = f.periodo ? PERIODOS[f.periodo] : undefined;
@@ -135,6 +138,7 @@ export default async function DescobertasPage({
     elegivel: elegivelParam === "nao" || elegivelParam === "todos" ? elegivelParam : "sim",
     scoreMin: decimal(param(searchParams, "score_min")),
     scoreMax: decimal(param(searchParams, "score_max")),
+    visualMin: decimal(param(searchParams, "visual_min")),
     precoMin: decimal(param(searchParams, "preco_min")),
     precoMax: decimal(param(searchParams, "preco_max")),
     periodo: param(searchParams, "periodo"),
@@ -317,6 +321,9 @@ export default async function DescobertasPage({
             <Input name="score_min" type="number" min={0} max={100} defaultValue={f.scoreMin ?? ""} placeholder="mín" className="h-10 px-3" aria-label="Score mínimo" />
             <Input name="score_max" type="number" min={0} max={100} defaultValue={f.scoreMax ?? ""} placeholder="máx" className="h-10 px-3" aria-label="Score máximo" />
           </div>
+        </Campo>
+        <Campo label="Score visual (IA)" dica="Apelo visual mínimo da análise de IA.">
+          <Input name="visual_min" type="number" min={0} max={100} defaultValue={f.visualMin ?? ""} placeholder="mín" className="h-10 px-3" aria-label="Score visual mínimo" />
         </Campo>
         <Campo label="Preço (R$)">
           <div className="flex items-center gap-1.5">
