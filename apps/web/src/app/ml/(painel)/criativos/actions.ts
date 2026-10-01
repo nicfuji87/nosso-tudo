@@ -129,7 +129,7 @@ export async function enviarImagem(creativeId: string, form: FormData) {
   return executarAcao("operator", async (s) => {
     const arquivo = form.get("arquivo");
     if (!(arquivo instanceof File)) throw new Error("Selecione uma imagem.");
-    if (arquivo.size > 15 * 1024 * 1024) throw new Error("Imagem acima de 15 MB.");
+    if (arquivo.size > 9.5 * 1024 * 1024) throw new Error("Imagem acima de 9,5 MB (limite de envio do app).");
     const bytes = Buffer.from(await arquivo.arrayBuffer());
     const r = await criativos.receberImagemManual(id.parse(creativeId), bytes, s.userId);
     revalidar();

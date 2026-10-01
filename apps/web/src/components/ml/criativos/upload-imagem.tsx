@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const TIPOS = ["image/png", "image/jpeg", "image/webp"];
-const MAX_BYTES = 15 * 1024 * 1024;
+// Server Actions do projeto aceitam até 10 MB de corpo (next.config) — margem para o multipart.
+const MAX_BYTES = 9.5 * 1024 * 1024;
 
 function tamanho(bytes: number) {
   return bytes > 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
@@ -16,7 +17,7 @@ function tamanho(bytes: number) {
 
 function validarArquivo(f: File): string | null {
   if (!TIPOS.includes(f.type)) return "Formato não suportado. Use PNG, JPG ou WebP.";
-  if (f.size > MAX_BYTES) return `Imagem com ${tamanho(f.size)} — o limite é 15 MB.`;
+  if (f.size > MAX_BYTES) return `Imagem com ${tamanho(f.size)} — o limite é 9,5 MB.`;
   return null;
 }
 
@@ -132,7 +133,7 @@ export function UploadImagem({
         >
           <ImageUp className="size-7 text-tech" aria-hidden />
           <span className="text-body-sm font-medium">Arraste a imagem aqui, cole com Ctrl+V ou clique para escolher</span>
-          <span className="text-caption text-muted-foreground">PNG, JPG ou WebP · até 15 MB · ideal vertical 2:3 (1000×1500)</span>
+          <span className="text-caption text-muted-foreground">PNG, JPG ou WebP · até 9,5 MB · ideal vertical 2:3 (1000×1500)</span>
         </button>
       ) : (
         <div className="flex flex-col gap-3 rounded-xl border border-border/70 bg-secondary/30 p-3 sm:flex-row sm:items-center">

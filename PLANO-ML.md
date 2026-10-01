@@ -44,14 +44,14 @@ Não reaproveitado (e por quê): `audit_log` (exige `workspace_id`) → `ml_audi
 | # | Fase | Entregas | Depende de | Status |
 |---|---|---|---|---|
 | 0 | Fundação | migration `ml01`, acesso por papel, layout `/ml`, settings (Zod+defaults), Vault, auditoria, HTTP seguro, docs | — | ✅ |
-| 1 | Integrações | OAuth ML (PKCE) e Pinterest, refresh com trava, OpenAI/Apify por chave, testar/desconectar, diagnóstico completo, tela Integrações | 0 | ⏳ |
-| 2 | Jobs + agendador | fila (claim/lease/backoff/dead-letter/idempotência), worker `/api/ml/worker`, pg_cron, agendador cron+tz+sobreposição, telas Automações e Logs | 0 | ⏳ |
-| 3 | Descoberta + produtos | categorias, highlights, trends, snapshots/rankings, enriquecimento, scoring (engine + IA), telas Descobertas e Produto | 1, 2 | ⏳ |
-| 4 | Aprovação + links | transições validadas, aprovação/descarte individual e em lote (motivo + cooldown), Central de Pendências, fila "Salvar e próximo" | 3 | ⏳ |
-| 5 | Conteúdo + criativos | ângulos, copy (IA + fallback), 4 modos de imagem, histórico de versões, Kanban de criativos, fluxo manual ChatGPT | 4 | ⏳ |
-| 6 | Pinterest + publicação | Pins, janelas/limites, agendar/reagendar/pausar/cancelar, revalidação pré-publicação, publicação idempotente, falhas | 1, 5 | ⏳ |
-| 7 | Analytics | coleta de métricas, comissões (form/CSV), breakdowns (categoria/produto/board/ângulo/headline/criativo/preço), performance histórica | 6 | ⏳ |
-| 8 | Automação progressiva | níveis 0–4, auto-aprovação/geração/agendamento/publicação por regra, dashboard final, teste completo, checklist de produção | 3–7 | ⏳ |
+| 1 | Integrações | OAuth ML (PKCE) e Pinterest, refresh com trava, OpenAI/Apify por chave, testar/desconectar, diagnóstico completo, tela Integrações | 0 | ✅ código · ⏳ conexão real |
+| 2 | Jobs + agendador | fila (claim/lease/backoff/dead-letter/idempotência), worker `/api/ml/worker`, pg_cron, agendador cron+tz+sobreposição, telas Automações e Logs | 0 | ✅ |
+| 3 | Descoberta + produtos | categorias, highlights, trends, snapshots/rankings, enriquecimento, scoring (engine + IA), telas Descobertas e Produto | 1, 2 | ✅ |
+| 4 | Aprovação + links | transições validadas, aprovação/descarte individual e em lote (motivo + cooldown), Central de Pendências, fila "Salvar e próximo" | 3 | ✅ |
+| 5 | Conteúdo + criativos | ângulos, copy (IA + fallback), 4 modos de imagem, histórico de versões, Kanban de criativos, fluxo manual ChatGPT | 4 | ✅ |
+| 6 | Pinterest + publicação | Pins, janelas/limites, agendar/reagendar/pausar/cancelar, revalidação pré-publicação, publicação idempotente, falhas | 1, 5 | ✅ |
+| 7 | Analytics | coleta de métricas, comissões (form/CSV), breakdowns (categoria/produto/board/ângulo/headline/criativo/preço), performance histórica | 6 | ✅ |
+| 8 | Automação progressiva | níveis 0–4, auto-aprovação/geração/agendamento/publicação por regra, dashboard final, teste completo, checklist de produção | 3–7 | ✅ |
 
 Cada fase só fecha com: `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build` (apps/web) verdes e o fluxo da fase exercitado.
 
@@ -73,7 +73,24 @@ Cada fase só fecha com: `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build
 - Papéis: o Nosso Tudo só tem owner/member por workspace → ML tem papéis próprios (ADR-ML-002).
 - Spec sugere `integration_credentials` → `ml_integrations` (estado) + Vault (segredo).
 
-## 6. Registro de execução
+## 6. O que falta (depende do dono da conta)
 
-- **01/10/2026** — Análise completa (spec, repo, banco, APIs). Fase 0 iniciada: migration `ml01`, domínio puro
+1. **Deploy**: merge de `feat/ml-afiliados` na `main` → Vercel. Sem isso o pg_cron não tem para onde bater e o OAuth do ML (HTTPS) não roda.
+2. **Apps de desenvolvedor**: criar no DevCenter do Mercado Livre e no portal do Pinterest (Redirect URIs em `docs/ml/OPERACAO.md`) e conectar pelo painel.
+3. **Pinterest Standard access** para publicar em produção (em Trial só sandbox, sem métricas).
+4. Validar com contas reais: descoberta (`/highlights` nas categorias escolhidas), publicação e métricas — os adapters seguem a documentação de 01/10/2026, mas as respostas reais podem trazer surpresas (ex.: 403 em itens de terceiros, já tratado como dado faltante).
+5. Opcional: chave OpenAI e token Apify.
+
+Validado nesta sessão sem contas externas: fila (claim/concurrency/idempotência/reaper direto no banco), worker real via HTTP,
+diagnóstico, scoring, geração de ângulos/copy por template e criativo por composição (PNG 1000×1500 no Storage), 168 testes,
+lint, typecheck e `next build`.
+
+## 7. Registro de execução
+
+- **01/10/2026** — Análise completa (spec, repo, banco, APIs). Fase 0: migration `ml01`, domínio puro
   (estados, cron, scoring, janelas, redação) com testes, docs de arquitetura/decisões/APIs.
+- **01/10/2026** — Fases 1–8 em código: adapters (ML, Pinterest, OpenAI, Apify), fila + agendador + worker (pg_cron),
+  descoberta/enriquecimento/scoring, aprovação e links, conteúdo e criativos (4 modos + recorte), publicação idempotente,
+  métricas/performance/comissões, níveis de automação; migrations `ml02` (analytics) e `ml03` (pin/headline/membros) aplicadas;
+  todas as telas do §5 da spec. Commits `65e9cb1`, `6bf9c76`, `841604b` (+ ajustes) na branch `feat/ml-afiliados`.
+- **Próximo agente**: ver §6 — deploy, conexão real das integrações e ajuste fino dos adapters com respostas reais.
