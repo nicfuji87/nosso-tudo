@@ -2,7 +2,7 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 /** Rotas que exigem sessão autenticada. */
-const PROTECTED_PREFIXES = ["/app", "/onboarding"];
+const PROTECTED_PREFIXES = ["/app", "/onboarding", "/ml"];
 /** Rotas de autenticação que usuários logados não devem ver. */
 const AUTH_ROUTES = ["/entrar", "/cadastrar"];
 /**
