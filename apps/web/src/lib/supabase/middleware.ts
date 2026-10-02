@@ -3,6 +3,11 @@ import { NextResponse, type NextRequest } from "next/server";
 
 /** Rotas que exigem sessão autenticada. */
 const PROTECTED_PREFIXES = ["/app", "/onboarding", "/ml"];
+/**
+ * Exceções públicas dentro de prefixos protegidos (casamento exato). As páginas
+ * da Casa Prática são exigidas pela revisão de app do Pinterest e precisam abrir sem login.
+ */
+const PUBLIC_PATHS = ["/ml/sobre", "/ml/privacidade", "/ml/about", "/ml/privacy"];
 /** Rotas de autenticação que usuários logados não devem ver. */
 const AUTH_ROUTES = ["/entrar", "/cadastrar"];
 /**
@@ -60,7 +65,8 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
-  const isProtected = PROTECTED_PREFIXES.some((p) => pathname.startsWith(p));
+  const isPublic = PUBLIC_PATHS.includes(pathname.replace(/\/+$/, ""));
+  const isProtected = !isPublic && PROTECTED_PREFIXES.some((p) => pathname.startsWith(p));
   const isAuthRoute = AUTH_ROUTES.some((p) => pathname.startsWith(p));
 
   if (!user && isProtected) {
