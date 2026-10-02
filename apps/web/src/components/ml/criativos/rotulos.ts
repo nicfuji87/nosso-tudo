@@ -73,7 +73,8 @@ export interface CriativoView {
   created_at: string;
   updated_at: string;
   asset: AssetView | null;
-  produto: { id: string; title: string; thumbnail: string | null } | null;
+  /** `link`: link de afiliado ativo do produto (destino do Pin). */
+  produto: { id: string; title: string; thumbnail: string | null; link?: string | null } | null;
   angulo: string | null;
   board: string | null;
   // --- V2 (famílias de criativos). Em criativos legados (family_id null) só os defaults do banco.

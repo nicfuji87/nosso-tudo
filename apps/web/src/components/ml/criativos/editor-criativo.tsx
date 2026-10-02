@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Download, History, ImageOff, Loader2, RefreshCw, Save, Sparkles, Type } from "lucide-react";
+import { AlertTriangle, Copy, Download, ExternalLink, History, ImageOff, Link2, Loader2, RefreshCw, Save, Sparkles, Type } from "lucide-react";
 import { toast } from "sonner";
 import { editarCriativo, regerarCopy, regerarImagem, usarImagem } from "@/app/ml/(painel)/criativos/actions";
 import { editarPacoteExtra } from "@/app/ml/(painel)/criativos/actions-v2";
@@ -314,6 +314,15 @@ export function EditorCriativo({
               </Button>
             )}
             {img && pode && <RecorteImagem creativeId={criativo.id} src={img.public_url} aoAplicar={() => setVersao((v) => v + 1)} />}
+            <ParaPinterest
+              link={criativo.produto?.link ?? null}
+              produtoId={criativo.product_id}
+              campos={[
+                ["Título", titulo],
+                ["Descrição", descricao],
+                ["Texto alternativo", alt],
+              ]}
+            />
           </div>
 
           {/* Textos */}
@@ -550,5 +559,50 @@ export function EditorCriativo({
         </section>
       </SheetContent>
     </Sheet>
+  );
+}
+
+/** Atalhos para publicar à mão no Pinterest: link de afiliado (destino do Pin) e textos com "Copiar". */
+function ParaPinterest({ link, produtoId, campos }: { link: string | null; produtoId: string; campos: [string, string][] }) {
+  const copiar = (rotulo: string, texto: string) =>
+    void navigator.clipboard.writeText(texto).then(
+      () => toast.success(`${rotulo} copiado.`),
+      () => toast.error("Não foi possível copiar."),
+    );
+  return (
+    <div className="space-y-2 rounded-xl border border-border p-3">
+      <p className="flex items-center gap-1.5 text-caption font-semibold">
+        <Link2 className="size-3.5" aria-hidden /> Link de afiliado (destino do Pin)
+      </p>
+      {link ? (
+        <>
+          <p className="break-all font-mono text-caption text-muted-foreground">{link}</p>
+          <div className="flex gap-2">
+            <Button type="button" variant="secondary" size="sm" className="flex-1" onClick={() => copiar("Link", link)}>
+              <Copy /> Copiar link
+            </Button>
+            <Button type="button" variant="ghost" size="sm" asChild>
+              <a href={link} target="_blank" rel="noopener noreferrer" aria-label="Abrir link de afiliado">
+                <ExternalLink />
+              </a>
+            </Button>
+          </div>
+        </>
+      ) : (
+        <p className="text-caption text-warning">
+          Produto sem link de afiliado.{" "}
+          <Link href={`/ml/produtos/${produtoId}#link`} className="underline">
+            Cadastrar link
+          </Link>
+        </p>
+      )}
+      <div className="flex flex-wrap gap-1.5 pt-1">
+        {campos.map(([rotulo, texto]) => (
+          <Button key={rotulo} type="button" variant="ghost" size="sm" disabled={!texto.trim()} onClick={() => copiar(rotulo, texto)}>
+            <Copy /> {rotulo}
+          </Button>
+        ))}
+      </div>
+    </div>
   );
 }
