@@ -1,7 +1,7 @@
 import { Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { fmtBrl, fmtNum, fmtPct, type Resumo } from "./formato";
+import { fmtBrl, fmtDecimal, fmtNum, fmtPct, type Resumo } from "./formato";
 
 function Kpi({ label, valor, dica, ajuda, destaque }: { label: string; valor: string; dica?: string; ajuda?: string; destaque?: boolean }) {
   return (
@@ -28,7 +28,7 @@ function Kpi({ label, valor, dica, ajuda, destaque }: { label: string; valor: st
 export function Kpis({ r }: { r: Resumo }) {
   const semComissao = r.comissao <= 0;
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
       <Kpi
         label="Pins publicados"
         valor={fmtNum(r.pins_publicados)}
@@ -46,6 +46,12 @@ export function Kpis({ r }: { r: Resumo }) {
       />
       <Kpi label="CTR de outbound" valor={fmtPct(r.ctr_outbound)} ajuda="Outbound clicks ÷ impressões." destaque />
       <Kpi
+        label="Outbound por mil impressões"
+        valor={fmtDecimal(r.outbound_por_mil)}
+        dica="cliques a cada 1.000 impressões"
+        ajuda="Outbound clicks × 1.000 ÷ impressões — compara criativos com alcance diferente."
+      />
+      <Kpi
         label="Comissão"
         valor={fmtBrl(r.comissao)}
         dica={r.pedidos || r.gmv ? `${fmtNum(r.pedidos)} pedido(s) · ${fmtBrl(r.gmv)} vendidos` : "Importe comissões abaixo"}
@@ -55,6 +61,21 @@ export function Kpis({ r }: { r: Resumo }) {
         label="Receita por Pin"
         valor={r.receita_por_pin == null ? "—" : fmtBrl(r.receita_por_pin)}
         ajuda="Comissão do período ÷ Pins publicados que atendem aos filtros (todo o histórico)."
+      />
+      <Kpi
+        label="Famílias"
+        valor={fmtNum(r.familias)}
+        dica="com Pins publicados nos filtros"
+        ajuda="Famílias de criativos distintas entre os Pins publicados que atendem aos filtros (todo o histórico)."
+      />
+      <Kpi
+        label="Receita por família"
+        valor={r.receita_por_familia == null ? "—" : fmtBrl(r.receita_por_familia)}
+        ajuda={
+          r.familias === 0
+            ? "Comissão do período ÷ famílias. Ainda não há Pins de famílias de criativos nos filtros."
+            : "Comissão do período ÷ famílias com Pins publicados que atendem aos filtros."
+        }
       />
       <Kpi
         label="EPC"

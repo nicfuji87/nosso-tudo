@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRightLeft, ChevronLeft, ChevronRight, Globe, History, Lock, ScrollText, ServerCog, X } from "lucide-react";
+import { ArrowRightLeft, ChevronLeft, ChevronRight, Globe, History, Lock, Radar, ScrollText, ServerCog, X } from "lucide-react";
 import { PageHeader } from "@/components/patterns/page-header";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,18 @@ import {
   ATOR_LABEL,
 } from "@/components/ml/logs/formatos";
 import { DrawerUrl } from "@/components/ml/logs/interativos";
+import {
+  ACOES_EVENTOS_V2,
+  ACOES_POR_CATEGORIA,
+  CATEGORIAS_EVENTO,
+  EVENTOS_JOB,
+  ehCategoriaEvento,
+  ehEventoJob,
+  ListaEventos,
+  TabelaEventosJob,
+  type LinhaEvento,
+  type LinhaEventoJob,
+} from "@/components/ml/logs/eventos";
 import {
   JobDetalhe,
   type ChamadaApiJob,
@@ -53,6 +65,7 @@ type Sb = ReturnType<typeof createClient>;
 
 const ABA_INFO: Record<AbaLogs, { rotulo: string; icone: typeof ScrollText; tecnica: boolean }> = {
   jobs: { rotulo: "Jobs", icone: ServerCog, tecnica: true },
+  eventos: { rotulo: "Eventos", icone: Radar, tecnica: true },
   api: { rotulo: "Chamadas de API", icone: Globe, tecnica: true },
   auditoria: { rotulo: "Auditoria", icone: History, tecnica: true },
   transicoes: { rotulo: "Transições", icone: ArrowRightLeft, tecnica: false },
@@ -90,6 +103,48 @@ async function buscarJobs(sb: Sb, p: ParamsLogs, offset: number) {
   if (desde) q = q.gte("created_at", desde);
   const { data, error } = await q;
   return { linhas: (data ?? []) as LinhaJob[], erro: error?.message ?? null };
+}
+
+/** Logs de job com `data.evento` (falha de download/Storage, imagem gerada, fidelity warning, pacote). */
+async function buscarEventosJob(sb: Sb, p: ParamsLogs, evento: string, offset: number) {
+  let q = sb
+    .from("ml_job_logs")
+    .select("id, job_id, level, message, data, created_at, job:ml_jobs!inner(type, status, entity_type, entity_id)")
+    .eq("data->>evento", evento)
+    .order("id", { ascending: false })
+    .range(offset, offset + PAGINA_TAMANHO);
+  if (p.status && p.status in JOB_STATUS_LABEL) q = q.eq("job.status", p.status);
+  if (p.tipo && (JOB_TYPES as readonly string[]).includes(p.tipo)) q = q.eq("job.type", p.tipo);
+  if (p.entidade) q = q.eq("job.entity_id", p.entidade);
+  const desde = inicioPeriodo(p.periodo);
+  if (desde) q = q.gte("created_at", desde);
+  const { data, error } = await q;
+  type Bruta = Omit<LinhaEventoJob, "job"> & { job: LinhaEventoJob["job"] | NonNullable<LinhaEventoJob["job"]>[] };
+  const linhas: LinhaEventoJob[] = ((data ?? []) as unknown as Bruta[]).map((l) => ({
+    ...l,
+    job: Array.isArray(l.job) ? (l.job[0] ?? null) : l.job,
+  }));
+  return { linhas, erro: error?.message ?? null };
+}
+
+/** Eventos V2 registrados na auditoria (decisões automáticas e ações sobre mídia/fidelidade/pacote/links). */
+async function buscarEventos(sb: Sb, p: ParamsLogs, offset: number) {
+  let q = sb
+    .from("ml_audit_log")
+    .select("id, actor_type, actor_id, action, entity_type, entity_id, before, after, metadata, created_at")
+    .order("created_at", { ascending: false })
+    .range(offset, offset + PAGINA_TAMANHO);
+  const cat = ehCategoriaEvento(p.categoria) ? p.categoria : null;
+  if (cat === "cooldown") q = q.eq("action", "variante.bloqueada").eq("metadata->>evento", "bloqueada_cooldown");
+  else if (cat === "repeticao")
+    q = q.or('and(action.eq."variante.bloqueada",metadata->>evento.eq.bloqueada_repeticao),action.eq."publicacao.anti_flood"');
+  else if (cat && cat !== "imagem") q = q.in("action", ACOES_POR_CATEGORIA[cat]);
+  else q = q.in("action", ACOES_EVENTOS_V2);
+  if (p.entidade) q = q.eq("entity_id", p.entidade);
+  const desde = inicioPeriodo(p.periodo);
+  if (desde) q = q.gte("created_at", desde);
+  const { data, error } = await q;
+  return { linhas: (data ?? []) as LinhaEvento[], erro: error?.message ?? null };
 }
 
 async function buscarApi(sb: Sb, p: ParamsLogs, offset: number) {
@@ -218,15 +273,53 @@ export default async function LogsPage({ searchParams }: { searchParams: Record<
               .sort((a, b) => a.rotulo.localeCompare(b.rotulo, "pt-BR")),
           ],
         },
+        {
+          nome: "evento",
+          rotulo: "Evento do log",
+          padrao: "",
+          opcoes: [{ valor: "", rotulo: "Todos os jobs" }, ...Object.entries(EVENTOS_JOB).map(([valor, d]) => ({ valor, rotulo: d.rotulo }))],
+        },
         FILTRO_PERIODO,
       ];
-      const r = await buscarJobs(sb, params, offset);
-      erro = r.erro;
-      total = r.linhas.length;
       const hrefJob = (id: string) => hrefLogs(atual, { job: id });
-      conteudo = r.linhas.length ? (
-        <TabelaJobs linhas={r.linhas.slice(0, PAGINA_TAMANHO)} tz={tz} hrefJob={hrefJob} jobAtivo={jobAberto} />
-      ) : null;
+      if (ehEventoJob(params.evento)) {
+        const r = await buscarEventosJob(sb, params, params.evento, offset);
+        erro = r.erro;
+        total = r.linhas.length;
+        conteudo = r.linhas.length ? (
+          <TabelaEventosJob linhas={r.linhas.slice(0, PAGINA_TAMANHO)} tz={tz} hrefJob={hrefJob} jobAtivo={jobAberto} />
+        ) : null;
+      } else {
+        const r = await buscarJobs(sb, params, offset);
+        erro = r.erro;
+        total = r.linhas.length;
+        conteudo = r.linhas.length ? (
+          <TabelaJobs linhas={r.linhas.slice(0, PAGINA_TAMANHO)} tz={tz} hrefJob={hrefJob} jobAtivo={jobAberto} />
+        ) : null;
+      }
+    } else if (aba === "eventos") {
+      filtros = [
+        {
+          nome: "categoria",
+          rotulo: "Evento",
+          padrao: "",
+          opcoes: [{ valor: "", rotulo: "Todos os eventos" }, ...CATEGORIAS_EVENTO.map((c) => ({ valor: c.valor, rotulo: c.rotulo }))],
+        },
+        FILTRO_PERIODO,
+      ];
+      const hrefJob = (id: string) => hrefLogs({ aba: "jobs" }, { job: id, periodo: "tudo" });
+      if (params.categoria === "imagem") {
+        // "Imagem gerada" é registrada nos logs dos jobs de geração/composição.
+        const r = await buscarEventosJob(sb, params, "imagem_gerada", offset);
+        erro = r.erro;
+        total = r.linhas.length;
+        conteudo = r.linhas.length ? <TabelaEventosJob linhas={r.linhas.slice(0, PAGINA_TAMANHO)} tz={tz} hrefJob={hrefJob} jobAtivo={null} /> : null;
+      } else {
+        const r = await buscarEventos(sb, params, offset);
+        erro = r.erro;
+        total = r.linhas.length;
+        conteudo = r.linhas.length ? <ListaEventos linhas={r.linhas.slice(0, PAGINA_TAMANHO)} tz={tz} hrefJob={hrefJob} /> : null;
+      }
     } else if (aba === "api") {
       filtros = [
         {
@@ -294,7 +387,7 @@ export default async function LogsPage({ searchParams }: { searchParams: Record<
   const temMais = total > PAGINA_TAMANHO;
   const detalhe = jobAberto && podeVerTecnico ? await buscarDetalheJob(sb, jobAberto) : null;
   const hrefFecharDetalhe = hrefLogs(atual, { job: undefined });
-  const filtrosAtivos = ["status", "tipo", "provider", "resultado", "ator", "entidade_tipo", "entidade"].some((k) => params[k]);
+  const filtrosAtivos = ["status", "tipo", "evento", "categoria", "provider", "resultado", "ator", "entidade_tipo", "entidade"].some((k) => params[k]);
 
   return (
     <div className="space-y-5">
@@ -330,7 +423,7 @@ export default async function LogsPage({ searchParams }: { searchParams: Record<
         <EmptyState
           icon={Lock}
           title="Acesso restrito"
-          description="Logs técnicos (jobs, chamadas de API e auditoria) são visíveis para operadores e administradores."
+          description="Logs técnicos (jobs, eventos, chamadas de API e auditoria) são visíveis para operadores e administradores. Seu papel permite ver as transições de status."
           action={
             <Button asChild variant="secondary" size="sm">
               <Link href={hrefLogs({ aba: "transicoes" })}>Ver transições de status</Link>
@@ -367,7 +460,9 @@ export default async function LogsPage({ searchParams }: { searchParams: Record<
                     ? "Tente ampliar o período ou remover filtros."
                     : aba === "jobs"
                       ? "Os jobs aparecem aqui assim que a primeira automação ou ação manual rodar."
-                      : "Nada registrado no período."
+                      : aba === "eventos"
+                        ? "Importações de mídia, prompts, alertas de fidelidade, pacotes e bloqueios aparecem aqui conforme os criativos V2 são gerados."
+                        : "Nada registrado no período."
                 }
                 action={
                   filtrosAtivos || pag > 1 || params.periodo !== "tudo" ? (

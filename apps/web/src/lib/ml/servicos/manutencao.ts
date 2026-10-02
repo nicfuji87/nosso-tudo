@@ -192,12 +192,34 @@ export async function limpar(retencaoDias: number): Promise<Record<string, unkno
       midia = remover.length;
     }
   }
+  // V2: arquivos de variantes rejeitadas (sem Pin) além de `criativos_v2.retencao_rejeitados_dias`.
+  // A linha do criativo fica (histórico/analytics); só as imagens saem do Storage.
+  const { retencao_rejeitados_dias } = await lerConfig("criativos_v2");
+  const limiteRejeitados = new Date(Date.now() - retencao_rejeitados_dias * 86_400_000).toISOString();
+  const { data: rejeitados } = await db.from("ml_creatives").select("id").eq("status", "rejected").not("family_id", "is", null).lt("updated_at", limiteRejeitados).limit(200);
+  let rejeitadosLimpos = 0;
+  const idsRejeitados = ((rejeitados ?? []) as { id: string }[]).map((c) => c.id);
+  if (idsRejeitados.length) {
+    const { data: comPin } = await db.from("ml_pins").select("creative_id").in("creative_id", idsRejeitados);
+    const publicados = new Set(((comPin ?? []) as { creative_id: string }[]).map((p) => p.creative_id));
+    const alvo = idsRejeitados.filter((cid) => !publicados.has(cid));
+    if (alvo.length) {
+      const { data: assets } = await db.from("ml_creative_assets").select("id, storage_path").in("creative_id", alvo);
+      const lista = (assets ?? []) as { id: string; storage_path: string }[];
+      if (lista.length) {
+        await db.storage.from(BUCKET).remove(lista.map((a) => a.storage_path));
+        await db.from("ml_creative_assets").delete().in("id", lista.map((a) => a.id));
+        rejeitadosLimpos = lista.length;
+      }
+    }
+  }
   return {
     api_calls: r1.data?.length ?? 0,
     jobs: r2.data?.length ?? 0,
     oauth_states: r3.data?.length ?? 0,
     schedule_runs: r4.data?.length ?? 0,
     midia_temporaria: midia,
+    imagens_rejeitadas: rejeitadosLimpos,
   };
 }
 

@@ -12,7 +12,7 @@ import { chutarWorker } from "@/lib/ml/jobs/chute";
 import { sincronizarCategoria } from "@/lib/ml/servicos/categorias";
 
 const revalidar = () => revalidatePath("/ml", "layout");
-const SECOES_EDITAVEIS = ["geral", "descoberta", "scoring", "automacao", "publicacao", "ia", "criativos"] as const;
+const SECOES_EDITAVEIS = ["geral", "descoberta", "scoring", "automacao", "publicacao", "ia", "criativos", "criativos_v2", "pinterest_copy"] as const;
 
 export async function salvarSecao(secao: string, valores: Record<string, unknown>) {
   return executarAcao("admin", async (s) => {
@@ -210,5 +210,50 @@ export async function removerMembro(profileId: string) {
     await auditar({ acao: "membro.remover", entidade: "member", entidadeId: pid, actorId: s.userId });
     revalidar();
     return { mensagem: "Acesso removido." };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// V2: presets de cena e templates de prompt versionados
+// ---------------------------------------------------------------------------
+const presetSchema = z.object({
+  name: z.string().min(2).max(80),
+  environment: z.string().min(2).max(160),
+  palette: z.string().max(200).nullish(),
+  lighting: z.string().max(200).nullish(),
+  style: z.string().max(200).nullish(),
+  realism: z.string().max(60).optional(),
+  text_area: z.enum(["top", "bottom", "none"]).optional(),
+  restrictions: z.string().max(300).nullish(),
+  category_hint: z.string().max(200).nullish(),
+  active: z.boolean().optional(),
+  sort: z.number().int().min(0).max(1000).optional(),
+});
+
+export async function salvarPreset(presetId: string | null, dados: z.infer<typeof presetSchema>) {
+  return executarAcao("admin", async (s) => {
+    const { salvarPreset: salvar } = await import("@/lib/ml/servicos/prompts");
+    const idSalvo = await salvar(presetId ? z.string().uuid().parse(presetId) : null, presetSchema.parse(dados), s.userId);
+    revalidar();
+    return { presetId: idSalvo, mensagem: presetId ? "Preset atualizado." : "Preset criado." };
+  });
+}
+
+export async function salvarTemplate(chave: string, corpo: string, nota?: string | null) {
+  return executarAcao("admin", async (s) => {
+    const { CHAVES_TEMPLATE, salvarNovaVersao } = await import("@/lib/ml/servicos/prompts");
+    const k = z.enum(CHAVES_TEMPLATE).parse(chave);
+    const v = await salvarNovaVersao(k, z.string().min(20).max(6000).parse(corpo), z.string().max(300).nullish().parse(nota) ?? null, s.userId);
+    revalidar();
+    return { versao: v, mensagem: `Template ${k} v${v} ativo. Novas gerações registram esta versão.` };
+  });
+}
+
+export async function ativarTemplate(chave: string, versao: number) {
+  return executarAcao("admin", async (s) => {
+    const { CHAVES_TEMPLATE, ativarVersao } = await import("@/lib/ml/servicos/prompts");
+    await ativarVersao(z.enum(CHAVES_TEMPLATE).parse(chave), z.number().int().min(1).parse(versao), s.userId);
+    revalidar();
+    return { mensagem: `Versão ${versao} ativada.` };
   });
 }

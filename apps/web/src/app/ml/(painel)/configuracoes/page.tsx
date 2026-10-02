@@ -15,11 +15,27 @@ import { BoardsPorCategoria, type BoardLite, type OpcaoCategoria } from "@/compo
 import { FormIA } from "@/components/ml/configuracoes/ia";
 import { FormCriativos } from "@/components/ml/configuracoes/criativos";
 import { ConfigSeguranca, type MembroLite } from "@/components/ml/configuracoes/seguranca";
+import { FormCriativosV2 } from "@/components/ml/configuracoes/criativos-v2";
+import { PresetsCena, type PresetView } from "@/components/ml/configuracoes/presets";
+import { AtalhoBoards, FormDisclosure, FormPinterestCopy } from "@/components/ml/configuracoes/pinterest-copy";
+import { TemplatesPrompt, type TemplateView } from "@/components/ml/configuracoes/templates";
 
 export const metadata: Metadata = { title: "Configurações" };
 export const dynamic = "force-dynamic";
 
-const SECOES = ["geral", "automacao", "categorias", "scoring", "publicacao", "ia", "criativos", "seguranca"] as const;
+const SECOES = [
+  "geral",
+  "automacao",
+  "categorias",
+  "scoring",
+  "publicacao",
+  "ia",
+  "criativos",
+  "criativos_v2",
+  "pinterest_copy",
+  "templates",
+  "seguranca",
+] as const;
 type Secao = (typeof SECOES)[number];
 
 type Supa = ReturnType<typeof createClient>;
@@ -87,7 +103,7 @@ export default async function ConfiguracoesPage({ searchParams }: { searchParams
   const operador = temPapel(sessao.role, "operator");
   const dono = temPapel(sessao.role, "owner");
 
-  const [cfg, versaoIa, mlRes, categorias, boardsRes, versoesRes, membros] = await Promise.all([
+  const [cfg, versaoIa, mlRes, categorias, boardsRes, versoesRes, membros, presetsRes, templatesRes, pinRes] = await Promise.all([
     lerTodasConfigs(),
     versaoConfig("ia"),
     supabase.from("ml_integrations").select("status").eq("provider", "mercadolivre").maybeSingle(),
@@ -101,6 +117,19 @@ export default async function ConfiguracoesPage({ searchParams }: { searchParams
       .limit(500),
     supabase.from("ml_scoring_versions").select("version, weights, note, created_at").order("version", { ascending: false }).limit(50),
     admin ? carregarMembros(supabase) : Promise.resolve([] as MembroLite[]),
+    supabase
+      .from("ml_scene_presets")
+      .select("id, key, name, environment, palette, lighting, style, realism, text_area, restrictions, category_hint, active, sort")
+      .order("sort")
+      .order("name")
+      .limit(500),
+    supabase
+      .from("ml_prompt_templates")
+      .select("id, key, version, body, active, notes, created_at")
+      .order("key")
+      .order("version", { ascending: false })
+      .limit(1000),
+    supabase.from("ml_integrations").select("config").eq("provider", "pinterest").maybeSingle(),
   ]);
 
   const tz = cfg.geral.timezone;
@@ -108,6 +137,14 @@ export default async function ConfiguracoesPage({ searchParams }: { searchParams
   const mlConectado = mlStatus === "connected" || mlStatus === "expiring";
   const boards = ((boardsRes.data ?? []) as BoardLite[]).map((b) => ({ ...b, category_ids: b.category_ids ?? [] }));
   const versoes = (versoesRes.data ?? []) as VersaoScoring[];
+  const presets = (presetsRes.data ?? []) as PresetView[];
+  const templates = (templatesRes.data ?? []) as TemplateView[];
+  const pinConfig = (pinRes.data as { config: unknown } | null)?.config;
+  const aiDisclosureSuportado =
+    pinConfig && typeof pinConfig === "object" && "ai_disclosure_suportado" in pinConfig
+      ? (pinConfig as { ai_disclosure_suportado?: unknown }).ai_disclosure_suportado !== false
+      : null;
+  const boardsAtivos = boards.filter((b) => b.active).length;
 
   // Opções de categoria para os boards: acompanhadas + as que já estão mapeadas.
   const porId = new Map(categorias.map((c) => [c.id, c]));
@@ -151,12 +188,36 @@ export default async function ConfiguracoesPage({ searchParams }: { searchParams
       conteudo: (
         <div className="space-y-6">
           <FormPublicacao key={k(cfg.publicacao)} config={cfg.publicacao} tz={tz} podeEditar={admin} />
-          <BoardsPorCategoria boards={boards} categorias={opcoesCategoria} podeEditar={admin} />
+          <div id="boards" className="scroll-mt-24">
+            <BoardsPorCategoria boards={boards} categorias={opcoesCategoria} podeEditar={admin} />
+          </div>
         </div>
       ),
     },
     { valor: "ia", label: "IA", conteudo: <FormIA key={k(cfg.ia)} config={cfg.ia} versao={versaoIa} podeEditar={admin} /> },
     { valor: "criativos", label: "Criativos", conteudo: <FormCriativos key={k(cfg.criativos)} config={cfg.criativos} podeEditar={admin} /> },
+    {
+      valor: "criativos_v2",
+      label: "Criativos V2",
+      conteudo: (
+        <div className="space-y-6">
+          <FormCriativosV2 key={k(cfg.criativos_v2)} config={cfg.criativos_v2} podeEditar={admin} />
+          <PresetsCena presets={presets} podeEditar={admin} />
+        </div>
+      ),
+    },
+    {
+      valor: "pinterest_copy",
+      label: "Pinterest Copy",
+      conteudo: (
+        <div className="space-y-6">
+          <FormPinterestCopy key={k(cfg.pinterest_copy)} config={cfg.pinterest_copy} podeEditar={admin} aiDisclosureSuportado={aiDisclosureSuportado} />
+          <FormDisclosure key={k(cfg.geral.disclosure)} config={cfg.geral} podeEditar={admin} />
+          <AtalhoBoards boardsAtivos={boardsAtivos} />
+        </div>
+      ),
+    },
+    { valor: "templates", label: "Templates de prompt", conteudo: <TemplatesPrompt templates={templates} tz={tz} podeEditar={admin} /> },
     {
       valor: "seguranca",
       label: "Segurança",
@@ -170,7 +231,7 @@ export default async function ConfiguracoesPage({ searchParams }: { searchParams
         title="Configurações"
         description={
           admin
-            ? "Regras de descoberta, score, automação e publicação. Toda alteração é validada e fica registrada na auditoria."
+            ? "Regras de descoberta, score, automação, criativos e publicação. Toda alteração é validada e fica registrada na auditoria."
             : "Você pode consultar as configurações; somente administradores do ML podem alterá-las."
         }
       />

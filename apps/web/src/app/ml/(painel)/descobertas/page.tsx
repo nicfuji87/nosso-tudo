@@ -14,7 +14,7 @@ import { Campo, NativeSelect } from "@/components/ml/campos";
 import { BotaoAdicionarProduto, BotaoExecutarDescoberta } from "@/components/ml/descobertas/acoes-cabecalho";
 import { ListaDescobertas } from "@/components/ml/descobertas/lista-descobertas";
 import { TendenciasSemana, type TendenciaResumo } from "@/components/ml/descobertas/tendencias-semana";
-import type { ItemDescoberta } from "@/components/ml/descobertas/tipos";
+import type { ItemDescoberta, QualidadeImagem } from "@/components/ml/descobertas/tipos";
 import { FormFiltros } from "@/components/ml/produtos/form-filtros";
 import { Paginacao } from "@/components/ml/produtos/paginacao";
 import { caminhoCategoria, decimal, inteiro, n, param, termoBusca, textos } from "@/components/ml/produtos/formato";
@@ -37,7 +37,7 @@ const ORDENS = {
 type Ordem = keyof typeof ORDENS;
 
 const COLUNAS =
-  "id, title, thumbnail, category_id, status, current_price, original_price, discount_pct, current_rank, rank_delta, trend_keywords, rating, reviews_count, sources, score, score_confidence, score_id, eligible, available, first_seen_at, times_seen, times_promoted, last_promoted_at, permalink";
+  "id, title, thumbnail, category_id, status, current_price, original_price, discount_pct, current_rank, rank_delta, trend_keywords, rating, reviews_count, sources, score, score_confidence, score_id, eligible, available, first_seen_at, times_seen, times_promoted, last_promoted_at, permalink, pictures, media_count, ia_qualidade:ai_analysis->qualidade_imagem, ia_fit:ai_analysis->pinterest_fit";
 
 interface LinhaProduto {
   id: string;
@@ -64,6 +64,48 @@ interface LinhaProduto {
   times_promoted: number;
   last_promoted_at: string | null;
   permalink: string | null;
+  pictures: unknown;
+  media_count: number | null;
+  ia_qualidade: unknown;
+  ia_fit: unknown;
+}
+
+/** Famílias que contam como "ativas" para o indicador de Descobertas (V2 §11.2). */
+const FAMILIA_ATIVA = ["planning", "generating", "active"];
+
+function nivel(v: number, alta: number, media: number): QualidadeImagem["nivel"] {
+  return v >= alta ? "alta" : v >= media ? "media" : "baixa";
+}
+
+/** Qualidade da imagem principal: nota da IA (0–100) ou, na falta, resolução da 1ª foto. */
+function qualidadeImagem(iaNota: number | null, fatorScore: number | null, pictures: unknown): QualidadeImagem | null {
+  if (iaNota != null) return { nivel: nivel(iaNota, 70, 45), fonte: "ia", detalhe: `Nota da IA ${Math.round(iaNota)}/100` };
+  const primeira = Array.isArray(pictures) ? (pictures[0] as { width?: unknown; height?: unknown; max_size?: unknown } | undefined) : undefined;
+  let w = n(primeira?.width);
+  let h = n(primeira?.height);
+  if ((w == null || h == null) && typeof primeira?.max_size === "string") {
+    const m = /^(\d+)x(\d+)$/.exec(primeira.max_size);
+    if (m) {
+      w = Number(m[1]);
+      h = Number(m[2]);
+    }
+  }
+  if (w != null && h != null && w > 0 && h > 0) {
+    const lado = Math.min(w, h);
+    return { nivel: nivel(lado, 800, 500), fonte: "resolucao", detalhe: `${w}×${h} px` };
+  }
+  if (fatorScore != null) return { nivel: nivel(fatorScore, 70, 45), fonte: "ia", detalhe: `Fator do score ${Math.round(fatorScore)}/100` };
+  return null;
+}
+
+/** Valor de um fator do score (components jsonb), se não estiver marcado como sem dado. */
+function fator(components: unknown, chave: string): number | null {
+  if (!Array.isArray(components)) return null;
+  const c = components.find((x) => x && typeof x === "object" && (x as { key?: unknown }).key === chave) as
+    | { value?: unknown; missing?: unknown }
+    | undefined;
+  if (!c || c.missing === true) return null;
+  return n(c.value);
 }
 
 interface Filtros {
@@ -176,9 +218,10 @@ export default async function DescobertasPage({
     new Set(linhas.map((l) => l.category_id).filter((c): c is string => !!c && !categoriasTracked.some((t) => t.id === c))),
   );
   const semana = (semanaRes.data as { week_start: string } | null)?.week_start ?? null;
-  const [scores, catsExtras, trends] = await Promise.all([
+  const idsPagina = linhas.map((l) => l.id);
+  const [scores, catsExtras, trends, familiasRes] = await Promise.all([
     scoreIds.length
-      ? supabase.from("ml_product_scores").select("id, positives, alerts, hard_rule_failures").in("id", scoreIds)
+      ? supabase.from("ml_product_scores").select("id, positives, alerts, hard_rule_failures, components").in("id", scoreIds)
       : Promise.resolve({ data: [] }),
     faltandoCat.length
       ? supabase.from("ml_categories").select("id, name, path").in("id", faltandoCat)
@@ -191,14 +234,20 @@ export default async function DescobertasPage({
           .order("position", { ascending: true, nullsFirst: false })
           .limit(60)
       : Promise.resolve({ data: [] }),
+    idsPagina.length
+      ? supabase.from("ml_creative_families").select("product_id").in("product_id", idsPagina).in("status", FAMILIA_ATIVA).limit(500)
+      : Promise.resolve({ data: [] }),
   ]);
+  const comFamilia = new Set(((familiasRes.data ?? []) as { product_id: string }[]).map((f) => f.product_id));
 
   const nomeCategoria = new Map<string, string>();
   for (const c of [...categoriasTracked, ...((catsExtras.data ?? []) as { id: string; name: string; path: unknown }[])]) {
     nomeCategoria.set(c.id, c.name);
   }
   const scorePorId = new Map(
-    ((scores.data ?? []) as { id: string; positives: unknown; alerts: unknown; hard_rule_failures: string[] | null }[]).map((s) => [s.id, s]),
+    (
+      (scores.data ?? []) as { id: string; positives: unknown; alerts: unknown; hard_rule_failures: string[] | null; components: unknown }[]
+    ).map((s) => [s.id, s]),
   );
 
   const vistos = new Set<string>();
@@ -248,6 +297,10 @@ export default async function DescobertasPage({
       alertas: textos(s?.alerts).slice(0, 2),
       regrasDuras: l.eligible === false ? (s?.hard_rule_failures ?? []) : [],
       permalink: l.permalink,
+      imagens: Math.max(l.media_count ?? 0, Array.isArray(l.pictures) ? l.pictures.length : 0),
+      qualidadeImagem: qualidadeImagem(n(l.ia_qualidade), fator(s?.components, "image_quality"), l.pictures),
+      potencialLifestyle: n(l.ia_fit) ?? fator(s?.components, "pinterest_fit"),
+      familiaAtiva: comFamilia.has(l.id),
     };
   });
 

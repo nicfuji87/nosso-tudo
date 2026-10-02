@@ -4,29 +4,41 @@ import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Archive,
+  BadgeCheck,
+  Bot,
   CheckCircle2,
+  Columns2,
   Copy,
   Download,
   Filter,
+  Images,
   Loader2,
   MoreHorizontal,
+  Package,
   Pencil,
+  RefreshCw,
   RotateCcw,
   Send,
+  ShieldAlert,
+  Trash2,
+  Type,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { aprovarCriativos, arquivarCriativo, duplicarCriativo, voltarParaRevisao } from "@/app/ml/(painel)/criativos/actions";
+import { checarFidelidadeAgora, excluirRascunho, regerarCena, regerarPacote } from "@/app/ml/(painel)/criativos/actions-v2";
 import type { RespostaAcao } from "@/components/ml/acao-botao";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { baixarArquivo, editavel, nomeArquivo, podeRejeitar, type CriativoView } from "./rotulos";
+import type { DialogoV2 } from "./dialogos-v2";
+import { baixarArquivo, editavel, nomeArquivo, podeExcluirRascunho, podeRejeitar, type CriativoView } from "./rotulos";
 
 /** Executa uma action com toast + refresh (para itens de menu, que não são botões). */
 export function useExecutar() {
@@ -52,10 +64,25 @@ export interface HandlersCriativo {
   aoRejeitar: (ids: string[]) => void;
   aoCriarPin: (id: string) => void;
   aoFiltrarProduto?: (productId: string) => void;
+  /** V2: abre um diálogo da variante (lado a lado, revisar fidelidade, problema, trocar referência). */
+  aoDialogoV2?: (id: string, d: DialogoV2) => void;
+  /** Acompanha o job devolvido por uma action (JobStatus). */
+  aoJob?: (jobId: string, rotulo: string) => void;
+  /** Aprovação que mostra a falha de cada item (V2: fidelidade/pacote). */
+  aoAprovar?: (ids: string[]) => void;
+  /** OpenAI conectada — habilita "Checar fidelidade com IA". */
+  openai?: boolean;
 }
 
 export function MenuCriativo({ c, podeOperar, handlers }: { c: CriativoView; podeOperar: boolean; handlers: HandlersCriativo }) {
   const { pendente, executar } = useExecutar();
+  const v2 = Boolean(c.family_id);
+  const pode = podeOperar && editavel(c.status);
+  const manual = c.image_mode === "manual_chatgpt" || c.image_mode === "upload";
+  const comJob = (rotulo: string) => (r: RespostaAcao) => {
+    if (typeof r.jobId === "string") handlers.aoJob?.(r.jobId, rotulo);
+  };
+  const aprovar = () => (handlers.aoAprovar ? handlers.aoAprovar([c.id]) : executar(() => aprovarCriativos([c.id])));
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -63,12 +90,12 @@ export function MenuCriativo({ c, podeOperar, handlers }: { c: CriativoView; pod
           {pendente ? <Loader2 className="animate-spin" /> : <MoreHorizontal />}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="end" className="max-h-[75vh] overflow-y-auto">
         <DropdownMenuItem onSelect={() => handlers.aoEditar(c.id)}>
           <Pencil /> {editavel(c.status) && podeOperar ? "Editar" : "Ver detalhes"}
         </DropdownMenuItem>
         {podeOperar && c.status === "review" && (
-          <DropdownMenuItem onSelect={() => executar(() => aprovarCriativos([c.id]))}>
+          <DropdownMenuItem onSelect={aprovar}>
             <CheckCircle2 /> Aprovar
           </DropdownMenuItem>
         )}
@@ -86,6 +113,54 @@ export function MenuCriativo({ c, podeOperar, handlers }: { c: CriativoView; pod
           <DropdownMenuItem onSelect={() => executar(() => voltarParaRevisao(c.id))}>
             <RotateCcw /> {c.status === "archived" ? "Restaurar para revisão" : "Voltar para revisão"}
           </DropdownMenuItem>
+        )}
+        {v2 && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-overline uppercase text-muted-foreground">Fidelidade</DropdownMenuLabel>
+            {handlers.aoDialogoV2 && (
+              <DropdownMenuItem onSelect={() => handlers.aoDialogoV2?.(c.id, "lado")}>
+                <Columns2 /> Ver referência lado a lado
+              </DropdownMenuItem>
+            )}
+            {pode && handlers.aoDialogoV2 && c.asset && (
+              <DropdownMenuItem onSelect={() => handlers.aoDialogoV2?.(c.id, "fidelidade")}>
+                <BadgeCheck /> Revisar fidelidade
+              </DropdownMenuItem>
+            )}
+            {pode && handlers.aoDialogoV2 && c.asset && (
+              <DropdownMenuItem onSelect={() => handlers.aoDialogoV2?.(c.id, "problema")}>
+                <ShieldAlert /> Marcar problema de fidelidade
+              </DropdownMenuItem>
+            )}
+            {pode && handlers.openai && c.asset && (
+              <DropdownMenuItem onSelect={() => executar(() => checarFidelidadeAgora(c.id), comJob("Fidelidade (IA)"))}>
+                <Bot /> Checar fidelidade com IA
+              </DropdownMenuItem>
+            )}
+            {pode && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-overline uppercase text-muted-foreground">Variante</DropdownMenuLabel>
+                {!manual && (
+                  <DropdownMenuItem onSelect={() => executar(() => regerarCena(c.id))}>
+                    <RefreshCw /> Regerar cena
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onSelect={() => executar(() => regerarPacote(c.id), comJob("Pacote Pinterest"))}>
+                  <Type /> Regerar copy
+                </DropdownMenuItem>
+                {handlers.aoDialogoV2 && (
+                  <DropdownMenuItem onSelect={() => handlers.aoDialogoV2?.(c.id, "referencia")}>
+                    <Images /> Trocar referência
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onSelect={() => handlers.aoEditar(c.id)}>
+                  <Package /> Editar pacote Pinterest
+                </DropdownMenuItem>
+              </>
+            )}
+          </>
         )}
         <DropdownMenuSeparator />
         {podeOperar && (
@@ -107,6 +182,19 @@ export function MenuCriativo({ c, podeOperar, handlers }: { c: CriativoView; pod
           <DropdownMenuItem onSelect={() => handlers.aoFiltrarProduto?.(c.product_id)}>
             <Filter /> Só deste produto
           </DropdownMenuItem>
+        )}
+        {podeOperar && v2 && podeExcluirRascunho(c) && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              destructive
+              onSelect={() => {
+                if (window.confirm("Excluir este rascunho? A variante e suas imagens são apagadas e não podem ser recuperadas.")) executar(() => excluirRascunho(c.id));
+              }}
+            >
+              <Trash2 /> Excluir rascunho
+            </DropdownMenuItem>
+          </>
         )}
         {podeOperar && c.status !== "archived" && (
           <>

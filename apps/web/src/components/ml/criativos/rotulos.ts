@@ -76,6 +76,112 @@ export interface CriativoView {
   produto: { id: string; title: string; thumbnail: string | null } | null;
   angulo: string | null;
   board: string | null;
+  // --- V2 (famílias de criativos). Em criativos legados (family_id null) só os defaults do banco.
+  family_id: string | null;
+  visual_type: string;
+  scene_preset_id: string | null;
+  /** Nome do preset de cena. */
+  cena: string | null;
+  fidelity_mode: string;
+  fidelity_status: string;
+  fidelity_score: number | null;
+  fidelity_ia: FidelidadeIAView | null;
+  fidelity_humano: { nota: string | null; em: string | null; checklist: Record<string, boolean> } | null;
+  has_text_overlay: boolean;
+  ai_modified: boolean;
+  package_status: string;
+  package_errors: ErroPacote[];
+  board_section_id: string | null;
+  interests: string[];
+  source_media_ids: string[];
+  approved_at: string | null;
+  /** Pins (qualquer status) ligados ao criativo. */
+  pins: number;
+  /** Soma das métricas diárias dos Pins publicados (null = sem dados). */
+  metricas: MetricasView | null;
+}
+
+export interface FidelidadeIAView {
+  score: number | null;
+  resumo: string | null;
+  problemas: string[];
+  itens: Record<string, boolean>;
+}
+
+export interface ErroPacote {
+  campo: string;
+  mensagem: string;
+}
+
+export interface MetricasView {
+  impressoes: number;
+  saves: number;
+  cliques: number;
+  outbound: number;
+}
+
+/** Cena de preset ativa (para "Adicionar variante"). */
+export interface PresetOpcao {
+  id: string;
+  name: string;
+  environment: string;
+}
+
+// ---------------------------------------------------------------------------
+// V2 — rótulos de família, fidelidade e pacote
+// ---------------------------------------------------------------------------
+
+export const FIDELIDADE_LABEL: Record<string, string> = {
+  not_required: "Produto preservado",
+  pending: "Fidelidade pendente",
+  ok: "Fiel (IA)",
+  warning: "Alerta de fidelidade",
+  failed: "Fidelidade reprovada",
+  human_ok: "Fiel (confirmado)",
+};
+
+export const PACOTE_LABEL: Record<string, string> = {
+  missing: "Pacote ausente",
+  incomplete: "Pacote incompleto",
+  ready: "Pacote pronto",
+  invalid: "Pacote inválido",
+};
+
+export const FAMILIA_STATUS_LABEL: Record<string, string> = {
+  planning: "Planejando",
+  generating: "Gerando",
+  active: "Ativa",
+  archived: "Arquivada",
+};
+
+export const ASSET_KIND_LABEL: Record<string, string> = {
+  base: "Sem texto",
+  final: "Final",
+  background: "Cenário",
+};
+
+export const METODOS_IMAGEM_V2 = [
+  { valor: "auto", label: "Automático (IA ou composição)" },
+  { valor: "manual_chatgpt", label: "Manual no ChatGPT" },
+  { valor: "upload", label: "Upload próprio" },
+] as const;
+
+/** Status de criativo que bloqueiam "Excluir rascunho" (espelha servicos/variantes.excluirRascunho). */
+const RASCUNHO = ["to_generate", "generating", "waiting_manual_image", "review", "rejected"];
+
+export function podeExcluirRascunho(c: Pick<CriativoView, "status" | "approved_at" | "pins">): boolean {
+  return RASCUNHO.includes(c.status) && !c.approved_at && c.pins === 0;
+}
+
+/** Fidelidade que ainda pede olho humano. */
+export function fidelidadePendenteHumano(status: string): boolean {
+  return status === "pending" || status === "warning" || status === "failed";
+}
+
+/** CTR de saída (outbound ÷ impressões), em %. */
+export function ctrSaida(m: MetricasView | null): number | null {
+  if (!m || !m.impressoes) return null;
+  return (m.outbound / m.impressoes) * 100;
 }
 
 /** Status em que o criativo ainda pode ser editado/regenerado. */
@@ -123,4 +229,43 @@ export async function baixarArquivo(url: string, nome: string): Promise<"baixado
     window.open(url, "_blank", "noopener,noreferrer");
     return "aberto";
   }
+}
+
+/** Família de criativos "achatada" para a UI (§11.5). */
+export interface FamiliaView {
+  id: string;
+  name: string;
+  hypothesis: string | null;
+  objective: string | null;
+  status: string;
+  created_at: string;
+  product_id: string;
+  produto: { id: string; title: string; thumbnail: string | null } | null;
+  /** Imagem de referência principal do produto (ml_product_media primary_reference). */
+  referencia: string | null;
+  default_board_id: string | null;
+  board: string | null;
+  totais: { variantes: number; aprovadas: number; publicadas: number; revisao: number };
+}
+
+export interface FamiliaOpcao {
+  id: string;
+  name: string;
+}
+
+/** Diálogos V2 da variante (também abríveis via `?criativo=<id>&acao=<dialogo>`). */
+export const DIALOGOS_V2 = ["lado", "fidelidade", "problema", "referencia"] as const;
+export type DialogoV2 = (typeof DIALOGOS_V2)[number];
+
+/**
+ * Referências de uma variante na ordem de `source_media_ids` (a principal primeiro);
+ * sem ids gravados, cai para a principal + complementares do produto.
+ */
+export function ordenarReferencias<T extends { id: string; media_role: string; reference_priority: number | null }>(sourceIds: string[], midias: T[]): T[] {
+  const porId = new Map(midias.map((m) => [m.id, m]));
+  const daVariante = sourceIds.map((id) => porId.get(id)).filter((m): m is T => Boolean(m));
+  if (daVariante.length) return daVariante;
+  const principal = midias.filter((m) => m.media_role === "primary_reference");
+  const comp = midias.filter((m) => m.media_role === "complementary").sort((a, b) => (a.reference_priority ?? 99) - (b.reference_priority ?? 99));
+  return [...principal, ...comp];
 }

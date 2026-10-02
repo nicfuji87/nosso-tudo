@@ -75,6 +75,12 @@ export async function regerarImagem(creativeId: string, modo?: string) {
   return executarAcao("operator", async (s) => {
     const c = await criativos.lerCriativo(id.parse(creativeId));
     if (["published", "archived"].includes(c.status)) throw new Error("Criativo publicado/arquivado não pode ser regenerado.");
+    if (c.family_id) {
+      const { regerarCena } = await import("@/lib/ml/servicos/variantes");
+      await regerarCena(c.id, s.userId);
+      await chutarWorker();
+      return { jobId: undefined as string | undefined, mensagem: "Gerando nova cena (a anterior fica no histórico)…" };
+    }
     if (modo) {
       const m = z.enum(["api", "manual_chatgpt", "upload", "composition"]).parse(modo);
       await mlDb().from("ml_creatives").update({ image_mode: m }).eq("id", c.id);
@@ -92,6 +98,12 @@ export async function regerarCopy(creativeId: string) {
     const c = await criativos.lerCriativo(id.parse(creativeId));
     if (["published", "archived"].includes(c.status)) throw new Error("Criativo publicado/arquivado não pode ser regenerado.");
     if (c.status === "approved") await criativos.mudarStatusCriativo(c.id, "review", { motivo: "Textos serão regenerados", actorId: s.userId });
+    if (c.family_id) {
+      await mlDb().from("ml_creatives").update({ package_status: "missing" }).eq("id", c.id);
+      const { job } = await enfileirar({ tipo: "GENERATE_PINTEREST_PACKAGE", payload: { creative_id: c.id }, idempotencyKey: `v2:GENERATE_PINTEREST_PACKAGE:${c.id}`, entidade: { tipo: "creative", id: c.id }, criadoPor: s.userId });
+      await chutarWorker();
+      return { jobId: job.id, mensagem: "Gerando novo pacote Pinterest…" };
+    }
     const { job } = await enfileirar({ tipo: "GENERATE_COPY", payload: { creative_id: c.id }, idempotencyKey: `copy:${c.id}`, entidade: { tipo: "creative", id: c.id }, criadoPor: s.userId });
     await chutarWorker();
     return { jobId: job.id, mensagem: "Gerando novos textos…" };

@@ -48,3 +48,26 @@ Leia antes de criar/editar telas em `apps/web/src/app/ml/(painel)/**` e `apps/we
 - Números: classe `tabular`. Cards: `rounded-xl border border-border/70 bg-card shadow-card`.
 - Densidade: painel operacional — objetivo, sem excesso; destaque só o que exige ação.
 - Português do Brasil em toda a UI.
+
+## V2 — famílias de criativos (docs/ml/ESPECIFICACAO-V2.md)
+
+Dados novos (tipos em `@/lib/ml/database.types`): `ml_product_media` (galeria do anúncio: `media_role`
+primary_reference|complementary|do_not_use|consult_only, `public_url`, `source_url`, `source_type`, dimensões,
+`cutout_status`/`cutout_url`), `ml_creative_families` (name, hypothesis, objective, plan{mix,modo,metodo,headlines,editorial},
+status planning|generating|active|archived), `ml_scene_presets`, `ml_prompt_templates`; `ml_creatives` ganhou
+family_id, visual_type, scene_preset_id, fidelity_mode, source_media_ids, base_asset_id, has_text_overlay,
+editorial_points, ai_modified, fidelity_status (not_required|pending|ok|warning|failed|human_ok), fidelity_score,
+fidelity_notes, board_section_id, interests, disclosure_text, package_status (missing|incomplete|ready|invalid),
+package_errors, cost_estimated_usd/cost_actual_usd, image_hash; `ml_pins` ganhou family_id, ai_modified,
+ai_disclosure_sent, board_section_id; `ml_affiliate_links` ganhou final_url, final_host, redirect_status
+(unchecked|ok|ok_unverified|inconsistent|error), last_checked_at.
+
+Rótulos e regras puras (client-safe): `@/lib/ml/familias/plano` (TIPO_VISUAL_LABEL, MODO_FIDELIDADE_LABEL, MIX_PADRAO,
+TIPOS_VISUAIS, MODOS_FIDELIDADE), `@/lib/ml/conteudo/ia-v2` (ITENS_FIDELIDADE — checklist §5.2).
+
+Actions V2: `src/app/ml/(painel)/criativos/actions-v2.ts` (imagens do anúncio, wizard estimar/criar família,
+lotes elegíveis, família, variante, fidelidade, pacote, upload V2), `configuracoes/actions.ts` (salvarSecao também para
+`criativos_v2` e `pinterest_copy`, salvarPreset, salvarTemplate, ativarTemplate), `pendencias/actions.ts`
+(validarRedirectAgora). RPCs: `ml_dashboard_v2()`, `ml_analytics_breakdown` com dimensões novas
+(family, visual_type, scene, text, method, ai, pin), `ml_analytics_cohort(p_dias, p_dimension, p_filters)`;
+filtros novos em `p_filters`: family_id, visual_type, scene, has_text ('true'|'false'), fidelity_mode.

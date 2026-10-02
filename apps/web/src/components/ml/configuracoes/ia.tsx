@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { GitBranch } from "lucide-react";
+import { GitBranch, Info } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Secao } from "@/components/ml/campos";
 import type { ConfigCompleta } from "@/lib/ml/config";
@@ -10,6 +10,13 @@ import { BarraSalvar, Campos, useCampos, useSalvarSecao, type CampoSpec } from "
 const CAMPOS: CampoSpec[] = [
   { tipo: "texto", chave: "modelo_texto", label: "Modelo de texto", max: 80, dica: "Análises, ângulos e textos dos Pins." },
   { tipo: "texto", chave: "modelo_imagem", label: "Modelo de imagem", max: 80, dica: "Usado quando a arte é gerada por IA." },
+  {
+    tipo: "texto",
+    chave: "modelo_visao",
+    label: "Modelo de visão e fidelidade",
+    max: 80,
+    dica: "Descreve as imagens para o pacote Pinterest e compara a arte gerada com as fotos reais do produto.",
+  },
   {
     tipo: "select",
     chave: "modo",
@@ -50,8 +57,29 @@ const CAMPOS: CampoSpec[] = [
   },
 ];
 
+const preco = (chave: string, label: string, dica: string): CampoSpec => ({
+  tipo: "num",
+  chave,
+  label,
+  min: 0,
+  max: 100,
+  passo: 0.001,
+  sufixo: "US$",
+  dica,
+});
+
+const CAMPOS_PRECO: CampoSpec[] = [
+  preco("preco_imagem_low", "Imagem — qualidade baixa", "Por imagem gerada."),
+  preco("preco_imagem_medium", "Imagem — qualidade média", "Por imagem gerada."),
+  preco("preco_imagem_high", "Imagem — qualidade alta", "Por imagem gerada."),
+  preco("preco_texto", "Texto", "Por chamada de texto (copy, ângulos, análise)."),
+  preco("preco_visao", "Visão", "Por análise de imagem (descrição e checagem de fidelidade)."),
+];
+
+const TODOS = [...CAMPOS, ...CAMPOS_PRECO];
+
 export function FormIA({ config, versao, podeEditar }: { config: ConfigCompleta["ia"]; versao: number; podeEditar: boolean }) {
-  const form = useCampos(CAMPOS, config);
+  const form = useCampos(TODOS, config);
   const { pendente, salvar } = useSalvarSecao();
   const restantes = 2000 - String(form.estado.instrucoes_extras ?? "").length;
   return (
@@ -78,6 +106,14 @@ export function FormIA({ config, versao, podeEditar }: { config: ConfigCompleta[
       </p>
       <Campos campos={CAMPOS} form={form} disabled={!podeEditar || pendente} prefixo="ia" />
       <p className="mt-1 text-right text-caption text-muted-foreground tabular">{restantes} caracteres restantes</p>
+      <div className="mt-6 border-t border-border/70 pt-5">
+        <h3 className="text-body-sm font-semibold">Preços estimados (USD)</h3>
+        <p className="mb-3 mt-0.5 flex items-start gap-1.5 text-caption text-muted-foreground">
+          <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          Só alimentam a estimativa de custo dos lotes (wizard e limite por lote). Não alteram a cobrança da OpenAI — ajuste conforme a tabela vigente.
+        </p>
+        <Campos campos={CAMPOS_PRECO} form={form} disabled={!podeEditar || pendente} prefixo="ia-preco" className="lg:grid-cols-3" />
+      </div>
       <BarraSalvar
         sujo={form.sujo}
         valido={form.valido}

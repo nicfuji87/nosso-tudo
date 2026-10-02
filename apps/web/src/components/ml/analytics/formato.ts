@@ -2,6 +2,7 @@
  * Tipos e formatação da tela de Analytics (server e client).
  */
 import { labelAngulo } from "@/lib/ml/conteudo/angulos";
+import { MODO_FIDELIDADE_LABEL, TIPO_VISUAL_LABEL } from "@/lib/ml/familias/plano";
 
 export interface PontoSerie {
   date: string;
@@ -24,10 +25,28 @@ export interface Resumo {
   pedidos: number;
   receita_por_pin: number | null;
   epc: number | null;
+  /** V2: famílias distintas entre os Pins que atendem aos filtros. */
+  familias: number;
+  outbound_por_mil: number | null;
+  receita_por_familia: number | null;
   serie: PontoSerie[];
 }
 
-export type Dimensao = "category" | "product" | "board" | "angle" | "headline" | "creative" | "price_band" | "pin";
+export type Dimensao =
+  | "category"
+  | "product"
+  | "board"
+  | "angle"
+  | "headline"
+  | "creative"
+  | "price_band"
+  | "pin"
+  | "family"
+  | "visual_type"
+  | "scene"
+  | "text"
+  | "method"
+  | "ai";
 
 export interface LinhaBreakdown {
   dimension: Dimensao;
@@ -54,6 +73,11 @@ export const FILTROS_URL = {
   faixa: "price_band",
   ambiente: "environment",
   headline: "headline",
+  familia: "family_id",
+  tipo: "visual_type",
+  cena: "scene",
+  texto: "has_text",
+  modo: "fidelity_mode",
 } as const;
 export type FiltroUrl = keyof typeof FILTROS_URL;
 
@@ -66,7 +90,47 @@ export const FILTRO_DA_DIMENSAO: Partial<Record<Dimensao, FiltroUrl>> = {
   creative: "criativo",
   price_band: "faixa",
   headline: "headline",
+  family: "familia",
+  visual_type: "tipo",
+  scene: "cena",
+  text: "texto",
+  method: "modo",
 };
+
+/** Valor do filtro de URL para a chave de uma linha do relatório (com/sem texto vira 'true'/'false'). */
+export function valorFiltroDaLinha(dimension: Dimensao, key: string): string | null {
+  if (key === "—" || !key) return null;
+  if (dimension === "text") return key === "com_texto" ? "true" : key === "sem_texto" ? "false" : null;
+  return key;
+}
+
+/** Coortes (§11.9): dimensões aceitas por ml_analytics_cohort e janelas. */
+export const DIMENSOES_COORTE = [
+  { value: "family", label: "Família" },
+  { value: "creative", label: "Variante" },
+  { value: "visual_type", label: "Tipo visual" },
+  { value: "scene", label: "Cena" },
+  { value: "text", label: "Com × sem texto" },
+  { value: "product", label: "Produto" },
+] as const satisfies readonly { value: Dimensao; label: string }[];
+export type DimensaoCoorte = (typeof DIMENSOES_COORTE)[number]["value"];
+export const JANELAS_COORTE = ["7", "14", "30"] as const;
+
+export function rotuloTipoVisual(t: string): string {
+  return (TIPO_VISUAL_LABEL as Record<string, string>)[t] ?? t;
+}
+
+export function rotuloModo(m: string): string {
+  return (MODO_FIDELIDADE_LABEL as Record<string, string>)[m] ?? m;
+}
+
+/** Rótulo legível da linha conforme a dimensão (o banco devolve a chave crua em tipo visual / modo). */
+export function rotuloLinha(dimension: Dimensao, key: string, label: string): string {
+  if (dimension === "visual_type") return rotuloTipoVisual(key);
+  if (dimension === "method") return rotuloModo(key);
+  if (dimension === "angle") return rotuloAngulo(key);
+  return label;
+}
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const numOuNulo = (v: unknown) => (v == null || v === "" ? null : Number.isFinite(Number(v)) ? Number(v) : null);
@@ -87,6 +151,9 @@ export function normalizarResumo(d: unknown): Resumo {
     pedidos: num(r.pedidos),
     receita_por_pin: numOuNulo(r.receita_por_pin),
     epc: numOuNulo(r.epc),
+    familias: num(r.familias),
+    outbound_por_mil: numOuNulo(r.outbound_por_mil),
+    receita_por_familia: numOuNulo(r.receita_por_familia),
     serie: serie.map((p) => ({
       date: String(p.date ?? ""),
       impressions: num(p.impressions),
@@ -116,6 +183,8 @@ export const fmtNum = (n: number) => new Intl.NumberFormat("pt-BR").format(n);
 export const fmtBrl = (n: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
 export const fmtPct = (n: number | null) =>
   n == null ? "—" : new Intl.NumberFormat("pt-BR", { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 2 }).format(n);
+export const fmtDecimal = (n: number | null, casas = 2) =>
+  n == null ? "—" : new Intl.NumberFormat("pt-BR", { minimumFractionDigits: casas, maximumFractionDigits: casas }).format(n);
 export const fmtCompacto = (n: number) => new Intl.NumberFormat("pt-BR", { notation: "compact", maximumFractionDigits: 1 }).format(n);
 
 /** "2026-10-01" → "01/10/2026" (datas puras, sem fuso). */

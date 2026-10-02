@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { FiltroSelect } from "@/components/ml/publicacoes/filtro-select";
 import { hrefCom, type ParamsUrl } from "@/components/ml/publicacoes/tipos";
 import { TIPOS_ANGULO } from "@/lib/ml/conteudo/angulos";
+import { MODO_FIDELIDADE_LABEL, MODOS_FIDELIDADE, TIPO_VISUAL_LABEL, TIPOS_VISUAIS } from "@/lib/ml/familias/plano";
 import { cn } from "@/lib/utils";
 import { FAIXAS_PRECO, FILTROS_URL, fmtData } from "./formato";
 
@@ -22,6 +23,8 @@ export function FiltrosAnalytics({
   personalizado,
   categorias,
   boards,
+  familias = [],
+  cenas = [],
   rotulos,
 }: {
   params: ParamsUrl;
@@ -30,6 +33,9 @@ export function FiltrosAnalytics({
   personalizado: boolean;
   categorias: { value: string; label: string }[];
   boards: { value: string; label: string }[];
+  /** V2: famílias com Pins publicados e presets de cena. */
+  familias?: { value: string; label: string }[];
+  cenas?: { value: string; label: string }[];
   rotulos: { produto?: string; criativo?: string };
 }) {
   const router = useRouter();
@@ -117,6 +123,14 @@ export function FiltrosAnalytics({
           { value: "production", label: "Produção" },
           { value: "sandbox", label: "Sandbox" },
         ])}
+        {familias.length > 0 && sel("familia", "Família", familias, "Todas")}
+        {sel("tipo", "Tipo visual", TIPOS_VISUAIS.map((t) => ({ value: t, label: TIPO_VISUAL_LABEL[t] })))}
+        {cenas.length > 0 && sel("cena", "Cena", cenas, "Todas")}
+        {sel("texto", "Texto na imagem", [
+          { value: "true", label: "Com texto" },
+          { value: "false", label: "Sem texto" },
+        ])}
+        {sel("modo", "Modo de fidelidade", MODOS_FIDELIDADE.map((m) => ({ value: m, label: MODO_FIDELIDADE_LABEL[m] })))}
         {params.produto && (
           <Chip href={hrefCom(BASE, params, { produto: null })} rotulo={`Produto: ${rotulos.produto ?? "selecionado"}`} />
         )}

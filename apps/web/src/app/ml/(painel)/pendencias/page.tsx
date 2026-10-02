@@ -2,11 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import {
   ArrowRight,
+  Ban,
   CalendarClock,
   CheckCircle2,
   ImagePlus,
+  Images,
   Link2,
   Package,
+  PackageX,
   PartyPopper,
   Settings2,
   ShieldAlert,
@@ -21,11 +24,15 @@ import { ScoreBadge } from "@/components/ml/status";
 import { carregarCriativos, fotoPrincipal } from "@/components/ml/criativos/carregar";
 import { RevisaoRapida } from "@/components/ml/criativos/revisao-rapida";
 import { labelModo } from "@/components/ml/criativos/rotulos";
+import { TIPO_VISUAL_LABEL } from "@/lib/ml/familias/plano";
+import { FidelidadePendente, PacotesPendentes } from "@/components/ml/pendencias/criativos-v2-pendentes";
 import { Excecoes, type Excecao } from "@/components/ml/pendencias/excecoes";
 import { FocoGrupo } from "@/components/ml/pendencias/foco-grupo";
 import { GrupoPendencia, type TipoGrupo } from "@/components/ml/pendencias/grupo";
 import { PinsAprovacao, type PinPendente } from "@/components/ml/pendencias/pins-aprovacao";
+import { PinsBloqueados, type PinBloqueado } from "@/components/ml/pendencias/pins-bloqueados";
 import { ProdutosAprovacao, type ProdutoPendente } from "@/components/ml/pendencias/produtos-aprovacao";
+import { ReferenciasPendentes, type ProdutoSemReferencia } from "@/components/ml/pendencias/referencias-pendentes";
 import { getMlRole, temPapel } from "@/lib/ml/acesso";
 import { lerConfig } from "@/lib/ml/config";
 import { createClient } from "@/lib/supabase/server";
@@ -44,13 +51,31 @@ interface ConfigPendente {
   acao: string;
 }
 
-const TIPOS_VALIDOS: TipoGrupo[] = ["produtos", "links", "imagens", "criativos", "publicacoes", "excecoes", "configuracoes"];
+const TIPOS_VALIDOS: TipoGrupo[] = [
+  "bloqueios",
+  "links",
+  "referencias",
+  "imagens",
+  "fidelidade",
+  "criativos",
+  "pacote",
+  "publicacoes",
+  "produtos",
+  "excecoes",
+  "configuracoes",
+];
 const PROVEDORES: Record<string, string> = { mercadolivre: "Mercado Livre", pinterest: "Pinterest" };
 
+/** Produtos que já deveriam ter referência do anúncio para virar família de criativos (V2 §12). */
+const STATUS_PEDEM_REFERENCIA = ["approved", "waiting_affiliate_link", "ready_for_creative", "creative_draft", "ready_to_schedule"];
+
+/** Fidelidade que pede olho humano: alerta/reprovada, ou pendente com a variante já em revisão. */
+const FILTRO_FIDELIDADE = "fidelity_status.in.(warning,failed),and(fidelity_status.eq.pending,status.eq.review)";
+
 /** Faixa de tempo estimado (segundos) por tipo de tarefa — spec §17. */
-function estimativa(n: { produtos: number; links: number; imagens: number; criativos: number; pins: number }) {
-  const min = n.produtos * 2 + n.links * 10 + n.imagens * 30 + n.criativos * 5 + n.pins * 3;
-  const max = n.produtos * 5 + n.links * 30 + n.imagens * 90 + n.criativos * 15 + n.pins * 10;
+function estimativa(n: { produtos: number; links: number; imagens: number; criativos: number; pins: number; referencias: number; fidelidade: number; pacote: number }) {
+  const min = n.produtos * 2 + n.links * 10 + n.imagens * 30 + n.criativos * 5 + n.pins * 3 + n.referencias * 10 + n.fidelidade * 10 + n.pacote * 15;
+  const max = n.produtos * 5 + n.links * 30 + n.imagens * 90 + n.criativos * 15 + n.pins * 10 + n.referencias * 30 + n.fidelidade * 30 + n.pacote * 60;
   const fmt = (s: number) => (s < 60 ? `${s} s` : `${Math.round(s / 60)} min`);
   return min === 0 ? null : `${fmt(min)}–${fmt(max)}`;
 }
@@ -60,9 +85,30 @@ export default async function PendenciasPage({ searchParams }: { searchParams: P
   const tipo = TIPOS_VALIDOS.includes(tipoParam as TipoGrupo) ? (tipoParam as TipoGrupo) : null;
 
   const supabase = createClient();
-  const agora = new Date().toISOString();
+  const agoraData = new Date();
+  const agora = agoraData.toISOString();
+  // "Publicações próximas": até 48 h à frente — e as que falharam nas últimas 24 h.
+  const janelaInicio = new Date(agoraData.getTime() - 24 * 3600_000).toISOString();
+  const janelaFim = new Date(agoraData.getTime() + 48 * 3600_000).toISOString();
 
-  const [geral, role, prodRes, linkRes, imgRes, revisaoCount, criativosRevisao, pinRes, taskRes, intRes, catRes, boardRes] = await Promise.all([
+  const [
+    geral,
+    role,
+    prodRes,
+    linkRes,
+    imgRes,
+    revisaoCount,
+    criativosRevisao,
+    pinRes,
+    taskRes,
+    intRes,
+    catRes,
+    boardRes,
+    bloqueadosRes,
+    refProdRes,
+    fidRes,
+    pacoteRes,
+  ] = await Promise.all([
     lerConfig("geral"),
     getMlRole(),
     supabase
@@ -81,7 +127,7 @@ export default async function PendenciasPage({ searchParams }: { searchParams: P
       .limit(3),
     supabase
       .from("ml_creatives")
-      .select("id, headline, title, product_id, image_mode", { count: "exact" })
+      .select("id, headline, title, product_id, image_mode, family_id, visual_type", { count: "exact" })
       .eq("status", "waiting_manual_image")
       .order("created_at", { ascending: true })
       .limit(4),
@@ -95,7 +141,7 @@ export default async function PendenciasPage({ searchParams }: { searchParams: P
       .limit(10),
     supabase
       .from("ml_tasks")
-      .select("id, type, title, detail, entity_type, entity_id, payload, status, created_at")
+      .select("id, type, title, detail, entity_type, entity_id, payload, status, created_at, dedupe_key")
       .or(`status.eq.open,and(status.eq.snoozed,snoozed_until.lt."${agora}")`)
       .order("priority", { ascending: true })
       .order("created_at", { ascending: false })
@@ -103,6 +149,36 @@ export default async function PendenciasPage({ searchParams }: { searchParams: P
     supabase.from("ml_integrations").select("provider, status, last_error").in("provider", ["mercadolivre", "pinterest"]),
     supabase.from("ml_categories").select("id, name, commission_pct").eq("tracked", true).limit(500),
     supabase.from("ml_pinterest_boards").select("id, name, is_default, active, removed_at").limit(500),
+    supabase
+      .from("ml_pins")
+      .select("id, title, media_url, status, scheduled_at, last_error, board_id", { count: "exact" })
+      .in("status", ["blocked", "failed"])
+      .gte("scheduled_at", janelaInicio)
+      .lte("scheduled_at", janelaFim)
+      .order("scheduled_at", { ascending: true })
+      .limit(10),
+    supabase
+      .from("ml_products")
+      .select("id, title, thumbnail, pictures, status, media_count")
+      .in("status", STATUS_PEDEM_REFERENCIA)
+      .order("approved_at", { ascending: true, nullsFirst: false })
+      .limit(200),
+    supabase
+      .from("ml_creatives")
+      .select("id", { count: "exact" })
+      .not("family_id", "is", null)
+      .or(FILTRO_FIDELIDADE)
+      .not("status", "in", "(archived,rejected)")
+      .order("created_at", { ascending: true })
+      .limit(6),
+    supabase
+      .from("ml_creatives")
+      .select("id", { count: "exact" })
+      .not("family_id", "is", null)
+      .eq("status", "approved")
+      .in("package_status", ["missing", "incomplete", "invalid"])
+      .order("approved_at", { ascending: true })
+      .limit(6),
   ]);
 
   const tz = geral.timezone;
@@ -146,7 +222,15 @@ export default async function PendenciasPage({ searchParams }: { searchParams: P
   const totalLinks = linkRes.count ?? proximosLinks.length;
 
   // (c) Imagens manuais
-  const imgLinhas = (imgRes.data ?? []) as { id: string; headline: string | null; title: string | null; product_id: string; image_mode: string }[];
+  const imgLinhas = (imgRes.data ?? []) as {
+    id: string;
+    headline: string | null;
+    title: string | null;
+    product_id: string;
+    image_mode: string;
+    family_id: string | null;
+    visual_type: string;
+  }[];
   const totalImagens = imgRes.count ?? imgLinhas.length;
   const { data: imgProdutos } = imgLinhas.length
     ? await supabase.from("ml_products").select("id, title, thumbnail").in("id", [...new Set(imgLinhas.map((c) => c.product_id))])
@@ -164,8 +248,8 @@ export default async function PendenciasPage({ searchParams }: { searchParams: P
   );
   const totalPins = pinRes.count ?? pins.length;
 
-  // (f) Exceções
-  const excecoes: Excecao[] = ((taskRes.data ?? []) as {
+  // (f) Exceções — "publicação bloqueada" vai para o grupo de bloqueios; "sem referência" é calculado ao vivo.
+  const todasExcecoes: Excecao[] = ((taskRes.data ?? []) as {
     id: string;
     type: string;
     title: string;
@@ -175,20 +259,72 @@ export default async function PendenciasPage({ searchParams }: { searchParams: P
     payload: unknown;
     status: string;
     created_at: string;
-  }[]).map((t) => {
-    const jobId = (t.payload as { job_id?: unknown } | null)?.job_id;
-    return {
-      id: t.id,
-      type: t.type,
-      title: t.title,
-      detail: t.detail,
-      entity_type: t.entity_type,
-      entity_id: t.entity_id,
-      job_id: typeof jobId === "string" ? jobId : null,
-      status: t.status,
-      created_at: t.created_at,
-    };
-  });
+    dedupe_key: string | null;
+  }[])
+    .filter((t) => !t.dedupe_key?.startsWith("sem_referencia:"))
+    .map((t) => {
+      const jobId = (t.payload as { job_id?: unknown } | null)?.job_id;
+      return {
+        id: t.id,
+        type: t.type,
+        title: t.title,
+        detail: t.detail,
+        entity_type: t.entity_type,
+        entity_id: t.entity_id,
+        job_id: typeof jobId === "string" ? jobId : null,
+        status: t.status,
+        created_at: t.created_at,
+      };
+    });
+  const tarefasBloqueio = todasExcecoes.filter((e) => e.type === "publish_blocked");
+  const excecoes = todasExcecoes.filter((e) => e.type !== "publish_blocked");
+
+  // (1) Bloqueios que impedem publicações próximas
+  const pinsBloqueados: PinBloqueado[] = ((bloqueadosRes.data ?? []) as {
+    id: string;
+    title: string | null;
+    media_url: string | null;
+    status: string;
+    scheduled_at: string | null;
+    last_error: string | null;
+    board_id: string | null;
+  }[]).map((p) => ({ ...p, board: p.board_id ? nomeBoard.get(p.board_id) ?? null : null }));
+  // Pin com tarefa aberta aparece só uma vez (na tarefa, que tem o motivo completo).
+  const pinsComTarefa = new Set(tarefasBloqueio.filter((t) => t.entity_type === "pin" && t.entity_id).map((t) => t.entity_id!));
+  const pinsSoltos = pinsBloqueados.filter((p) => !pinsComTarefa.has(p.id));
+  const totalPinsSoltos = Math.max(pinsSoltos.length, (bloqueadosRes.count ?? 0) - (pinsBloqueados.length - pinsSoltos.length));
+  const totalBloqueios = tarefasBloqueio.length + totalPinsSoltos;
+
+  // (3) Produtos sem referência principal do anúncio
+  const refCandidatos = (refProdRes.data ?? []) as { id: string; title: string; thumbnail: string | null; pictures: unknown; status: string; media_count: number }[];
+  const { data: comReferencia } = refCandidatos.length
+    ? await supabase
+        .from("ml_product_media")
+        .select("product_id")
+        .in("product_id", refCandidatos.map((p) => p.id))
+        .eq("media_role", "primary_reference")
+        .limit(1000)
+    : { data: [] as { product_id: string }[] };
+  const temReferencia = new Set(((comReferencia ?? []) as { product_id: string }[]).map((m) => m.product_id));
+  const semReferencia = refCandidatos.filter((p) => !temReferencia.has(p.id));
+  const totalReferencias = semReferencia.length;
+  const produtosSemReferencia: ProdutoSemReferencia[] = semReferencia.slice(0, 6).map((p) => ({
+    id: p.id,
+    title: p.title,
+    thumbnail: p.thumbnail ?? fotoPrincipal(p),
+    status: p.status,
+    media_count: p.media_count ?? 0,
+  }));
+
+  // (5) Fidelidade e (7) pacote Pinterest — mesmos dados dos cards de Criativos.
+  const fidIds = ((fidRes.data ?? []) as { id: string }[]).map((r) => r.id);
+  const pacoteIds = ((pacoteRes.data ?? []) as { id: string }[]).map((r) => r.id);
+  const [criativosFidelidade, criativosPacote] = await Promise.all([
+    fidIds.length ? carregarCriativos({ ids: fidIds, limite: fidIds.length, maisAntigosPrimeiro: true }) : Promise.resolve([]),
+    pacoteIds.length ? carregarCriativos({ ids: pacoteIds, limite: pacoteIds.length, maisAntigosPrimeiro: true }) : Promise.resolve([]),
+  ]);
+  const totalFidelidade = fidRes.count ?? criativosFidelidade.length;
+  const totalPacote = pacoteRes.count ?? criativosPacote.length;
 
   // (g) Configurações incompletas (calculadas ao vivo)
   const configs: ConfigPendente[] = [];
@@ -248,18 +384,32 @@ export default async function PendenciasPage({ searchParams }: { searchParams: P
     });
   }
 
+  // Ordem da spec V2 §12: bloqueios → links → referências → fidelidade → aprovação → exceções.
   const resumo: { tipo: TipoGrupo; label: string; n: number; icon: typeof Package }[] = [
-    { tipo: "produtos", label: "Aprovar produtos", n: totalProdutos, icon: Package },
+    { tipo: "bloqueios", label: "Publicação bloqueada", n: totalBloqueios, icon: Ban },
     { tipo: "links", label: "Links de afiliado", n: totalLinks, icon: Link2 },
+    { tipo: "referencias", label: "Referências", n: totalReferencias, icon: Images },
     { tipo: "imagens", label: "Imagens manuais", n: totalImagens, icon: ImagePlus },
+    { tipo: "fidelidade", label: "Fidelidade", n: totalFidelidade, icon: ShieldAlert },
     { tipo: "criativos", label: "Revisar criativos", n: totalRevisao, icon: Sparkles },
+    { tipo: "pacote", label: "Pacote Pinterest", n: totalPacote, icon: PackageX },
     { tipo: "publicacoes", label: "Aprovar Pins", n: totalPins, icon: CalendarClock },
-    { tipo: "excecoes", label: "Exceções", n: excecoes.length, icon: ShieldAlert },
+    { tipo: "produtos", label: "Aprovar produtos", n: totalProdutos, icon: Package },
+    { tipo: "excecoes", label: "Exceções", n: excecoes.length, icon: TriangleAlert },
     { tipo: "configuracoes", label: "Configuração", n: configs.length, icon: Settings2 },
   ];
   const total = resumo.reduce((a, r) => a + r.n, 0);
-  const tempo = estimativa({ produtos: totalProdutos, links: totalLinks, imagens: totalImagens, criativos: totalRevisao, pins: totalPins });
-  const urgentes = excecoes.filter((e) => e.type === "integration_auth" || e.type === "publish_blocked").length;
+  const tempo = estimativa({
+    produtos: totalProdutos,
+    links: totalLinks,
+    imagens: totalImagens,
+    criativos: totalRevisao,
+    pins: totalPins,
+    referencias: totalReferencias,
+    fidelidade: totalFidelidade,
+    pacote: totalPacote,
+  });
+  const reconectar = excecoes.filter((e) => e.type === "integration_auth").length;
 
   if (total === 0) {
     return (
@@ -268,7 +418,7 @@ export default async function PendenciasPage({ searchParams }: { searchParams: P
         <EmptyState
           icon={PartyPopper}
           title="Tudo em dia"
-          description="Nenhum produto, link, imagem, criativo ou publicação esperando por você. A automação segue trabalhando."
+          description="Nenhum produto, link, referência, imagem, criativo ou publicação esperando por você. A automação segue trabalhando."
           action={
             <div className="flex flex-wrap justify-center gap-2">
               <Button asChild variant="tech">
@@ -292,7 +442,7 @@ export default async function PendenciasPage({ searchParams }: { searchParams: P
         description={`${total} item(ns) aguardando você${tempo ? ` · tempo estimado ${tempo}` : ""}. Comece pelo que destrava mais coisa.`}
       />
 
-      {urgentes > 0 && (
+      {reconectar > 0 && (
         <Link
           href="?tipo=excecoes"
           scroll={false}
@@ -300,14 +450,14 @@ export default async function PendenciasPage({ searchParams }: { searchParams: P
         >
           <TriangleAlert className="size-5 shrink-0" aria-hidden />
           <span className="flex-1">
-            <strong>{urgentes} exceção(ões) bloqueando publicações ou integrações.</strong> Resolva primeiro — elas travam o restante do fluxo.
+            <strong>{reconectar} integração(ões) precisam ser reconectadas.</strong> Sem elas a descoberta ou a publicação param.
           </span>
           <ArrowRight className="size-4" aria-hidden />
         </Link>
       )}
 
       {/* Atalhos por tipo */}
-      <nav aria-label="Tipos de pendência" className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+      <nav aria-label="Tipos de pendência" className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
         {resumo.map((r) => (
           <Link
             key={r.tipo}
@@ -316,6 +466,7 @@ export default async function PendenciasPage({ searchParams }: { searchParams: P
             className={cn(
               "flex flex-col gap-1 rounded-xl border px-3 py-2.5 transition-colors",
               r.n > 0 ? "border-border/70 bg-card shadow-card hover:border-tech/50" : "border-dashed border-border bg-transparent text-muted-foreground",
+              r.n > 0 && r.tipo === "bloqueios" && "border-destructive/40",
               tipo === r.tipo && "border-tech",
             )}
           >
@@ -329,43 +480,31 @@ export default async function PendenciasPage({ searchParams }: { searchParams: P
         ))}
       </nav>
 
-      {/* (f) Exceções urgentes vêm antes quando existem bloqueios */}
-      {urgentes > 0 && excecoes.length > 0 && (
-        <GrupoPendencia tipo="excecoes" icon={ShieldAlert} titulo="Exceções" contagem={excecoes.length} tom="destructive" descricao="O que a automação não conseguiu resolver sozinha.">
-          <Excecoes itens={excecoes} tz={tz} podeOperar={podeOperar} />
-        </GrupoPendencia>
-      )}
-
-      {/* (a) Produtos */}
-      {totalProdutos > 0 && (
+      {/* (1) Bloqueios que impedem publicações próximas */}
+      {totalBloqueios > 0 && (
         <GrupoPendencia
-          tipo="produtos"
-          icon={Package}
-          titulo="Produtos aguardando aprovação"
-          contagem={totalProdutos}
-          tempo="2–5 s por produto"
-          descricao="Maior score primeiro."
+          tipo="bloqueios"
+          icon={Ban}
+          titulo="Publicações bloqueadas"
+          contagem={totalBloqueios}
+          tom="destructive"
+          descricao="Pins das próximas 48 h que não vão sair sem você. Resolva primeiro."
           acoes={
             <Button asChild variant="ghost" size="sm">
-              <Link href="/ml/descobertas">
-                Ver todos <ArrowRight />
+              <Link href="/ml/publicacoes">
+                Abrir Publicações <ArrowRight />
               </Link>
             </Button>
           }
         >
-          <ProdutosAprovacao produtos={produtos} podeOperar={podeOperar} />
-          {totalProdutos > produtos.length && (
-            <p className="mt-3 text-caption text-muted-foreground">
-              Mostrando {produtos.length} de {totalProdutos}.{" "}
-              <Link href="/ml/descobertas" className="font-medium text-tech hover:underline">
-                Ver todos em Descobertas
-              </Link>
-            </p>
-          )}
+          <div className="space-y-3">
+            {tarefasBloqueio.length > 0 && <Excecoes itens={tarefasBloqueio} tz={tz} podeOperar={podeOperar} />}
+            {pinsSoltos.length > 0 && <PinsBloqueados pins={pinsSoltos} tz={tz} />}
+          </div>
         </GrupoPendencia>
       )}
 
-      {/* (b) Links */}
+      {/* (2) Links */}
       {totalLinks > 0 && (
         <GrupoPendencia
           tipo="links"
@@ -408,15 +547,38 @@ export default async function PendenciasPage({ searchParams }: { searchParams: P
         </GrupoPendencia>
       )}
 
-      {/* (c) Imagens manuais */}
+      {/* (3) Referências do produto */}
+      {totalReferencias > 0 && (
+        <GrupoPendencia
+          tipo="referencias"
+          icon={Images}
+          titulo="Selecionar referência do produto"
+          contagem={totalReferencias}
+          tempo="10–30 s por produto"
+          descricao="Sem a foto de referência principal do anúncio, a família de criativos não é gerada."
+          tom="warning"
+        >
+          <ReferenciasPendentes produtos={produtosSemReferencia} podeOperar={podeOperar} />
+          {totalReferencias > produtosSemReferencia.length && (
+            <p className="mt-3 text-caption text-muted-foreground">
+              Mostrando {produtosSemReferencia.length} de {totalReferencias}{refCandidatos.length >= 200 ? "+" : ""}.{" "}
+              <Link href="/ml/produtos" className="font-medium text-tech hover:underline">
+                Ver produtos
+              </Link>
+            </p>
+          )}
+        </GrupoPendencia>
+      )}
+
+      {/* (4) Imagens manuais (ChatGPT) */}
       {totalImagens > 0 && (
         <GrupoPendencia
           tipo="imagens"
           icon={ImagePlus}
-          titulo="Imagens manuais"
+          titulo="Criativo manual aguardando ChatGPT"
           contagem={totalImagens}
           tempo="30–90 s por criativo"
-          descricao="Prompt e imagem de referência prontos — gere no ChatGPT e envie."
+          descricao="Prompt e referências prontos — gere no ChatGPT e envie."
           tom="warning"
         >
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
@@ -435,7 +597,10 @@ export default async function PendenciasPage({ searchParams }: { searchParams: P
                         )}
                       </div>
                       <p className="line-clamp-2 text-caption font-medium group-hover:underline">{c.headline ?? c.title ?? p?.title ?? "Criativo"}</p>
-                      <p className="text-overline text-muted-foreground">{labelModo(c.image_mode)}</p>
+                      <p className="text-overline text-muted-foreground">
+                        {c.family_id ? `${(TIPO_VISUAL_LABEL as Record<string, string>)[c.visual_type] ?? c.visual_type} · ` : ""}
+                        {labelModo(c.image_mode)}
+                      </p>
                     </Link>
                   </li>
                 );
@@ -450,7 +615,30 @@ export default async function PendenciasPage({ searchParams }: { searchParams: P
         </GrupoPendencia>
       )}
 
-      {/* (d) Criativos em revisão */}
+      {/* (5) Fidelidade */}
+      {totalFidelidade > 0 && (
+        <GrupoPendencia
+          tipo="fidelidade"
+          icon={ShieldAlert}
+          titulo="Criativo com baixa fidelidade"
+          contagem={totalFidelidade}
+          tempo="10–30 s por criativo"
+          descricao="Compare com a foto do anúncio: produto diferente do real não pode ser publicado."
+          tom="warning"
+        >
+          <FidelidadePendente criativos={criativosFidelidade} podeOperar={podeOperar} />
+          {totalFidelidade > criativosFidelidade.length && (
+            <p className="mt-3 text-caption text-muted-foreground">
+              Mostrando {criativosFidelidade.length} de {totalFidelidade}.{" "}
+              <Link href="/ml/criativos?status=review" className="font-medium text-tech hover:underline">
+                Ver em Criativos
+              </Link>
+            </p>
+          )}
+        </GrupoPendencia>
+      )}
+
+      {/* (6) Criativos em revisão */}
       {totalRevisao > 0 && (
         <GrupoPendencia
           tipo="criativos"
@@ -479,7 +667,30 @@ export default async function PendenciasPage({ searchParams }: { searchParams: P
         </GrupoPendencia>
       )}
 
-      {/* (e) Publicações */}
+      {/* (7) Pacote Pinterest */}
+      {totalPacote > 0 && (
+        <GrupoPendencia
+          tipo="pacote"
+          icon={PackageX}
+          titulo="Pacote Pinterest incompleto"
+          contagem={totalPacote}
+          tempo="15–60 s por criativo"
+          descricao="Aprovados, mas faltando algo que o Pinterest exige (título, descrição, alt text, board ou link)."
+          tom="warning"
+        >
+          <PacotesPendentes criativos={criativosPacote} podeOperar={podeOperar} />
+          {totalPacote > criativosPacote.length && (
+            <p className="mt-3 text-caption text-muted-foreground">
+              Mostrando {criativosPacote.length} de {totalPacote}.{" "}
+              <Link href="/ml/criativos?status=approved" className="font-medium text-tech hover:underline">
+                Ver aprovados
+              </Link>
+            </p>
+          )}
+        </GrupoPendencia>
+      )}
+
+      {/* Publicações aguardando aprovação */}
       {totalPins > 0 && (
         <GrupoPendencia
           tipo="publicacoes"
@@ -499,14 +710,50 @@ export default async function PendenciasPage({ searchParams }: { searchParams: P
         </GrupoPendencia>
       )}
 
-      {/* (f) Exceções (sem bloqueio urgente) */}
-      {urgentes === 0 && excecoes.length > 0 && (
-        <GrupoPendencia tipo="excecoes" icon={ShieldAlert} titulo="Exceções" contagem={excecoes.length} tom="warning" descricao="O que a automação não conseguiu resolver sozinha.">
+      {/* Produtos */}
+      {totalProdutos > 0 && (
+        <GrupoPendencia
+          tipo="produtos"
+          icon={Package}
+          titulo="Produtos aguardando aprovação"
+          contagem={totalProdutos}
+          tempo="2–5 s por produto"
+          descricao="Maior score primeiro."
+          acoes={
+            <Button asChild variant="ghost" size="sm">
+              <Link href="/ml/descobertas">
+                Ver todos <ArrowRight />
+              </Link>
+            </Button>
+          }
+        >
+          <ProdutosAprovacao produtos={produtos} podeOperar={podeOperar} />
+          {totalProdutos > produtos.length && (
+            <p className="mt-3 text-caption text-muted-foreground">
+              Mostrando {produtos.length} de {totalProdutos}.{" "}
+              <Link href="/ml/descobertas" className="font-medium text-tech hover:underline">
+                Ver todos em Descobertas
+              </Link>
+            </p>
+          )}
+        </GrupoPendencia>
+      )}
+
+      {/* (8) Exceções e reconexão de integrações */}
+      {excecoes.length > 0 && (
+        <GrupoPendencia
+          tipo="excecoes"
+          icon={ShieldAlert}
+          titulo="Exceções"
+          contagem={excecoes.length}
+          tom={reconectar > 0 ? "destructive" : "warning"}
+          descricao="O que a automação não conseguiu resolver sozinha (inclui reconectar integração)."
+        >
           <Excecoes itens={excecoes} tz={tz} podeOperar={podeOperar} />
         </GrupoPendencia>
       )}
 
-      {/* (g) Configurações incompletas */}
+      {/* Configurações incompletas */}
       {configs.length > 0 && (
         <GrupoPendencia
           tipo="configuracoes"

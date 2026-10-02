@@ -97,3 +97,25 @@ Pins) e toda mudança passa por `assertTransicao` + `ml_status_history`.
 `ml_jobs` + `ml_job_logs` (execuções), `ml_api_calls` (chamadas externas sem segredo), `ml_audit_log`
 (alterações administrativas e decisões automáticas com motivo), `ml_status_history` (transições),
 `ml_schedule_runs` (disparos). Tela **Logs & Erros** filtra por status/tipo e permite reprocessar.
+
+## V2 — famílias de criativos (ver ESPECIFICACAO-V2.md e ADR-ML-016…022)
+
+```
+produto aprovado ─► IMPORT_PRODUCT_MEDIA (galeria com proveniência; referência principal automática)
+                 └► wizard "Gerar lote" ─► ml_creative_families ─► PLAN_CREATIVE_FAMILY (hipótese, headlines, editorial)
+                                                               └► GENERATE_CREATIVE_BATCH (N variantes = mix × cenas)
+cada variante ─► avancarVariante (decide o próximo passo pelo estado):
+   composição exata:  PREPARE_PRODUCT_CUTOUT → GENERATE_LIFESTYLE_BACKGROUND → COMPOSE_EXACT_PRODUCT
+   por referência:    GENERATE_REFERENCE_IMAGE → CHECK_CREATIVE_FIDELITY
+   foto + layout:     COMPOSE_EXACT_PRODUCT (layout com a foto original)
+   manual/upload:     aguarda upload (prompt + referências prontos) → CHECK_CREATIVE_FIDELITY
+   ─► APPLY_TEXT_OVERLAY (se tem texto/editorial) ─► GENERATE_PINTEREST_PACKAGE ─► revisão
+aprovação (portões: fidelidade + pacote ready) ─► piscina ─► agendamento (cooldown, board/dia, similaridade) ─► PUBLISH_PIN
+métricas ─► COMPUTE_PERFORMANCE (= ROLLUP_CREATIVE_PERFORMANCE) por família/variante/cena/tipo
+```
+
+- Imagens: `lib/ml/media/pixels.ts` (decode, recorte, dHash — JS puro), `composicao-v2.tsx` (cena exata, overlay,
+  editorial, cenário estilizado), `servicos/midia.ts` (galeria), `servicos/variantes.ts` (pipeline), `servicos/prompts.ts`
+  (templates/presets).
+- Regras puras testadas: `familias/plano.ts` (mix × cenas, custo), `familias/pacote.ts` (pacote e portão de fidelidade),
+  `familias/templates.ts`, `publicacao/repeticao.ts` (anti-repetição, cooldown, escolha da variante), `conteudo/ia-v2.ts`.

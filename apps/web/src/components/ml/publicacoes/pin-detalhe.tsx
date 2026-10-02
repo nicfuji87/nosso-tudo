@@ -1,6 +1,5 @@
 "use client";
 
-import type { ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, ExternalLink, FlaskConical } from "lucide-react";
@@ -8,19 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { StatusBadge } from "@/components/ml/status";
 import { formatarNoFuso } from "@/lib/ml/tempo";
+import { DetalhesV2, IndicadoresPin, Linha } from "./indicadores";
 import { PinAcoes } from "./pin-acoes";
 import { PinThumb } from "./thumb";
 import { type BoardOpcao, type PinView } from "./tipos";
 import { ValidacaoLista } from "./validacao";
-
-function Linha({ rotulo, children }: { rotulo: string; children: ReactNode }) {
-  return (
-    <div className="grid grid-cols-[7.5rem_1fr] gap-2 py-1.5 text-body-sm">
-      <dt className="text-muted-foreground">{rotulo}</dt>
-      <dd className="min-w-0 break-words">{children}</dd>
-    </div>
-  );
-}
 
 /** Detalhe do Pin em painel lateral, aberto por `?pin=<id>` (link compartilhável). */
 export function PinDetalhe({
@@ -75,6 +66,7 @@ export function PinDetalhe({
               <PinThumb pin={pin} className="w-36 shrink-0" />
             )}
             <div className="min-w-0 flex-1 space-y-3">
+              <IndicadoresPin pin={pin} tz={tz} />
               <PinAcoes pin={pin} boards={boards} tz={tz} podeOperar={podeOperar} />
               {pin.last_error && pin.status !== "published" && (
                 <p className="flex items-start gap-1.5 rounded-lg bg-destructive/10 px-2.5 py-2 text-caption text-destructive">
@@ -123,6 +115,7 @@ export function PinDetalhe({
                 {pin.creative.headline || <span className="text-muted-foreground">Sem headline</span>}
               </Linha>
             )}
+            <DetalhesV2 pin={pin} tz={tz} />
             {pin.duplicated_from && (
               <Linha rotulo="Duplicado de">
                 <Link href={`/ml/publicacoes?pin=${pin.duplicated_from}`} scroll={false} className="hover:underline">

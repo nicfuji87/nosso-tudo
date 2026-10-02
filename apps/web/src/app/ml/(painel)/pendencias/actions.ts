@@ -58,3 +58,19 @@ export async function resolverPendencia(taskId: string, acao: "done" | "dismisse
     return { mensagem: a === "snoozed" ? "Adiada." : "Resolvida." };
   });
 }
+
+/** Resolve o redirect do link agora e grava destino/host/status (V2 §10). */
+export async function validarRedirectAgora(linkId: string) {
+  return executarAcao("operator", async () => {
+    const { validarRedirectLink } = await import("@/lib/ml/servicos/afiliados");
+    const r = await validarRedirectLink(id.parse(linkId));
+    revalidatePath("/ml", "layout");
+    const rotulo: Record<string, string> = {
+      ok: "Redireciona para o produto no Mercado Livre.",
+      ok_unverified: "Redireciona para o Mercado Livre (não deu para confirmar que é o mesmo produto).",
+      inconsistent: "Destino inconsistente — gere outro link.",
+      error: "Não foi possível conferir agora.",
+    };
+    return { status: r.status, host: r.host, mensagem: rotulo[r.status] ?? r.status };
+  });
+}

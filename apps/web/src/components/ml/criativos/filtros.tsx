@@ -1,31 +1,46 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { Fragment, useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Columns3, List, Loader2, Search, X, Zap } from "lucide-react";
+import { Columns3, Layers, List, Loader2, Search, X, Zap } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { NativeSelect } from "@/components/ml/campos";
-import { CREATIVE_STATUS_LABEL } from "@/lib/ml/estados";
+import { Checkbox, NativeSelect } from "@/components/ml/campos";
 import { cn } from "@/lib/utils";
-import { MODOS_IMAGEM, labelModo } from "./rotulos";
+import { MODOS_IMAGEM, labelModo, type FamiliaOpcao } from "./rotulos";
 
-export type Vista = "kanban" | "lista" | "revisao";
+export type Vista = "familias" | "kanban" | "lista" | "revisao";
 
+/** "Por família" é a vista padrão (V2 §11.5); as demais mostram todas as variantes. */
 const VISTAS: { valor: Vista; label: string; icon: typeof List }[] = [
+  { valor: "familias", label: "Por família", icon: Layers },
   { valor: "kanban", label: "Kanban", icon: Columns3 },
   { valor: "lista", label: "Lista", icon: List },
   { valor: "revisao", label: "Revisão rápida", icon: Zap },
+];
+
+const STATUS_CHIPS: { valor: string; label: string }[] = [
+  { valor: "", label: "Todos" },
+  { valor: "to_generate", label: "A gerar" },
+  { valor: "generating", label: "Em geração" },
+  { valor: "waiting_manual_image", label: "Aguardando imagem" },
+  { valor: "review", label: "Revisão" },
+  { valor: "approved", label: "Aprovados" },
+  { valor: "rejected", label: "Rejeitados" },
+  { valor: "published", label: "Publicados" },
+  { valor: "archived", label: "Arquivados" },
 ];
 
 /** Filtros persistidos na URL (spec §25). */
 export function FiltrosCriativos({
   vista,
   produtos,
+  familias,
   totalRevisao,
 }: {
   vista: Vista;
   produtos: { id: string; title: string }[];
+  familias: FamiliaOpcao[];
   totalRevisao: number;
 }) {
   const router = useRouter();
@@ -43,6 +58,7 @@ export function FiltrosCriativos({
       else p.delete(k);
     }
     p.delete("criativo");
+    p.delete("acao");
     const s = p.toString();
     iniciar(() => router.replace(s ? `${pathname}?${s}` : pathname, { scroll: false }));
   }
@@ -50,36 +66,46 @@ export function FiltrosCriativos({
   function hrefVista(v: Vista) {
     const p = new URLSearchParams(sp.toString());
     p.delete("criativo");
-    if (v === "kanban") p.delete("vista");
+    p.delete("acao");
+    if (v === "familias") p.delete("vista");
     else p.set("vista", v);
     if (v === "revisao") p.delete("status");
+    if (v !== "familias") p.delete("arquivadas");
     const s = p.toString();
     return s ? `${pathname}?${s}` : pathname;
   }
 
-  const temFiltro = Boolean(sp.get("status") || sp.get("modo") || sp.get("produto") || sp.get("q"));
+  const temFiltro = Boolean(sp.get("status") || sp.get("modo") || sp.get("produto") || sp.get("q") || sp.get("familia") || sp.get("arquivadas"));
+  const statusAtual = sp.get("status") ?? "";
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <nav className="inline-flex h-10 items-center gap-1 rounded-full bg-secondary p-1" aria-label="Visualização">
-          {VISTAS.map((v) => (
-            <Link
-              key={v.valor}
-              href={hrefVista(v.valor)}
-              scroll={false}
-              aria-current={vista === v.valor ? "page" : undefined}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-body-sm font-medium transition-all",
-                vista === v.valor ? "bg-card text-foreground shadow-card" : "text-muted-foreground hover:text-foreground",
+        <nav className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-3xl bg-secondary p-1 sm:h-10 sm:flex-nowrap sm:rounded-full" aria-label="Visualização">
+          {VISTAS.map((v, i) => (
+            <Fragment key={v.valor}>
+              {i === 1 && (
+                <span className="hidden items-center gap-2 pl-1.5 pr-0.5 text-overline uppercase text-muted-foreground md:inline-flex" aria-hidden>
+                  <span className="h-4 w-px bg-border" /> Todas as variantes
+                </span>
               )}
-            >
-              <v.icon className="size-4" aria-hidden />
-              {v.label}
-              {v.valor === "revisao" && totalRevisao > 0 && (
-                <span className="rounded-full bg-tech px-1.5 text-overline text-tech-foreground tabular">{totalRevisao}</span>
-              )}
-            </Link>
+              <Link
+                href={hrefVista(v.valor)}
+                scroll={false}
+                aria-current={vista === v.valor ? "page" : undefined}
+                title={v.valor === "familias" ? undefined : `Todas as variantes — ${v.label}`}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-body-sm font-medium transition-all",
+                  vista === v.valor ? "bg-card text-foreground shadow-card" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <v.icon className="size-4" aria-hidden />
+                {v.label}
+                {v.valor === "revisao" && totalRevisao > 0 && (
+                  <span className="rounded-full bg-tech px-1.5 text-overline text-tech-foreground tabular">{totalRevisao}</span>
+                )}
+              </Link>
+            </Fragment>
           ))}
         </nav>
         {pendente && <Loader2 className="size-4 animate-spin text-muted-foreground" aria-label="Carregando" />}
@@ -98,21 +124,11 @@ export function FiltrosCriativos({
           <Input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Buscar por headline ou título (Enter)"
+            placeholder={vista === "familias" ? "Buscar por família ou hipótese (Enter)" : "Buscar por headline ou título (Enter)"}
             className="h-10 rounded-xl pl-9"
             aria-label="Buscar criativos"
           />
         </div>
-        {vista !== "revisao" && (
-          <NativeSelect value={sp.get("status") ?? ""} onChange={(e) => atualizar({ status: e.target.value || null })} aria-label="Status">
-            <option value="">Todos os status</option>
-            {Object.entries(CREATIVE_STATUS_LABEL).map(([v, l]) => (
-              <option key={v} value={v}>
-                {l}
-              </option>
-            ))}
-          </NativeSelect>
-        )}
         <NativeSelect value={sp.get("modo") ?? ""} onChange={(e) => atualizar({ modo: e.target.value || null })} aria-label="Modo de imagem">
           <option value="">Todos os modos</option>
           {MODOS_IMAGEM.map((m) => (
@@ -134,12 +150,28 @@ export function FiltrosCriativos({
             </option>
           ))}
         </NativeSelect>
+        {familias.length > 0 && (
+          <NativeSelect value={sp.get("familia") ?? ""} onChange={(e) => atualizar({ familia: e.target.value || null })} aria-label="Família" className="max-w-56">
+            <option value="">Todas as famílias</option>
+            {familias.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name.length > 50 ? `${f.name.slice(0, 50)}…` : f.name}
+              </option>
+            ))}
+          </NativeSelect>
+        )}
+        {vista === "familias" && (
+          <label className="flex h-10 items-center gap-2 rounded-xl px-2 text-body-sm text-muted-foreground">
+            <Checkbox checked={sp.get("arquivadas") === "1"} onChange={(e) => atualizar({ arquivadas: e.target.checked ? "1" : null })} />
+            Famílias arquivadas
+          </label>
+        )}
         {temFiltro && (
           <button
             type="button"
             onClick={() => {
               setQ("");
-              atualizar({ status: null, modo: null, produto: null, q: null });
+              atualizar({ status: null, modo: null, produto: null, q: null, familia: null, arquivadas: null });
             }}
             className="inline-flex h-10 items-center gap-1 rounded-xl px-3 text-body-sm text-muted-foreground hover:bg-secondary hover:text-foreground"
           >
@@ -147,6 +179,25 @@ export function FiltrosCriativos({
           </button>
         )}
       </form>
+
+      {vista !== "revisao" && (
+        <nav aria-label="Status" className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+          {STATUS_CHIPS.map((st) => (
+            <button
+              key={st.valor || "todos"}
+              type="button"
+              onClick={() => atualizar({ status: st.valor || null })}
+              aria-pressed={statusAtual === st.valor}
+              className={cn(
+                "shrink-0 rounded-full border px-3 py-1 text-caption font-medium transition-colors",
+                statusAtual === st.valor ? "border-tech bg-tech/10 text-tech" : "border-border text-muted-foreground hover:bg-secondary hover:text-foreground",
+              )}
+            >
+              {st.label}
+            </button>
+          ))}
+        </nav>
+      )}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import "server-only";
 import type { createClient } from "@/lib/supabase/server";
-import { itensValidacao, PIN_COLUNAS, type PinView } from "@/components/ml/publicacoes/tipos";
+import { itensValidacao, PIN_COLUNAS, type CriativoResumo, type LinkResumo, type PinView } from "@/components/ml/publicacoes/tipos";
+import { lerConfig } from "@/lib/ml/config";
 
 type Supa = ReturnType<typeof createClient>;
 
@@ -57,6 +58,10 @@ interface LinhaPin {
   board_id: string | null;
   product_id: string;
   creative_id: string;
+  family_id: string | null;
+  ai_modified: boolean | null;
+  ai_disclosure_sent: boolean | null;
+  affiliate_link_id: string | null;
 }
 
 function blocos<T>(lista: T[], n = 100): T[][] {
@@ -74,38 +79,136 @@ async function porIds<T extends { id: string }>(supabase: Supa, tabela: string, 
   return mapa;
 }
 
-/** Junta produto, board e criativo (consultas separadas, em blocos — evita URL gigante e ambiguidade de embed). */
+const H = 3_600_000;
+const D = 86_400_000;
+/** Status que contam para repetição (espelha lib/ml/servicos/publicacao) e para o cooldown. */
+const STATUS_REPETICAO = ["scheduled", "publishing", "published", "pending_approval"];
+const STATUS_COOLDOWN = new Set(["scheduled", "publishing", "published"]);
+
+interface PinVizinho {
+  id: string;
+  product_id: string;
+  status: string;
+  quando: number;
+}
+
+/**
+ * Pins do mesmo produto relevantes para os indicadores V2 (§16): os que caem em ±7 dias de algum Pin da lista
+ * (repetição) e os agendados/publicados recentes ou futuros (cooldown). Consulta em blocos de produtos.
+ */
+async function vizinhosPorProduto(supabase: Supa, linhas: LinhaPin[], cooldownHoras: number, agora: number): Promise<Map<string, PinVizinho[]>> {
+  const porProduto = new Map<string, PinVizinho[]>();
+  const produtos = Array.from(new Set(linhas.map((l) => l.product_id)));
+  if (!produtos.length) return porProduto;
+  const tempos = linhas.map((l) => l.published_at ?? l.scheduled_at).filter((t): t is string => Boolean(t)).map((t) => Date.parse(t));
+  const de = Math.min(agora - cooldownHoras * H, ...tempos.map((t) => t - 7 * D));
+  const ate = Math.max(agora + 7 * D, ...tempos.map((t) => t + 7 * D));
+  const filtroData = orIntervalo(new Date(de).toISOString(), new Date(ate).toISOString());
+  // Agendados além da janela também prolongam o cooldown do produto.
+  const futuro = `scheduled_at.gte.${JSON.stringify(new Date(ate).toISOString())}`;
+  const resultados = await Promise.all(
+    blocos(produtos, 80).map((b) =>
+      supabase
+        .from("ml_pins")
+        .select("id, product_id, status, published_at, scheduled_at")
+        .in("product_id", b)
+        .in("status", STATUS_REPETICAO)
+        .or(`${filtroData},${futuro}`)
+        .limit(1000),
+    ),
+  );
+  for (const r of resultados) {
+    for (const row of (r.data ?? []) as { id: string; product_id: string; status: string; published_at: string | null; scheduled_at: string | null }[]) {
+      const t = row.published_at ?? row.scheduled_at;
+      if (!t) continue;
+      const lista = porProduto.get(row.product_id) ?? [];
+      lista.push({ id: row.id, product_id: row.product_id, status: row.status, quando: Date.parse(t) });
+      porProduto.set(row.product_id, lista);
+    }
+  }
+  return porProduto;
+}
+
+/** "Nº Pin do produto na semana": posição do Pin entre os Pins do produto em ±7 dias (inclui ele mesmo). */
+function repeticaoDoPin(l: LinhaPin, vizinhos: PinVizinho[]): PinView["repeticao"] {
+  const t = l.published_at ?? l.scheduled_at;
+  if (!t || l.status === "canceled") return null;
+  const quando = Date.parse(t);
+  const janela = vizinhos.filter((v) => v.id !== l.id && Math.abs(v.quando - quando) < 7 * D);
+  if (!janela.length) return null;
+  const antes = janela.filter((v) => v.quando < quando || (v.quando === quando && v.id < l.id)).length;
+  return { ordem: antes + 1, total: janela.length + 1 };
+}
+
+/** Cooldown do produto: último Pin agendado/publicado + regra → horas que faltam (0 = livre). */
+function cooldownDoProduto(vizinhos: PinVizinho[], regraHoras: number, agora: number): PinView["cooldown"] {
+  if (regraHoras <= 0) return { regraHoras, faltamHoras: 0, liberaEm: null };
+  const ultimos = vizinhos.filter((v) => STATUS_COOLDOWN.has(v.status)).map((v) => v.quando);
+  if (!ultimos.length) return { regraHoras, faltamHoras: 0, liberaEm: null };
+  const libera = Math.max(...ultimos) + regraHoras * H;
+  return { regraHoras, faltamHoras: libera > agora ? Math.ceil((libera - agora) / H) : 0, liberaEm: new Date(libera).toISOString() };
+}
+
+/** Junta produto, board, criativo, família e link (consultas separadas, em blocos — evita URL gigante e ambiguidade de embed). */
 export async function hidratarPins(supabase: Supa, dados: unknown): Promise<PinView[]> {
   const linhas = (dados ?? []) as LinhaPin[];
   if (!linhas.length) return [];
-  const [produtos, boards, criativos] = await Promise.all([
+  const agora = Date.now();
+  const cfg = await lerConfig("criativos_v2").catch(() => null);
+  const cooldownHoras = cfg?.cooldown_variantes_horas ?? 0;
+  const [produtos, boards, criativos, links, vizinhos] = await Promise.all([
     porIds<{ id: string; title: string; permalink: string | null }>(supabase, "ml_products", "id, title, permalink", linhas.map((l) => l.product_id)),
     porIds<{ id: string; name: string }>(supabase, "ml_pinterest_boards", "id, name", linhas.map((l) => l.board_id ?? "")),
-    porIds<{ id: string; headline: string | null }>(supabase, "ml_creatives", "id, headline", linhas.map((l) => l.creative_id)),
+    porIds<CriativoResumo>(
+      supabase,
+      "ml_creatives",
+      "id, headline, visual_type, fidelity_mode, has_text_overlay, family_id",
+      linhas.map((l) => l.creative_id),
+    ),
+    porIds<LinkResumo>(
+      supabase,
+      "ml_affiliate_links",
+      "id, label, redirect_status, final_host, final_url, last_checked_at",
+      linhas.map((l) => l.affiliate_link_id ?? ""),
+    ),
+    vizinhosPorProduto(supabase, linhas, cooldownHoras, agora),
   ]);
-  return linhas.map((l) => ({
-    id: l.id,
-    status: l.status,
-    title: l.title,
-    description: l.description,
-    alt_text: l.alt_text,
-    link_url: l.link_url,
-    media_url: l.media_url,
-    scheduled_at: l.scheduled_at,
-    published_at: l.published_at,
-    environment: l.environment,
-    last_error: l.last_error,
-    external_url: l.external_url,
-    attempts: l.attempts ?? 0,
-    validated_at: l.validated_at,
-    created_at: l.created_at,
-    updated_at: l.updated_at,
-    duplicated_from: l.duplicated_from,
-    validacao: itensValidacao(l.validation),
-    product: produtos.get(l.product_id) ?? null,
-    board: l.board_id ? (boards.get(l.board_id) ?? null) : null,
-    creative: criativos.get(l.creative_id) ?? null,
-  }));
+  const familiaDe = (l: LinhaPin) => l.family_id ?? criativos.get(l.creative_id)?.family_id ?? null;
+  const familias = await porIds<{ id: string; name: string }>(supabase, "ml_creative_families", "id, name", linhas.map((l) => familiaDe(l) ?? ""));
+
+  return linhas.map((l) => {
+    const famId = familiaDe(l);
+    const doProduto = vizinhos.get(l.product_id) ?? [];
+    return {
+      id: l.id,
+      status: l.status,
+      title: l.title,
+      description: l.description,
+      alt_text: l.alt_text,
+      link_url: l.link_url,
+      media_url: l.media_url,
+      scheduled_at: l.scheduled_at,
+      published_at: l.published_at,
+      environment: l.environment,
+      last_error: l.last_error,
+      external_url: l.external_url,
+      attempts: l.attempts ?? 0,
+      validated_at: l.validated_at,
+      created_at: l.created_at,
+      updated_at: l.updated_at,
+      duplicated_from: l.duplicated_from,
+      validacao: itensValidacao(l.validation),
+      product: produtos.get(l.product_id) ?? null,
+      board: l.board_id ? (boards.get(l.board_id) ?? null) : null,
+      creative: criativos.get(l.creative_id) ?? null,
+      familia: famId ? (familias.get(famId) ?? { id: famId, name: "Família" }) : null,
+      ai_modified: Boolean(l.ai_modified),
+      ai_disclosure_sent: l.ai_disclosure_sent,
+      link: l.affiliate_link_id ? (links.get(l.affiliate_link_id) ?? null) : null,
+      repeticao: repeticaoDoPin(l, doProduto),
+      cooldown: cfg ? cooldownDoProduto(doProduto, cooldownHoras, agora) : null,
+    };
+  });
 }
 
 export async function lerPinPorId(supabase: Supa, id: string): Promise<PinView | null> {

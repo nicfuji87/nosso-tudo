@@ -1,6 +1,6 @@
 /** Filtros da tela de Logs persistidos na URL (spec §25). */
 
-export const ABAS_LOGS = ["jobs", "api", "auditoria", "transicoes"] as const;
+export const ABAS_LOGS = ["jobs", "eventos", "api", "auditoria", "transicoes"] as const;
 export type AbaLogs = (typeof ABAS_LOGS)[number];
 
 export const PERIODOS = [

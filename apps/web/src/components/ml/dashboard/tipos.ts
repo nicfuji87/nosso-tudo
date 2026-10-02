@@ -108,3 +108,31 @@ export interface Atividade {
   ator: string;
   href: string | null;
 }
+
+/** ml_dashboard_v2() — contadores V2 (§11.1). */
+export interface ContadoresV2 {
+  familias_em_teste: number;
+  produtos_sem_referencia: number;
+  criativos_alerta_fidelidade: number;
+  criativos_fidelidade_pendente: number;
+  pacotes_pendentes: number;
+  publicados_por_tipo: Record<string, number>;
+}
+
+export const CONTADORES_V2_VAZIOS: ContadoresV2 = {
+  familias_em_teste: 0,
+  produtos_sem_referencia: 0,
+  criativos_alerta_fidelidade: 0,
+  criativos_fidelidade_pendente: 0,
+  pacotes_pendentes: 0,
+  publicados_por_tipo: {},
+};
+
+/** Melhor item de uma dimensão (cena / tipo visual) no período, por outbound clicks. */
+export interface MelhorItem {
+  rotulo: string;
+  outbound_clicks: number;
+  impressions: number;
+  ctr: number | null;
+  pins: number;
+}

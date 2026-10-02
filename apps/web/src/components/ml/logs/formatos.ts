@@ -79,6 +79,9 @@ export const ENTIDADE_LABEL: Record<string, string> = {
   task: "Pendência",
   commission: "Comissão",
   member: "Membro",
+  scene_preset: "Preset de cena",
+  prompt_template: "Template de prompt",
+  family: "Família",
 };
 
 export function rotuloEntidade(tipo: string | null | undefined): string {
@@ -106,6 +109,10 @@ export function linkEntidade(tipo: string | null | undefined, id: string | null 
       return "/ml/configuracoes";
     case "category":
       return "/ml/configuracoes";
+    case "scene_preset":
+      return "/ml/configuracoes?secao=criativos_v2";
+    case "prompt_template":
+      return "/ml/configuracoes?secao=templates";
     default:
       return null;
   }
@@ -173,6 +180,22 @@ export const ACAO_AUDITORIA_LABEL: Record<string, string> = {
   "runtime.registrar_url": "URL do app registrada",
   "scoring.ativar_versao": "Versão de score ativada",
   "scoring.nova_versao": "Nova versão de score",
+  // V2 — famílias de criativos, mídia, fidelidade, pacote e anti-repetição
+  "midia.importar": "Imagens do anúncio importadas",
+  "midia.adicionar": "Imagem adicionada ao produto",
+  "midia.papel": "Papel da imagem alterado",
+  "prompt.gerado": "Prompt gerado",
+  "fidelidade.alerta": "Alerta de fidelidade",
+  "fidelidade.problema": "Problema de fidelidade apontado",
+  "fidelidade.confirmada": "Fidelidade confirmada",
+  "pacote.invalido": "Pacote Pinterest inválido",
+  "link.redirect_inconsistente": "Link com redirect inconsistente",
+  "variante.bloqueada": "Variante bloqueada",
+  "publicacao.anti_flood": "Anti-flood: Pins atrasados reagendados",
+  "template.nova_versao": "Nova versão de template de prompt",
+  "template.ativar": "Versão de template ativada",
+  "preset.criar": "Preset de cena criado",
+  "preset.editar": "Preset de cena editado",
 };
 
 export function rotuloAcao(acao: string): string {

@@ -116,6 +116,34 @@ export function useSalvarSecao() {
   return { pendente, salvar };
 }
 
+type RespostaGenerica = { error?: string; mensagem?: string } & Record<string, unknown>;
+
+/** Executa qualquer Server Action de configuração com toast + refresh. Devolve a resposta (ou null em erro). */
+export function useExecutarAcao() {
+  const router = useRouter();
+  const [pendente, iniciar] = useTransition();
+  const executar = <R extends RespostaGenerica>(acao: () => Promise<R>, opts?: { semToast?: boolean }) =>
+    new Promise<R | null>((resolve) =>
+      iniciar(async () => {
+        try {
+          const r = await acao();
+          if (r.error) {
+            toast.error(r.error);
+            resolve(null);
+            return;
+          }
+          if (!opts?.semToast && typeof r.mensagem === "string") toast.success(r.mensagem);
+          router.refresh();
+          resolve(r);
+        } catch {
+          toast.error("Não foi possível concluir. Verifique sua conexão e tente de novo.");
+          resolve(null);
+        }
+      }),
+    );
+  return { pendente, executar };
+}
+
 export function LinhaSwitch({
   id,
   label,

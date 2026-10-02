@@ -2,15 +2,17 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCheck, CheckCircle2, ImageOff, Keyboard, Loader2, Pencil, XCircle } from "lucide-react";
+import { AlertTriangle, BadgeCheck, CheckCheck, CheckCircle2, Columns2, ImageOff, Keyboard, Loader2, Pencil, XCircle } from "lucide-react";
 import { toast } from "sonner";
-import { aprovarCriativos } from "@/app/ml/(painel)/criativos/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { labelAngulo } from "@/lib/ml/conteudo/angulos";
 import { cn } from "@/lib/utils";
+import { aprovarComFalhas } from "./aprovar-lote";
+import { FidelidadeBadge, PacoteBadge, labelTipoVisual } from "./detalhes-v2";
+import { DialogosV2 } from "./dialogos-v2";
 import { RejeitarDialog } from "./rejeitar-dialog";
-import { labelModo, type CriativoView } from "./rotulos";
+import { fidelidadePendenteHumano, labelModo, type CriativoView, type DialogoV2 } from "./rotulos";
 
 /**
  * Revisão rápida (spec §17: 5–15 s por criativo): imagens grandes lado a lado,
@@ -32,27 +34,34 @@ export function RevisaoRapida({
   const [ocultos, setOcultos] = useState<Set<string>>(new Set());
   const [emAndamento, setEmAndamento] = useState<Set<string>>(new Set());
   const [rejeitando, setRejeitando] = useState<string[] | null>(null);
+  const [erros, setErros] = useState<Map<string, string>>(new Map());
+  const [dialogo, setDialogo] = useState<{ id: string; d: DialogoV2 } | null>(null);
   const [pendenteLote, iniciarLote] = useTransition();
 
   const visiveis = criativos.filter((c) => !ocultos.has(c.id));
+  const criativoDialogo = dialogo ? criativos.find((c) => c.id === dialogo.id) ?? null : null;
 
   async function aprovar(ids: string[]) {
     if (!podeOperar || !ids.length) return;
     setEmAndamento((s) => new Set([...s, ...ids]));
-    const r = await aprovarCriativos(ids);
+    // Item a item: nas variantes V2 a aprovação pode falhar por fidelidade/pacote — mostramos o motivo no card.
+    const r = await aprovarComFalhas(ids);
     setEmAndamento((s) => {
       const n = new Set(s);
       ids.forEach((i) => n.delete(i));
       return n;
     });
-    if (!r.ok) {
-      toast.error(r.error);
-      return;
-    }
-    if (r.falhas.length) toast.warning(r.mensagem);
-    else toast.success(r.mensagem);
+    setErros((m) => {
+      const n = new Map(m);
+      r.feitos.forEach((i) => n.delete(i));
+      r.falhas.forEach((f) => n.set(f.id, f.mensagem));
+      return n;
+    });
+    if (!r.falhas.length) toast.success(r.feitos.length === 1 ? "Aprovado." : `${r.feitos.length} aprovados.`);
+    else if (ids.length === 1) toast.error(r.falhas[0]!.mensagem);
+    else toast.warning(`${r.feitos.length} aprovado(s) · ${r.falhas.length} com pendência — veja o motivo em cada card.`);
     // Esconde já os aprovados com sucesso (o refresh confirma).
-    if (r.feitos === ids.length) setOcultos((s) => new Set([...s, ...ids]));
+    if (r.feitos.length) setOcultos((s) => new Set([...s, ...r.feitos]));
     router.refresh();
   }
 
@@ -144,10 +153,38 @@ export function RevisaoRapida({
                 {c.title && <p className="line-clamp-2 text-body-sm">{c.title}</p>}
                 {c.description && <p className="line-clamp-3 text-caption text-muted-foreground">{c.description}</p>}
                 <div className="flex flex-wrap gap-1.5">
+                  {c.family_id && <Badge variant="outline">{labelTipoVisual(c.visual_type)}</Badge>}
                   {c.angulo && <Badge variant="outline">{labelAngulo(c.angulo)}</Badge>}
                   <Badge variant="default">{labelModo(c.image_mode)}</Badge>
                   {c.board && <Badge variant="default">{c.board}</Badge>}
                 </div>
+                {c.family_id && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <FidelidadeBadge status={c.fidelity_status} score={c.fidelity_score} />
+                    <PacoteBadge status={c.package_status} erros={c.package_errors} />
+                  </div>
+                )}
+                {c.family_id && (
+                  <div className="flex flex-wrap gap-x-3 gap-y-1">
+                    <button type="button" className="inline-flex items-center gap-1 text-caption font-medium text-tech hover:underline" onClick={() => setDialogo({ id: c.id, d: "lado" })}>
+                      <Columns2 className="size-3.5" aria-hidden /> Lado a lado
+                    </button>
+                    {podeOperar && c.asset && fidelidadePendenteHumano(c.fidelity_status) && (
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 text-caption font-medium text-tech hover:underline"
+                        onClick={() => setDialogo({ id: c.id, d: "fidelidade" })}
+                      >
+                        <BadgeCheck className="size-3.5" aria-hidden /> Revisar fidelidade
+                      </button>
+                    )}
+                  </div>
+                )}
+                {erros.get(c.id) && (
+                  <p className="flex gap-1.5 rounded-lg bg-warning/10 px-2 py-1.5 text-caption text-warning">
+                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden /> {erros.get(c.id)}
+                  </p>
+                )}
                 <div className="mt-auto flex flex-wrap gap-2 pt-2">
                   <Button size="sm" variant="tech" className="flex-1" disabled={!podeOperar || ocupado} onClick={() => void aprovar([c.id])}>
                     {ocupado ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
@@ -167,6 +204,17 @@ export function RevisaoRapida({
           );
         })}
       </ul>
+
+      {criativoDialogo && dialogo && (
+        <DialogosV2
+          key={`${criativoDialogo.id}-${dialogo.d}`}
+          c={criativoDialogo}
+          dialogo={dialogo.d}
+          aoFechar={() => setDialogo(null)}
+          aoTrocar={(d) => setDialogo({ id: criativoDialogo.id, d })}
+          podeOperar={podeOperar}
+        />
+      )}
 
       <RejeitarDialog
         ids={rejeitando ?? []}

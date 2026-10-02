@@ -57,3 +57,39 @@ export async function historicoCriativo(creativeId: string) {
     return { revisoes, assets: (ass.data ?? []) as AssetHistorico[] };
   });
 }
+
+export interface MidiaReferencia {
+  id: string;
+  public_url: string;
+  media_role: string;
+  reference_priority: number | null;
+  sort_order: number;
+  width: number | null;
+  height: number | null;
+  source_type: string;
+}
+
+/** Imagens do anúncio já no Storage (V2 — lado a lado e "Trocar referência"). */
+export async function midiasProduto(productId: string) {
+  return executarAcao("viewer", async () => {
+    const id = z.string().uuid().parse(productId);
+    const { data } = await createClient()
+      .from("ml_product_media")
+      .select("id, public_url, media_role, reference_priority, sort_order, width, height, source_type")
+      .eq("product_id", id)
+      .eq("status", "ready")
+      .not("public_url", "is", null)
+      .order("sort_order", { ascending: true })
+      .limit(60);
+    return { midias: (data ?? []) as MidiaReferencia[] };
+  });
+}
+
+/** Tipo de cada asset do histórico (V2: base = sem texto, final, background = cenário). */
+export async function tiposAssets(creativeId: string) {
+  return executarAcao("viewer", async () => {
+    const id = z.string().uuid().parse(creativeId);
+    const { data } = await createClient().from("ml_creative_assets").select("id, kind").eq("creative_id", id).limit(100);
+    return { tipos: Object.fromEntries(((data ?? []) as { id: string; kind: string }[]).map((a) => [a.id, a.kind])) as Record<string, string> };
+  });
+}

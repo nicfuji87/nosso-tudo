@@ -1,16 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { Info, Sparkles, Trash2, Wifi } from "lucide-react";
+import { Eye, ImageIcon, Info, Sparkles, Trash2, Type, Wifi } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AcaoBotao } from "@/components/ml/acao-botao";
 import { Campo, NativeSelect } from "@/components/ml/campos";
 import { desconectarIntegracao, salvarOpenAI, testarIntegracao } from "@/app/ml/(painel)/integracoes/actions";
+import { salvarSecao } from "@/app/ml/(painel)/configuracoes/actions";
 import { CartaoIntegracao, Nota } from "./cartao-integracao";
 import { CampoSegredo, SoLeitura, useAcao } from "./comum";
 import type { IntegracaoView, Permissoes } from "./tipos";
 
+const OUTRO = "__outro__";
+
+/** Select com os modelos da conta + "Outro…" para digitar livremente (fallback quando a lista não tem o modelo). */
 function SeletorModelo({
   valor,
   onChange,
@@ -24,18 +28,48 @@ function SeletorModelo({
   disabled?: boolean;
   placeholder: string;
 }) {
-  if (opcoes.length === 0) {
-    return <Input value={valor} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} disabled={disabled} spellCheck={false} />;
+  const [livre, setLivre] = useState(false);
+  if (opcoes.length === 0 || livre) {
+    return (
+      <div className="flex items-center gap-2">
+        <Input value={valor} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} disabled={disabled} spellCheck={false} maxLength={80} className="font-mono" />
+        {opcoes.length > 0 && (
+          <Button type="button" size="sm" variant="ghost" onClick={() => setLivre(false)} disabled={disabled} className="shrink-0">
+            Lista
+          </Button>
+        )}
+      </div>
+    );
   }
   const lista = opcoes.includes(valor) || !valor ? opcoes : [valor, ...opcoes];
   return (
-    <NativeSelect value={valor} onChange={(e) => onChange(e.target.value)} disabled={disabled} className="w-full">
+    <NativeSelect
+      value={valor}
+      onChange={(e) => (e.target.value === OUTRO ? setLivre(true) : onChange(e.target.value))}
+      disabled={disabled}
+      className="w-full"
+    >
       {lista.map((m) => (
         <option key={m} value={m}>
           {m}
         </option>
       ))}
+      <option value={OUTRO}>Outro modelo (digitar)…</option>
     </NativeSelect>
+  );
+}
+
+/** Um modelo por função (V2 §11.11): rótulo com ícone + seletor. */
+function CampoModelo({ titulo, dica, icone, children }: { titulo: string; dica: string; icone: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <label className="block space-y-1.5">
+      <span className="flex items-center gap-1.5 text-body-sm font-medium [&_svg]:size-4 [&_svg]:text-tech">
+        {icone}
+        {titulo}
+      </span>
+      {children}
+      <span className="block text-caption text-muted-foreground">{dica}</span>
+    </label>
   );
 }
 
@@ -45,12 +79,14 @@ export function IntegracaoOpenAI({
   permissoes,
   modeloTexto,
   modeloImagem,
+  modeloVisao,
 }: {
   integ: IntegracaoView;
   tz: string;
   permissoes: Permissoes;
   modeloTexto: string;
   modeloImagem: string;
+  modeloVisao: string;
 }) {
   const mascara = integ.secret_hints.api_key ?? null;
   const modelosDisponiveis = Array.isArray(integ.config.modelos)
@@ -62,11 +98,15 @@ export function IntegracaoOpenAI({
   const [chave, setChave] = useState("");
   const [texto, setTexto] = useState(modeloTexto);
   const [imagem, setImagem] = useState(modeloImagem);
+  const [visao, setVisao] = useState(modeloVisao);
   const chaveAcao = useAcao();
   const modelosAcao = useAcao();
 
   const chaveValida = chave.trim().length >= 20 && chave.trim().length <= 300;
-  const modelosMudaram = (texto.trim() !== modeloTexto || imagem.trim() !== modeloImagem) && texto.trim().length >= 2 && imagem.trim().length >= 2;
+  const mudouTextoImagem = texto.trim() !== modeloTexto || imagem.trim() !== modeloImagem;
+  const mudouVisao = visao.trim() !== modeloVisao;
+  const modelosValidos = [texto, imagem, visao].every((m) => m.trim().length >= 2 && m.trim().length <= 80);
+  const modelosMudaram = (mudouTextoImagem || mudouVisao) && modelosValidos;
 
   return (
     <CartaoIntegracao
@@ -81,7 +121,8 @@ export function IntegracaoOpenAI({
       <Nota icone={<Info />}>
         <p>
           Usada para: <strong>analisar</strong> o apelo visual dos produtos, sugerir <strong>ângulos</strong> de divulgação, escrever <strong>títulos e
-          descrições</strong> dos Pins e gerar <strong>imagens automáticas</strong>.
+          descrições</strong> dos Pins, gerar <strong>imagens automáticas</strong> e <strong>conferir a fidelidade</strong> das artes ao produto real. Cada
+          função pode usar um modelo diferente.
         </p>
         <p className="text-muted-foreground">
           Sem a chave o app continua funcionando: as artes saem por composição (foto real + texto) ou você gera a imagem no ChatGPT e envia.
@@ -124,16 +165,30 @@ export function IntegracaoOpenAI({
             onSubmit={async (e) => {
               e.preventDefault();
               if (!modelosMudaram) return;
-              await modelosAcao.executar(() => salvarOpenAI(null, { texto: texto.trim(), imagem: imagem.trim() }));
+              await modelosAcao.executar(async () => {
+                // texto/imagem pela action da integração; visão é parte da seção "ia" das configurações
+                if (mudouTextoImagem) {
+                  const r = await salvarOpenAI(null, { texto: texto.trim(), imagem: imagem.trim() });
+                  if ("error" in r && r.error) return { error: r.error };
+                }
+                if (mudouVisao) {
+                  const r = await salvarSecao("ia", { modelo_visao: visao.trim() });
+                  if ("error" in r && r.error) return { error: mudouTextoImagem ? `Texto e imagem salvos, mas o modelo de visão falhou: ${r.error}` : r.error };
+                }
+                return { ok: true, mensagem: "Modelos salvos." };
+              });
             }}
           >
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Campo label="Modelo de texto" dica="Análises, ângulos e textos dos Pins.">
+            <div className="space-y-3">
+              <CampoModelo titulo="Texto" dica="Análises de produto, ângulos, headlines e copy dos Pins." icone={<Type />}>
                 <SeletorModelo valor={texto} onChange={setTexto} opcoes={modelosTexto} disabled={modelosAcao.pendente} placeholder="Ex.: gpt-…" />
-              </Campo>
-              <Campo label="Modelo de imagem" dica="Geração automática de artes.">
+              </CampoModelo>
+              <CampoModelo titulo="Visão e análise de fidelidade" dica="Descreve as imagens para o pacote Pinterest e compara a arte gerada com as fotos reais do produto." icone={<Eye />}>
+                <SeletorModelo valor={visao} onChange={setVisao} opcoes={modelosTexto} disabled={modelosAcao.pendente} placeholder="Ex.: gpt-…" />
+              </CampoModelo>
+              <CampoModelo titulo="Imagem" dica="Cenários, geração por referência e artes automáticas." icone={<ImageIcon />}>
                 <SeletorModelo valor={imagem} onChange={setImagem} opcoes={modelosImagem} disabled={modelosAcao.pendente} placeholder="Ex.: gpt-image-…" />
-              </Campo>
+              </CampoModelo>
             </div>
             {modelosDisponiveis.length === 0 && (
               <p className="text-caption text-muted-foreground">Clique em “Testar conexão” para carregar a lista de modelos da sua conta.</p>
@@ -146,7 +201,7 @@ export function IntegracaoOpenAI({
       ) : (
         <>
           <p className="text-body-sm text-muted-foreground">
-            Modelos em uso: texto <strong>{modeloTexto}</strong> · imagem <strong>{modeloImagem}</strong>
+            Modelos em uso: texto <strong>{modeloTexto}</strong> · visão <strong>{modeloVisao}</strong> · imagem <strong>{modeloImagem}</strong>
           </p>
           <SoLeitura />
         </>

@@ -58,3 +58,22 @@ automático onde faz sentido. Status são `text + CHECK`. Fonte: `supabase/migra
 Bucket `ml-media` (público, só PNG/JPEG/WEBP, 15 MB): `creatives/<creative_id>/<ts>-<rand>.<ext>` (imagens finais,
 URL estável para o Pinterest) e `references/<creative_id>.<ext>` (referência do modo manual; limpa pelo job CLEANUP).
 Sem policy de escrita para usuários: upload só pelo servidor, validado por magic bytes.
+
+## V2 (migrations `ml04_v2_familias_midia`, `ml05_v2_analytics`, `ml06_logs_evento`)
+
+| Tabela/coluna | Para quê |
+|---|---|
+| `ml_product_media` | galeria do anúncio: origem, URL original, cópia no Storage (`media/<produto>/…`), dimensões, checksum, papel (referência principal única por índice parcial, complementar, não usar, consulta), recorte (`cutout_*`) |
+| `ml_creative_families` | hipótese/benefício, board padrão, link, plano do lote (mix, modo, método, cenas, referências, headlines, editorial), custo estimado, job do lote |
+| `ml_scene_presets` | cenas administráveis (ambiente, paleta, luz, estilo, área de texto, restrições, dica de categoria) |
+| `ml_prompt_templates` | prompts versionados (um ativo por chave) |
+| `ml_creatives.*` | family_id, visual_type, scene_preset_id, fidelity_mode, source_media_ids, base_asset_id, has_text_overlay, editorial_points, ai_modified, fidelity_*, pacote (board_section_id, interests, disclosure_text, package_*), custo, image_hash |
+| `ml_creative_assets.kind` | final / base (sem texto) / background (cenário) + parent_asset_id + image_hash |
+| `ml_pins.*` | family_id, board_section_id, ai_modified, ai_disclosure_sent |
+| `ml_affiliate_links.*` | final_url, final_host, redirect_status, last_checked_at |
+
+RPCs: `ml_pins_filtrados` (novos filtros family_id/visual_type/scene/has_text/fidelity_mode), `ml_analytics_breakdown`
+(+ family, visual_type, scene, text, method, ai, pin), `ml_analytics_cohort(dias, dimensão, filtros)`,
+`ml_analytics_summary` (+ familias, outbound_por_mil, receita_por_familia), `ml_dashboard_v2()`.
+Agendamentos novos: `refresh_media`, `validate_affiliate_links`, `generate_packages`.
+Índice `ml_job_logs_evento_idx` (`data->>'evento'`, parcial) atende o filtro "Evento do log" em Logs & Erros.

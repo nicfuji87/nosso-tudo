@@ -118,7 +118,7 @@ export function CardAgendamento({
         </Badge>
         {config.map(([k, v]) => (
           <Badge key={k} variant="outline" size="sm" className="normal-case">
-            {rotuloConfig(k)}: {formatarValorConfig(v)}
+            {rotuloConfig(k, a.job_type)}: {formatarValorConfig(v)}
           </Badge>
         ))}
       </div>

@@ -1,12 +1,13 @@
 "use client";
 
-import { ImageOff, Loader2 } from "lucide-react";
+import { AlertTriangle, ImageOff, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ml/campos";
 import { StatusBadge } from "@/components/ml/status";
 import { labelAngulo } from "@/lib/ml/conteudo/angulos";
 import { formatarNoFuso } from "@/lib/ml/tempo";
 import { cn } from "@/lib/utils";
+import { DetalhesV2 } from "./detalhes-v2";
 import { MenuCriativo, type HandlersCriativo } from "./menu-criativo";
 import { labelModo, type CriativoView } from "./rotulos";
 
@@ -50,6 +51,8 @@ export function CardCriativo({
   aoSelecionar,
   podeOperar,
   handlers,
+  ocultarProduto,
+  erroAprovacao,
 }: {
   c: CriativoView;
   tz: string;
@@ -57,7 +60,12 @@ export function CardCriativo({
   aoSelecionar: (id: string, v: boolean) => void;
   podeOperar: boolean;
   handlers: HandlersCriativo;
+  /** Na vista por família o produto já está no cabeçalho. */
+  ocultarProduto?: boolean;
+  /** Motivo da última tentativa de aprovação que falhou (V2). */
+  erroAprovacao?: string | null;
 }) {
+  const v2 = Boolean(c.family_id);
   return (
     <article
       className={cn(
@@ -80,9 +88,13 @@ export function CardCriativo({
       </div>
       <div className="space-y-2 p-3">
         <div className="flex items-start justify-between gap-1">
-          <p className="line-clamp-1 text-caption text-muted-foreground" title={c.produto?.title}>
-            {c.produto?.title ?? "Produto"}
-          </p>
+          {ocultarProduto ? (
+            <StatusBadge tipo="creative" status={c.status} className="px-2 py-0.5" />
+          ) : (
+            <p className="line-clamp-1 text-caption text-muted-foreground" title={c.produto?.title}>
+              {c.produto?.title ?? "Produto"}
+            </p>
+          )}
           <div className="-mr-1.5 -mt-1.5">
             <MenuCriativo c={c} podeOperar={podeOperar} handlers={handlers} />
           </div>
@@ -90,18 +102,29 @@ export function CardCriativo({
         <button type="button" onClick={() => handlers.aoEditar(c.id)} className="block w-full text-left">
           <p className="line-clamp-2 text-body-sm font-semibold leading-snug">{c.headline || c.title || "Sem headline"}</p>
         </button>
-        <div className="flex flex-wrap gap-1">
-          <StatusBadge tipo="creative" status={c.status} className="px-2 py-0.5" />
-          {c.angulo && (
-            <Badge variant="outline" className="px-2 py-0.5">
-              {labelAngulo(c.angulo)}
-            </Badge>
-          )}
-        </div>
-        <p className="text-caption text-muted-foreground">
-          {labelModo(c.image_mode)} · {c.format}
-          {c.board ? ` · ${c.board}` : ""}
-        </p>
+        {!(ocultarProduto && !c.angulo) && (
+          <div className="flex flex-wrap gap-1">
+            {!ocultarProduto && <StatusBadge tipo="creative" status={c.status} className="px-2 py-0.5" />}
+            {c.angulo && (
+              <Badge variant="outline" className="px-2 py-0.5">
+                {labelAngulo(c.angulo)}
+              </Badge>
+            )}
+          </div>
+        )}
+        {v2 ? (
+          <DetalhesV2 c={c} mostrarTitulo={Boolean(c.headline)} />
+        ) : (
+          <p className="text-caption text-muted-foreground">
+            {labelModo(c.image_mode)} · {c.format}
+            {c.board ? ` · ${c.board}` : ""}
+          </p>
+        )}
+        {erroAprovacao && (
+          <p className="flex gap-1 rounded-lg bg-warning/10 px-2 py-1 text-caption text-warning">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden /> {erroAprovacao}
+          </p>
+        )}
         {c.status === "rejected" && c.rejection_reason && <p className="line-clamp-2 text-caption text-destructive">{c.rejection_reason}</p>}
         {c.last_error && c.status !== "published" && <p className="line-clamp-2 text-caption text-warning">{c.last_error}</p>}
         <p className="text-overline text-muted-foreground tabular" title={`Atualizado ${formatarNoFuso(c.updated_at, tz)}`}>

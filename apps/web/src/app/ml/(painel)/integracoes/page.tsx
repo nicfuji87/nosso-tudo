@@ -102,7 +102,7 @@ export default async function IntegracoesPage({ searchParams }: { searchParams: 
       <IntegracaoPinterest integ={pin} tz={tz} redirectUri={redirectUri("pinterest", origem)} permissoes={permissoes} boardsAtivos={boardsAtivos} boardTesteId={((boardsRes.data ?? []) as { id: string }[])[0]?.id ?? null} />
 
       <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
-        <IntegracaoOpenAI integ={oai} tz={tz} permissoes={permissoes} modeloTexto={ia.modelo_texto} modeloImagem={ia.modelo_imagem} />
+        <IntegracaoOpenAI integ={oai} tz={tz} permissoes={permissoes} modeloTexto={ia.modelo_texto} modeloImagem={ia.modelo_imagem} modeloVisao={ia.modelo_visao} />
         <IntegracaoApify integ={apify} tz={tz} permissoes={permissoes} />
       </div>
 

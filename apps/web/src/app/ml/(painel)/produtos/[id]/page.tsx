@@ -31,6 +31,17 @@ import { Galeria } from "@/components/ml/produtos/galeria";
 import { GraficoPreco, GraficoRanking, type PontoSerie } from "@/components/ml/produtos/graficos-historico";
 import { LinkAfiliado, type LinkAntigo, type LinkAtivo } from "@/components/ml/produtos/link-afiliado";
 import { ScoreDetalhe, type ScoreLinha } from "@/components/ml/produtos/score-detalhe";
+import { ImagensAnuncio } from "@/components/ml/produtos/imagens-anuncio";
+import { FamiliasProduto } from "@/components/ml/familias/familias-produto";
+import {
+  lerPlano,
+  type AnguloOpcao,
+  type BoardOpcaoV2,
+  type FamiliaView,
+  type MidiaView,
+  type PresetOpcao,
+  type VarianteView,
+} from "@/components/ml/familias/rotulos";
 import {
   ATOR_LABEL,
   brl,
@@ -134,19 +145,76 @@ interface Job {
   finished_at: string | null;
 }
 
+interface Midia {
+  id: string;
+  source_type: string;
+  source_url: string | null;
+  public_url: string | null;
+  width: number | null;
+  height: number | null;
+  is_primary: boolean;
+  media_role: string;
+  role_source: string;
+  status: string;
+  error: string | null;
+  cutout_status: string;
+  cutout_url: string | null;
+  cutout_note: string | null;
+  captured_at: string;
+  sort_order: number;
+}
+
+interface Familia {
+  id: string;
+  name: string;
+  hypothesis: string | null;
+  objective: string | null;
+  status: string;
+  created_at: string;
+  batch_job_id: string | null;
+  cost_estimated_usd: number | string | null;
+  default_board_id: string | null;
+  plan: unknown;
+}
+
+interface Variante {
+  id: string;
+  family_id: string;
+  status: string;
+  visual_type: string;
+  scene_preset_id: string | null;
+  fidelity_status: string;
+  package_status: string;
+  ai_modified: boolean;
+  headline: string | null;
+  has_text_overlay: boolean;
+  current_asset_id: string | null;
+  created_at: string;
+}
+
+/** Status em que o backend ainda não aceita criar família (criarFamiliaELote). */
+const SEM_CRIATIVO = ["rejected", "discovered", "enriching", "analyzed", "error"];
+
 const statusLabel = (s: string | null) => (s ? (PRODUCT_STATUS_LABEL as Record<string, string>)[s] ?? s : "—");
 const FEEDBACK_LABEL: Record<string, string> = { reject: "Descarte", approve: "Aprovação", edit: "Edição" };
 const INTENCAO_LABEL: Record<string, string> = { alta: "Alta", media: "Média", baixa: "Baixa" };
 
-export default async function ProdutoPage({ params }: { params: { id: string } }) {
+export default async function ProdutoPage({
+  params,
+  searchParams,
+}: {
+  params: { id: string };
+  searchParams?: Record<string, string | string[] | undefined>;
+}) {
   if (!UUID.test(params.id)) notFound();
   const id = params.id;
   const supabase = createClient();
 
-  const [{ data: prodData }, role, geral] = await Promise.all([
+  const [{ data: prodData }, role, geral, cfgV2] = await Promise.all([
     supabase.from("ml_products").select("*").eq("id", id).maybeSingle(),
     getMlRole(),
     lerConfig("geral"),
+    lerConfig("criativos_v2"),
   ]);
   if (!prodData) notFound();
   const p = prodData as ProdutoRow;
@@ -155,7 +223,7 @@ export default async function ProdutoPage({ params }: { params: { id: string } }
   const fmt = (d: string | null | undefined) => formatarNoFuso(d, tz, { dateStyle: "short", timeStyle: "short" });
   const fmtDia = (d: string | null | undefined) => formatarNoFuso(d, tz, { dateStyle: "short" });
 
-  const [cat, snaps, ranks, scores, links, angulos, criativos, pins, hist, feedback, jobs, openai] = await Promise.all([
+  const [cat, snaps, ranks, scores, links, angulos, criativos, pins, hist, feedback, jobs, openai, midiaRes, familiasRes, presetsRes, boardsLote] = await Promise.all([
     p.category_id
       ? supabase.from("ml_categories").select("id, name, path").eq("id", p.category_id).maybeSingle()
       : Promise.resolve({ data: null }),
@@ -222,12 +290,52 @@ export default async function ProdutoPage({ params }: { params: { id: string } }
       .order("created_at", { ascending: false })
       .limit(20),
     supabase.from("ml_integrations").select("status").eq("provider", "openai").maybeSingle(),
+    supabase
+      .from("ml_product_media")
+      .select("id, source_type, source_url, public_url, width, height, is_primary, media_role, role_source, status, error, cutout_status, cutout_url, cutout_note, captured_at, sort_order")
+      .eq("product_id", id)
+      .order("sort_order", { ascending: true })
+      .limit(60),
+    supabase
+      .from("ml_creative_families")
+      .select("id, name, hypothesis, objective, status, created_at, batch_job_id, cost_estimated_usd, default_board_id, plan")
+      .eq("product_id", id)
+      .order("created_at", { ascending: false })
+      .limit(30),
+    supabase
+      .from("ml_scene_presets")
+      .select("id, key, name, environment, palette, text_area, category_hint, active")
+      .order("sort", { ascending: true })
+      .limit(200),
+    supabase
+      .from("ml_pinterest_boards")
+      .select("id, name, is_default")
+      .eq("active", true)
+      .is("removed_at", null)
+      .order("is_default", { ascending: false })
+      .order("name", { ascending: true })
+      .limit(200),
   ]);
 
   const listaCriativos = (criativos.data ?? []) as Criativo[];
   const listaPins = (pins.data ?? []) as Pin[];
-  const assetIds = listaCriativos.map((c) => c.current_asset_id).filter((x): x is string => !!x);
-  const boardIds = Array.from(new Set(listaPins.map((x) => x.board_id).filter((x): x is string => !!x)));
+  const listaFamilias = (familiasRes.data ?? []) as Familia[];
+  const famIds = listaFamilias.map((f) => f.id);
+  const variantesRes = famIds.length
+    ? await supabase
+        .from("ml_creatives")
+        .select("id, family_id, status, visual_type, scene_preset_id, fidelity_status, package_status, ai_modified, headline, has_text_overlay, current_asset_id, created_at")
+        .in("family_id", famIds)
+        .order("created_at", { ascending: true })
+        .limit(400)
+    : { data: [] };
+  const listaVariantes = (variantesRes.data ?? []) as Variante[];
+  const assetIds = Array.from(
+    new Set([...listaCriativos, ...listaVariantes].map((c) => c.current_asset_id).filter((x): x is string => !!x)),
+  );
+  const boardIds = Array.from(
+    new Set([...listaPins.map((x) => x.board_id), ...listaFamilias.map((f) => f.default_board_id)].filter((x): x is string => !!x)),
+  );
   const listaRanks = (ranks.data ?? []) as Ranking[];
   const catsRanking = Array.from(new Set(listaRanks.map((r) => r.category_id)));
   const [assets, boards, catsRank] = await Promise.all([
@@ -307,10 +415,92 @@ export default async function ProdutoPage({ params }: { params: { id: string } }
   const listaFeedback = (feedback.data ?? []) as Feedback[];
   const listaJobs = (jobs.data ?? []) as Job[];
 
+  // ---- V2: imagens do anúncio, famílias e wizard ----
+  const midias: MidiaView[] = ((midiaRes.data ?? []) as Midia[]).map((m) => ({
+    ...m,
+    url: m.public_url ?? m.source_url,
+  }));
+  const todosPresets = (presetsRes.data ?? []) as (PresetOpcao & { active: boolean })[];
+  const nomePreset = new Map(todosPresets.map((x) => [x.id, x.name]));
+  const presetsAtivos: PresetOpcao[] = todosPresets
+    .filter((x) => x.active)
+    .map((x) => ({
+      id: x.id,
+      key: x.key,
+      name: x.name,
+      environment: x.environment,
+      palette: x.palette,
+      text_area: x.text_area,
+      category_hint: x.category_hint,
+    }));
+  const boardsLoteLista = (boardsLote.data ?? []) as BoardOpcaoV2[];
+  const variantesPorFamilia = new Map<string, VarianteView[]>();
+  for (const v of listaVariantes) {
+    const arr = variantesPorFamilia.get(v.family_id) ?? [];
+    arr.push({
+      id: v.id,
+      status: v.status,
+      visual_type: v.visual_type,
+      cena: v.scene_preset_id ? (nomePreset.get(v.scene_preset_id) ?? null) : null,
+      fidelity_status: v.fidelity_status,
+      package_status: v.package_status,
+      ai_modified: v.ai_modified,
+      headline: v.headline,
+      has_text_overlay: v.has_text_overlay,
+      img: v.current_asset_id ? (urlAsset.get(v.current_asset_id) ?? null) : null,
+    });
+    variantesPorFamilia.set(v.family_id, arr);
+  }
+  const familias: FamiliaView[] = listaFamilias.map((f) => {
+    const plano = lerPlano(f.plan);
+    return {
+      id: f.id,
+      name: f.name,
+      hypothesis: f.hypothesis,
+      objective: f.objective,
+      status: f.status,
+      created_at: f.created_at,
+      batch_job_id: f.batch_job_id,
+      cost_estimated_usd: n(f.cost_estimated_usd),
+      board: f.default_board_id ? (nomeBoard.get(f.default_board_id) ?? null) : null,
+      mix: plano.mix,
+      modo: plano.modo,
+      metodo: plano.metodo,
+      variantes: variantesPorFamilia.get(f.id) ?? [],
+    };
+  });
+  const angulosLote: AnguloOpcao[] = listaAngulos
+    .filter((a) => a.status !== "discarded")
+    .map((a) => ({ id: a.id, hook: a.hook, type: a.type }));
+  const wizard = {
+    productId: p.id,
+    produtoTitulo: p.title,
+    caminhoCategoria: caminho,
+    bloqueio: SEM_CRIATIVO.includes(p.status)
+      ? "Aprove o produto antes de criar criativos — a família só pode ser gerada para produtos aprovados."
+      : null,
+    midias,
+    presets: presetsAtivos,
+    boards: boardsLoteLista,
+    angulos: angulosLote,
+    defaults: {
+      mix: cfgV2.mix,
+      modo: cfgV2.modo_fidelidade_padrao,
+      limiteUsd: cfgV2.limite_custo_lote_usd,
+      maxVariantes: cfgV2.max_variantes_ativas_familia,
+    },
+    openaiConectada,
+  };
+  const loteParam = searchParams?.lote;
+  const abrirLote = (Array.isArray(loteParam) ? loteParam[0] : loteParam) === "1";
+  const familiasAtivas = familias.filter((f) => f.status !== "archived").length;
+
   const temDesconto = n(p.discount_pct) != null && (n(p.discount_pct) ?? 0) > 0 && p.original_price != null;
 
   const secoes = [
     ["visao", "Visão geral"],
+    ["imagens", "Imagens do anúncio"],
+    ["familias", "Famílias"],
     ["score", "Score"],
     ["historico", "Histórico"],
     ["link", "Link"],
@@ -460,6 +650,44 @@ export default async function ProdutoPage({ params }: { params: { id: string } }
           </div>
         </div>
       </section>
+
+      {/* ---------------- Imagens do anúncio (V2) ---------------- */}
+      <div id="imagens" className="scroll-mt-20">
+        <Secao
+          titulo="Imagens do anúncio"
+          descricao="Fotos reais do anúncio usadas como referência dos criativos. Marque a principal e as complementares."
+        >
+          <ImagensAnuncio
+            productId={p.id}
+            midias={midias}
+            importadoEm={p.media_imported_at ? fmt(p.media_imported_at) : null}
+            tz={tz}
+            podeOperar={podeOperar}
+            wizard={{ ...wizard, abrirInicial: abrirLote && podeOperar }}
+          />
+        </Secao>
+      </div>
+
+      {/* ---------------- Famílias de criativos (V2) ---------------- */}
+      <div id="familias" className="scroll-mt-20">
+        <Secao
+          titulo="Famílias de criativos"
+          descricao={
+            familias.length
+              ? `${familiasAtivas} ativa${familiasAtivas === 1 ? "" : "s"} · ${listaVariantes.length} variante${listaVariantes.length === 1 ? "" : "s"}`
+              : "Uma hipótese de marketing, várias variantes visuais — cada uma com seu pacote Pinterest."
+          }
+          acoes={
+            <Button asChild size="sm" variant="ghost">
+              <Link href={`/ml/criativos?produto=${p.id}`}>
+                Ver em Criativos <ArrowRight />
+              </Link>
+            </Button>
+          }
+        >
+          <FamiliasProduto familias={familias} tz={tz} podeOperar={podeOperar} wizard={wizard} />
+        </Secao>
+      </div>
 
       {/* ---------------- Score + IA ---------------- */}
       <div id="score" className="scroll-mt-20">

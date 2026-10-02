@@ -14,7 +14,7 @@ import { cronParaSimples, descreverCron, simplesParaCron, TIMEZONES_SUGERIDOS, t
 import { labelJob } from "@/lib/ml/jobs/tipos";
 import { formatarNoFuso } from "@/lib/ml/tempo";
 import { cn } from "@/lib/utils";
-import { CONFIG_LABEL, OVERLAP_DICA, OVERLAP_LABEL, rotuloConfig } from "./rotulos";
+import { dicaConfig, OVERLAP_DICA, OVERLAP_LABEL, rotuloConfig } from "./rotulos";
 
 export interface AgendamentoEditavel {
   id: string;
@@ -471,21 +471,22 @@ export function EditorAgendamento({ agendamento }: { agendamento: AgendamentoEdi
               chavesConfig.map((k) => {
                 const t = tipos[k];
                 const v = valores[k];
-                const dica = CONFIG_LABEL[k]?.dica;
+                const dica = dicaConfig(k, agendamento.job_type);
+                const rotulo = rotuloConfig(k, agendamento.job_type);
                 if (t === "boolean") {
                   return (
                     <div key={k} className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-body-sm font-medium">{rotuloConfig(k)}</p>
+                        <p className="text-body-sm font-medium">{rotulo}</p>
                         {dica && <p className="text-caption text-muted-foreground">{dica}</p>}
                       </div>
-                      <Switch checked={Boolean(v)} onCheckedChange={(b) => setValores((s) => ({ ...s, [k]: b }))} aria-label={rotuloConfig(k)} />
+                      <Switch checked={Boolean(v)} onCheckedChange={(b) => setValores((s) => ({ ...s, [k]: b }))} aria-label={rotulo} />
                     </div>
                   );
                 }
                 if (t === "json") {
                   return (
-                    <Campo key={k} label={rotuloConfig(k)} dica={dica ?? "Valor em JSON."}>
+                    <Campo key={k} label={rotulo} dica={dica ?? "Valor em JSON."}>
                       <Textarea
                         className="font-mono text-caption"
                         value={String(v ?? "")}
@@ -496,7 +497,7 @@ export function EditorAgendamento({ agendamento }: { agendamento: AgendamentoEdi
                   );
                 }
                 return (
-                  <Campo key={k} label={rotuloConfig(k)} dica={dica}>
+                  <Campo key={k} label={rotulo} dica={dica}>
                     <Input
                       type={t === "number" ? "number" : "text"}
                       inputMode={t === "number" ? "decimal" : undefined}

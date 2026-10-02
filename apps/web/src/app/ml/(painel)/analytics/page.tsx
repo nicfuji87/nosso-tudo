@@ -6,18 +6,24 @@ import { PageHeader } from "@/components/patterns/page-header";
 import { Secao } from "@/components/ml/campos";
 import { CohortCriativos, type GrupoCohort, type VariacaoCohort } from "@/components/ml/analytics/cohort";
 import { ColetarMetricas } from "@/components/ml/analytics/coletar";
+import { Coortes, type LinhaCoorte } from "@/components/ml/analytics/coortes";
 import { Comissoes, type ComissaoView, type PinOpcao, type ProdutoOpcao } from "@/components/ml/analytics/comissoes";
 import { FiltrosAnalytics } from "@/components/ml/analytics/filtros";
 import {
+  DIMENSOES_COORTE,
   FAIXAS_PRECO,
   FILTRO_DA_DIMENSAO,
   FILTROS_URL,
+  JANELAS_COORTE,
   fmtData,
   normalizarBreakdown,
   normalizarResumo,
   rotuloAngulo,
+  rotuloLinha,
   somarDias,
+  valorFiltroDaLinha,
   type Dimensao,
+  type DimensaoCoorte,
   type FiltroUrl,
   type LinhaBreakdown,
   type PontoSerie,
@@ -29,6 +35,7 @@ import { hrefCom, type ParamsUrl } from "@/components/ml/publicacoes/tipos";
 import { getMlRole, temPapel } from "@/lib/ml/acesso";
 import { lerConfig } from "@/lib/ml/config";
 import { TIPOS_ANGULO } from "@/lib/ml/conteudo/angulos";
+import { MODOS_FIDELIDADE, TIPOS_VISUAIS } from "@/lib/ml/familias/plano";
 import { diaNoFuso } from "@/lib/ml/tempo";
 import { createClient } from "@/lib/supabase/server";
 import { porIds } from "./dados";
@@ -53,6 +60,11 @@ const VALIDADORES: Record<FiltroUrl, (v: string) => boolean> = {
   faixa: (v) => (FAIXAS_PRECO as readonly string[]).includes(v),
   ambiente: (v) => v === "production" || v === "sandbox",
   headline: (v) => v.length > 0 && v.length <= 120,
+  familia: (v) => UUID.test(v),
+  tipo: (v) => (TIPOS_VISUAIS as readonly string[]).includes(v),
+  cena: (v) => /^[a-z0-9_-]{1,64}$/i.test(v),
+  texto: (v) => v === "true" || v === "false",
+  modo: (v) => (MODOS_FIDELIDADE as readonly string[]).includes(v),
 };
 
 function diasEntre(de: string, ate: string) {
@@ -96,11 +108,19 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Se
   const pFilters: Record<string, string> = {};
   for (const [k, v] of Object.entries(filtrosUrl)) pFilters[FILTROS_URL[k as FiltroUrl]] = v;
 
+  // Coortes (§11.9): janela e dimensão na URL
+  const coorteP = um(searchParams.coorte);
+  const coorteDias: string = coorteP && (JANELAS_COORTE as readonly string[]).includes(coorteP) ? coorteP : "7";
+  const coortePorP = um(searchParams.coorte_por);
+  const coortePor: DimensaoCoorte = DIMENSOES_COORTE.find((d) => d.value === coortePorP)?.value ?? "family";
+
   const params: ParamsUrl = {
     periodo: personalizado || periodo === "30" ? undefined : periodo,
     de: personalizado ? de : undefined,
     ate: personalizado ? ate : undefined,
     ...filtrosUrl,
+    coorte: coorteDias === "7" ? undefined : coorteDias,
+    coorte_por: coortePor === "family" ? undefined : coortePor,
   };
 
   // ---------------------------------------------------------------------------
@@ -113,8 +133,22 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Se
     .gte("period_end", de);
   if (filtrosUrl.produto) qComissoes = qComissoes.eq("product_id", filtrosUrl.produto);
 
-  const [resumoRes, breakdownRes, integRes, publicadosRes, categoriasRes, boardsRes, produtoRes, criativoRes, comissoesRes, produtosFormRes, pinsFormRes] =
-    await Promise.all([
+  const [
+    resumoRes,
+    breakdownRes,
+    integRes,
+    publicadosRes,
+    categoriasRes,
+    boardsRes,
+    produtoRes,
+    criativoRes,
+    comissoesRes,
+    produtosFormRes,
+    pinsFormRes,
+    coorteRes,
+    cenasRes,
+    pinsFamiliaRes,
+  ] = await Promise.all([
       supabase.rpc("ml_analytics_summary", { p_from: de, p_to: ate, p_filters: pFilters }),
       supabase.rpc("ml_analytics_breakdown", { p_from: de, p_to: ate, p_dimension: "all", p_filters: pFilters }),
       supabase.from("ml_integrations").select("status, config").eq("provider", "pinterest").maybeSingle(),
@@ -128,6 +162,9 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Se
       qComissoes.order("period_end", { ascending: false }).limit(200),
       supabase.from("ml_products").select("id, title").in("status", ["published", "scheduled"]).order("title").limit(200),
       supabase.from("ml_pins").select("id, title, product_id, published_at").eq("status", "published").order("published_at", { ascending: false }).limit(300),
+      supabase.rpc("ml_analytics_cohort", { p_dias: Number(coorteDias), p_dimension: coortePor, p_filters: pFilters }),
+      supabase.from("ml_scene_presets").select("key, name, active, sort").order("sort").order("name").limit(200),
+      supabase.from("ml_pins").select("family_id, creative_id").eq("status", "published").order("published_at", { ascending: false }).limit(1000),
     ]);
 
   const resumo = normalizarResumo(resumoRes.data);
@@ -147,6 +184,31 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Se
   const categorias = Array.from(categoriasMapa, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
   const boards = ((boardsRes.data ?? []) as { id: string; name: string }[]).map((b) => ({ value: b.id, label: b.name }));
   const produtoSel = produtoRes.data as { id: string; title: string } | null;
+
+  // V2: famílias com Pins publicados (pin.family_id ou creative.family_id) e presets de cena
+  const pinsFamilia = (pinsFamiliaRes.data ?? []) as { family_id: string | null; creative_id: string }[];
+  const criativosSemFamilia = await porIds<{ id: string; family_id: string | null }>(
+    supabase,
+    "ml_creatives",
+    "id, family_id",
+    pinsFamilia.filter((p) => !p.family_id).map((p) => p.creative_id),
+  );
+  const idsFamilia = new Set<string>();
+  for (const p of pinsFamilia) {
+    const f = p.family_id ?? criativosSemFamilia.get(p.creative_id)?.family_id;
+    if (f) idsFamilia.add(f);
+  }
+  for (const l of por("family")) if (l.key !== "—") idsFamilia.add(l.key);
+  if (filtrosUrl.familia) idsFamilia.add(filtrosUrl.familia);
+  const familiasMapa = await porIds<{ id: string; name: string }>(supabase, "ml_creative_families", "id, name", Array.from(idsFamilia));
+  const familias = Array.from(idsFamilia, (id) => ({ value: id, label: familiasMapa.get(id)?.name ?? "Família" })).sort((a, b) =>
+    a.label.localeCompare(b.label, "pt-BR"),
+  );
+  const cenasLista = (cenasRes.data ?? []) as { key: string; name: string; active: boolean }[];
+  const cenas = cenasLista
+    .filter((c) => c.active || c.key === filtrosUrl.cena)
+    .map((c) => ({ value: c.key, label: c.active ? c.name : `${c.name} (inativa)` }));
+  if (filtrosUrl.cena && !cenas.some((c) => c.value === filtrosUrl.cena)) cenas.push({ value: filtrosUrl.cena, label: filtrosUrl.cena });
   const criativoSel = criativoRes.data as { id: string; headline: string | null } | null;
 
   // Série diária completa (dias sem métrica = 0)
@@ -158,10 +220,12 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Se
   // Linhas de relatório com link de filtro
   const paraRelatorio = (l: LinhaBreakdown, extra?: Partial<LinhaRelatorio>): LinhaRelatorio => {
     const p = FILTRO_DA_DIMENSAO[l.dimension];
+    const valor = valorFiltroDaLinha(l.dimension, l.key);
     return {
       ...l,
-      hrefFiltro: p && l.key !== "—" ? hrefCom(BASE, params, { [p]: l.key }) : undefined,
-      ativo: Boolean(p && params[p] === l.key),
+      label: rotuloLinha(l.dimension, l.key, l.label),
+      hrefFiltro: p && valor ? hrefCom(BASE, params, { [p]: valor }) : undefined,
+      ativo: Boolean(p && valor && params[p] === valor),
       ...extra,
     };
   };
@@ -184,6 +248,53 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Se
     .sort((a, b) => (b.ctr ?? 0) - (a.ctr ?? 0) || b.outbound_clicks - a.outbound_clicks)
     .map((l) => paraRelatorio(l));
   const headlinesFora = headlines.length - headlinesRanking.length;
+
+  // V2 (§11.9): família, tipo visual, cena, texto, modo de criação, IA e Pins
+  const porFamilia = por("family").map((l) =>
+    paraRelatorio(l, {
+      extra:
+        l.key !== "—" ? (
+          <Link href={`/ml/criativos?familia=${l.key}`} className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground" aria-label="Abrir família">
+            <ExternalLink className="size-3.5" />
+          </Link>
+        ) : undefined,
+    }),
+  );
+  const porTipoVisual = por("visual_type").map((l) => paraRelatorio(l));
+  const porCena = por("scene").map((l) => paraRelatorio(l));
+  const porTexto = por("text").map((l) => paraRelatorio(l));
+  const porModo = por("method").map((l) => paraRelatorio(l));
+  const porIa = por("ai").map((l) => paraRelatorio(l));
+  const topPins = por("pin")
+    .slice(0, 50)
+    .map((l) =>
+      paraRelatorio(l, {
+        extra: (
+          <Link href={`/ml/publicacoes?pin=${l.key}`} className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground" aria-label="Abrir Pin">
+            <ExternalLink className="size-3.5" />
+          </Link>
+        ),
+      }),
+    );
+
+  // Coortes
+  const coorteLinhas: LinhaCoorte[] = normalizarBreakdown(coorteRes.data).map((l) => {
+    const dim = l.dimension;
+    const p = dim === "creative" ? "criativo" : FILTRO_DA_DIMENSAO[dim];
+    const valor = valorFiltroDaLinha(dim, l.key);
+    return {
+      key: l.key,
+      label: rotuloLinha(dim, l.key, l.label),
+      pins: l.pins,
+      impressions: l.impressions,
+      saves: l.saves,
+      pin_clicks: l.pin_clicks,
+      outbound_clicks: l.outbound_clicks,
+      ctr: l.ctr,
+      hrefFiltro: p && valor ? hrefCom(BASE, params, { [p]: valor }) : undefined,
+      ativo: Boolean(p && valor && params[p] === valor),
+    };
+  });
 
   // Cohort de criativos: variações agrupadas por produto
   const linhasCriativo = por("creative").slice(0, 120);
@@ -310,6 +421,8 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Se
         personalizado={personalizado}
         categorias={categorias}
         boards={boards}
+        familias={familias}
+        cenas={cenas}
         rotulos={{ produto: produtoSel?.title, criativo: criativoSel?.headline ?? undefined }}
       />
 
@@ -354,6 +467,47 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Se
         <TabelaRelatorio titulo="Por board" descricao="Compare temas e intenção de cada board." linhas={porBoard} />
         <TabelaRelatorio titulo="Por faixa de preço" descricao="Qual ticket traz melhor retorno." linhas={porFaixa} />
       </div>
+
+      <div className="space-y-1 pt-2">
+        <h2 className="text-h4 font-semibold tracking-tight">Famílias e criativos</h2>
+        <p className="text-body-sm text-muted-foreground">
+          O que funciona dentro de cada família: tipo visual, cena, texto na imagem e modo de criação. Clique numa linha para filtrar a página.
+        </p>
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <TabelaRelatorio
+          titulo="Por família"
+          descricao="Cada família testa uma hipótese do mesmo produto."
+          linhas={porFamilia}
+          vazio="Sem Pins de famílias de criativos no período."
+        />
+        <TabelaRelatorio titulo="Por tipo visual" descricao="Lifestyle sem texto, com texto, editorial ou foto + layout." linhas={porTipoVisual} />
+        <TabelaRelatorio titulo="Por cena" descricao="Preset de ambiente usado na variante." linhas={porCena} />
+        <TabelaRelatorio titulo="Com × sem texto" descricao="Texto sobreposto na imagem versus imagem limpa." linhas={porTexto} />
+        <TabelaRelatorio titulo="Por modo de criação" descricao="Composição exata, geração por referência ou foto original + layout." linhas={porModo} />
+        <TabelaRelatorio titulo="IA × sem IA" descricao="Imagens geradas/modificadas por IA versus sem IA." linhas={porIa} />
+        <TabelaRelatorio
+          titulo="Top Pins"
+          descricao="Pins individuais que mais geraram outbound clicks no período."
+          linhas={topPins}
+          vazio="Nenhum Pin com métricas no período."
+          className="xl:col-span-2"
+        />
+      </div>
+
+      <Secao
+        titulo="Coortes"
+        descricao="Compare grupos pelo desempenho nos primeiros 7, 14 ou 30 dias de vida de cada Pin — justo entre Pins publicados em datas diferentes."
+      >
+        <Coortes
+          dias={coorteDias}
+          dimensao={coortePor}
+          linhas={coorteLinhas}
+          erro={coorteRes.error?.message ?? null}
+          hrefJanela={(d) => hrefCom(BASE, params, { coorte: d === "7" ? null : d })}
+          hrefDimensao={(d) => hrefCom(BASE, params, { coorte_por: d === "family" ? null : d })}
+        />
+      </Secao>
 
       <Secao
         titulo="Cohort de criativos"

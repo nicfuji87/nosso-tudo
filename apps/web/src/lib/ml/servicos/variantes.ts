@@ -38,7 +38,7 @@ import { lerCriativo, mudarStatusCriativo } from "./criativos";
 import { caminhoNomes } from "./categorias";
 import { dadosConteudo } from "./scoring";
 import { lerProduto, recalcularStatus } from "./produtos";
-import { listarMidia, prepararRecorte, referenciasDoProduto, type MidiaRow } from "./midia";
+import { listarMidia, referenciasDoProduto, type MidiaRow } from "./midia";
 import { lerPreset, montarPrompt, varsDoPreset, type PresetRow } from "./prompts";
 import { abrirPendencia } from "./pendencias";
 import type { CtxJob } from "../jobs/executor";
@@ -461,7 +461,10 @@ async function varsPrompt(c: CriativoRow, preset: PresetRow | null): Promise<Rec
 
 function chaveTemplateImagem(c: CriativoRow, manual: boolean): string {
   if (manual) return "manual_chatgpt";
-  if (c.fidelity_mode === "reference_generation") return c.visual_type === "editorial" ? "editorial" : c.visual_type === "lifestyle_text" ? "lifestyle_text" : "reference_generation";
+  if (c.fidelity_mode === "reference_generation") {
+    const porTipo: Record<string, string> = { lifestyle_no_text: "lifestyle_no_text", lifestyle_text: "lifestyle_text", editorial: "editorial" };
+    return porTipo[c.visual_type ?? ""] ?? "reference_generation";
+  }
   return "exact_background";
 }
 

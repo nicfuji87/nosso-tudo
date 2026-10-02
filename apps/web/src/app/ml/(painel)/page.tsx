@@ -24,11 +24,15 @@ import {
   ProdutosRecentesBloco,
   ProximosJobsBloco,
 } from "@/components/ml/dashboard/blocos";
+import { FamiliasBloco } from "@/components/ml/dashboard/blocos-v2";
 import { ContadorLink } from "@/components/ml/dashboard/contador";
 import { OnboardingCard, type PassoOnboarding } from "@/components/ml/dashboard/onboarding";
 import {
+  CONTADORES_V2_VAZIOS,
   CONTADORES_VAZIOS,
   type AgendamentoResumo,
+  type ContadoresV2,
+  type MelhorItem,
   type Atividade,
   type ContadoresDashboard,
   type IntegracaoResumo,
@@ -45,6 +49,7 @@ import {
   truncarTexto,
 } from "@/components/ml/logs/formatos";
 import { getMlRole, temPapel } from "@/lib/ml/acesso";
+import { TIPO_VISUAL_LABEL } from "@/lib/ml/familias/plano";
 import { lerConfig } from "@/lib/ml/config";
 import { diaNoFuso } from "@/lib/ml/tempo";
 import { createClient } from "@/lib/supabase/server";
@@ -92,6 +97,35 @@ function mesclarContadores(bruto: unknown): ContadoresDashboard {
   };
 }
 
+function mesclarV2(bruto: unknown): ContadoresV2 {
+  const b = (bruto && typeof bruto === "object" ? bruto : {}) as Partial<Record<keyof ContadoresV2, unknown>>;
+  const n = (v: unknown) => Number(v ?? 0) || 0;
+  const porTipo: Record<string, number> = {};
+  if (b.publicados_por_tipo && typeof b.publicados_por_tipo === "object")
+    for (const [k, v] of Object.entries(b.publicados_por_tipo as Record<string, unknown>)) porTipo[k] = n(v);
+  return {
+    ...CONTADORES_V2_VAZIOS,
+    familias_em_teste: n(b.familias_em_teste),
+    produtos_sem_referencia: n(b.produtos_sem_referencia),
+    criativos_alerta_fidelidade: n(b.criativos_alerta_fidelidade),
+    criativos_fidelidade_pendente: n(b.criativos_fidelidade_pendente),
+    pacotes_pendentes: n(b.pacotes_pendentes),
+    publicados_por_tipo: porTipo,
+  };
+}
+
+/** Linha de maior outbound (desempate por impressões); null sem cliques de saída. */
+function melhorDe(dados: unknown, rotular: (l: LinhaBreakdown) => string): MelhorItem | null {
+  const linhas = ((dados ?? []) as (LinhaBreakdown & { pins?: number })[])
+    .filter((l) => Number(l.outbound_clicks) > 0)
+    .sort((a, b) => Number(b.outbound_clicks) - Number(a.outbound_clicks) || Number(b.impressions) - Number(a.impressions));
+  const l = linhas[0];
+  if (!l) return null;
+  const imp = Number(l.impressions) || 0;
+  const oc = Number(l.outbound_clicks) || 0;
+  return { rotulo: rotular(l), outbound_clicks: oc, impressions: imp, ctr: imp > 0 ? oc / imp : null, pins: Number(l.pins) || 0 };
+}
+
 export default async function MlDashboardPage() {
   const supabase = createClient();
   const agoraIso = new Date().toISOString();
@@ -115,6 +149,9 @@ export default async function MlDashboardPage() {
     categoriasR,
     diagnosticoR,
     breakdownR,
+    dashV2,
+    cenaR,
+    tipoR,
   ] = await Promise.all([
     supabase.rpc("ml_dashboard"),
     supabase
@@ -154,9 +191,15 @@ export default async function MlDashboardPage() {
       ? supabase.from("ml_jobs").select("id").eq("type", "DIAGNOSTICS").eq("status", "succeeded").limit(1)
       : Promise.resolve({ data: [] as { id: string }[] }),
     supabase.rpc("ml_analytics_breakdown", { p_from: de30, p_to: ate, p_dimension: "pin", p_filters: {} }),
+    supabase.rpc("ml_dashboard_v2"),
+    supabase.rpc("ml_analytics_breakdown", { p_from: de30, p_to: ate, p_dimension: "scene", p_filters: {} }),
+    supabase.rpc("ml_analytics_breakdown", { p_from: de30, p_to: ate, p_dimension: "visual_type", p_filters: {} }),
   ]);
 
   const c = mesclarContadores(dash.data);
+  const v2 = mesclarV2(dashV2.data);
+  const melhorCena = melhorDe(cenaR.data, (l) => l.label || l.key);
+  const melhorTipo = melhorDe(tipoR.data, (l) => (TIPO_VISUAL_LABEL as Record<string, string>)[l.key] ?? l.label ?? l.key);
   const agendamentos = (agendamentosR.data ?? []) as AgendamentoResumo[];
   const integracoes = (integracoesR.data ?? []) as IntegracaoResumo[];
   const pendencias = (pendenciasR.data ?? []) as PendenciaResumo[];
@@ -327,6 +370,8 @@ export default async function MlDashboardPage() {
         </Secao>
         <PerformanceBloco c={c} top={top} />
       </div>
+
+      <FamiliasBloco v2={v2} melhorCena={melhorCena} melhorTipo={melhorTipo} erro={dashV2.error?.message ?? null} />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <ProximosJobsBloco agendamentos={proximos} desativados={desativados} pausado={automacao.pausado} jobsAtivos={c.jobs_ativos} tz={tz} />

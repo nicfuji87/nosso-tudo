@@ -9,8 +9,32 @@ export const CONFIG_LABEL: Record<string, { label: string; dica?: string }> = {
   retention_days: { label: "Retenção (dias)", dica: "Dados temporários mais antigos que isso são removidos." },
 };
 
-export function rotuloConfig(chave: string): string {
-  return CONFIG_LABEL[chave]?.label ?? chave.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+/**
+ * Rótulos específicos por tipo de job — o mesmo `batch` significa coisas diferentes
+ * em cada automação (V2 §11.10: imagens, links e pacotes).
+ */
+export const CONFIG_LABEL_POR_JOB: Record<string, Record<string, { label: string; dica?: string }>> = {
+  REFRESH_PRODUCT_MEDIA: {
+    batch: { label: "Produtos por execução", dica: "Quantos produtos aprovados têm as imagens do anúncio reimportadas a cada execução." },
+  },
+  VALIDATE_AFFILIATE_REDIRECT: {
+    batch: { label: "Links por execução", dica: "Quantos links de afiliado (de produtos com publicação próxima) têm o redirecionamento conferido a cada execução." },
+  },
+  GENERATE_PINTEREST_PACKAGE: {
+    batch: { label: "Criativos por execução", dica: "Quantos criativos aprovados sem pacote pronto recebem o pacote Pinterest a cada execução." },
+  },
+};
+
+function definicaoConfig(chave: string, jobType?: string | null): { label: string; dica?: string } | undefined {
+  return (jobType ? CONFIG_LABEL_POR_JOB[jobType]?.[chave] : undefined) ?? CONFIG_LABEL[chave];
+}
+
+export function rotuloConfig(chave: string, jobType?: string | null): string {
+  return definicaoConfig(chave, jobType)?.label ?? chave.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+}
+
+export function dicaConfig(chave: string, jobType?: string | null): string | undefined {
+  return definicaoConfig(chave, jobType)?.dica;
 }
 
 export const OVERLAP_LABEL: Record<string, string> = {

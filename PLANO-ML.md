@@ -85,7 +85,26 @@ Validado nesta sessão sem contas externas: fila (claim/concurrency/idempotênci
 diagnóstico, scoring, geração de ângulos/copy por template e criativo por composição (PNG 1000×1500 no Storage), 168 testes,
 lint, typecheck e `next build`.
 
-## 7. Registro de execução
+## 7. V2 — famílias de criativos (docs/ml/ESPECIFICACAO-V2.md)
+
+| # (§20) | Etapa | Status |
+|---|---|---|
+| 1 | Auditoria de schema e código | ✅ (pictures jsonb sem proveniência; sem família/presets/templates) |
+| 2–3 | Mídia do anúncio, importação e seleção de referências | ✅ (backend + tela) |
+| 4 | Família e variantes (extensão de ml_creatives) | ✅ |
+| 5 | Wizard Gerar Lote | ✅ (wizard de 6 passos com estimativa/limite de custo) |
+| 6 | Modo manual ChatGPT com referências | ✅ (backend + tela) |
+| 7 | Prompt builder versionado | ✅ (ml_prompt_templates) |
+| 8 | Geração automática com referência | ✅ (images/edits com várias referências) |
+| 9 | Composição exata + overlay programático | ✅ (testado ponta a ponta sem IA) |
+| 10 | Pacote Pinterest por variante | ✅ (validação pura + ai_disclosures oficial) |
+| 11 | Aprovação e Central de Pendências | ✅ (portões + Central com grupos V2 na ordem do §12) |
+| 12 | Calendário e anti-repetição | ✅ (cooldown, board/dia, dHash, headline, anti-flood, piscina; badges em Publicações) |
+| 13 | Analytics e rollups | ✅ (dimensões + coortes 7/14/30; blocos V2 no Dashboard) |
+| 14 | Configurações, logs e documentação | ✅ (Criativos V2, Pinterest Copy, presets, templates, OpenAI 3 modelos, eventos em Logs) |
+| 15 | Teste com produto real em Sandbox | ⏳ depende das integrações conectadas |
+
+## 8. Registro de execução
 
 - **01/10/2026** — Análise completa (spec, repo, banco, APIs). Fase 0: migration `ml01`, domínio puro
   (estados, cron, scoring, janelas, redação) com testes, docs de arquitetura/decisões/APIs.
@@ -93,4 +112,14 @@ lint, typecheck e `next build`.
   descoberta/enriquecimento/scoring, aprovação e links, conteúdo e criativos (4 modos + recorte), publicação idempotente,
   métricas/performance/comissões, níveis de automação; migrations `ml02` (analytics) e `ml03` (pin/headline/membros) aplicadas;
   todas as telas do §5 da spec. Commits `65e9cb1`, `6bf9c76`, `841604b` (+ ajustes) na branch `feat/ml-afiliados`.
-- **Próximo agente**: ver §6 — deploy, conexão real das integrações e ajuste fino dos adapters com respostas reais.
+- **02/10/2026** — V2 (famílias de criativos): migrations `ml04`/`ml05` aplicadas; pipeline de variantes testado ponta a
+  ponta sem IA (importação → recorte → 6 variantes em cenas de banheiro → overlay/editorial → pacote pronto).
+- **02/10/2026** — Telas V2: Produto (Imagens do anúncio, Famílias, wizard `?lote=1`), Criativos (visão por família,
+  diálogos de fidelidade/referência, pacote no editor), ChatGPT manual com referências, Central (bloqueios → links →
+  referências → ChatGPT → fidelidade → aprovação → pacote), Publicações, Analytics (coortes), Dashboard, Configurações,
+  Integrações, Logs (aba Eventos), Automações. Migration `ml06` (índice de eventos em `ml_job_logs`). Retenção de
+  variantes rejeitadas ligada à Limpeza. Falta só validar as telas logado (precisa da conta do dono) e o item 15.
+  Lacunas conhecidas (não bloqueiam): `regerarCena`/`enviarImagemVariante` não devolvem `jobId` (UI mostra só aviso);
+  métricas por família somadas no app (limite 1000 linhas/lote — trocar por RPC se crescer); "Família ativa" em
+  Descobertas é consulta por página; coorte sem dimensão headline/board/faixa de preço.
+- **Próximo agente**: ver §6 (deploy, integrações reais) e §7 (item 15: produto real em sandbox).

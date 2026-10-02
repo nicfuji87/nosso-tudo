@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/ml/status";
 import { Checkbox } from "@/components/ml/campos";
 import { formatarNoFuso } from "@/lib/ml/tempo";
 import { cn } from "@/lib/utils";
+import { IndicadoresPin } from "./indicadores";
 import { PinAcoes } from "./pin-acoes";
 import { PinThumb } from "./thumb";
 import { encurtarUrl, type BoardOpcao, type PinView } from "./tipos";
@@ -109,6 +110,8 @@ export function PinCartao({
             )}
           </div>
         </div>
+
+        <IndicadoresPin pin={pin} tz={tz} />
 
         <ValidacaoBadges itens={pin.validacao} />
 

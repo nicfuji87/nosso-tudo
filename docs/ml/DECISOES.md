@@ -67,3 +67,47 @@ A única alteração em código existente é incluir `/ml` nas rotas protegidas 
 ### ADR-ML-015 — Comissões por importação
 **Contexto:** o programa de afiliados do ML não tem API de relatórios.
 **Decisão:** `ml_commissions` alimentada por formulário/CSV; Analytics mostra receita, receita/Pin e EPC quando houver dado.
+
+---
+
+## V2 (docs/ml/ESPECIFICACAO-V2.md)
+
+### ADR-ML-016 — V2 incremental: estender antes de criar
+**Decisão:** `ml_creatives` ganhou os campos de variante e de pacote Pinterest (title/description/alt/board já existiam);
+`ml_creative_assets` ganhou `kind` (final/base/background). Tabelas novas só sem equivalente: `ml_product_media`,
+`ml_creative_families`, `ml_scene_presets`, `ml_prompt_templates`. Nenhum estado novo de produto/criativo:
+mídia, fidelidade e pacote são colunas próprias (`fidelity_status`, `package_status`), não estados do pipeline.
+
+### ADR-ML-017 — Orquestração por estado ("avancarVariante")
+**Decisão:** cada passo da variante (cenário, composição, geração por referência, fidelidade, overlay, pacote) é um job
+idempotente que termina chamando `avancarVariante`, que decide o próximo passo olhando o estado REAL do criativo
+(assets existentes, status de fidelidade e pacote). Retry, reaper e o varredor `PROCESS_PIPELINE` só precisam
+chamar o mesmo orquestrador. Nenhuma geração sobrescreve asset: tudo vira asset novo (histórico).
+
+### ADR-ML-018 — Composição exata com recorte determinístico (sem IA no produto)
+**Contexto:** a IA "recriou" o suporte do produto num teste — risco comercial (V2 §5).
+**Decisão:** o recorte remove só o fundo uniforme conectado às bordas (flood fill em JS puro, `pngjs`/`jpeg-js`, sem
+binário nativo); pixels do produto ficam intactos. Fundo não uniforme ⇒ a composição usa a foto inteira emoldurada.
+O cenário pode ser de IA (só o ambiente) ou estilizado sem IA. Composição exata e foto+layout têm
+`fidelity_status = not_required`; geração por referência e imagens manuais exigem checagem.
+
+### ADR-ML-019 — Fidelidade: IA assiste, humano decide no modo assistido
+**Decisão:** `CHECK_CREATIVE_FIDELITY` (visão, checklist §5.2, conservador) produz ok/warning/failed. Aprovação humana
+exige a checagem feita (IA ou checklist humano); aprovação AUTOMÁTICA exige `human_ok`, ou nível ≥ 3 com `ok`.
+`failed` bloqueia aprovação e publicação.
+
+### ADR-ML-020 — AI disclosure pelo campo oficial
+**Contexto:** a V2 pede não inventar parâmetros. Verificado no OpenAPI oficial v5.28.0: `PinCreate.ai_disclosures
+{values: [AI_MODIFIED | SYNTHETIC_PERFORMER]}` e `board_section_id` existem; interesses/tags NÃO existem na escrita.
+**Decisão:** `ai_modified` interno → `ai_disclosures: {values: ["AI_MODIFIED"]}` (desligável em Pinterest Copy).
+Se a conta recusar o campo (400), o app grava `ai_disclosure_suportado=false`, repete sem ele e mantém o flag
+interno (`ml_pins.ai_disclosure_sent`). Interesses ficam só no app.
+
+### ADR-ML-021 — Gerar ≠ publicar: piscina de variantes
+**Decisão:** a família gera N variantes; o agendamento automático escolhe UMA por produto por vez
+(`escolherVariante`: tipo/cena diferentes do último publicado) e respeita cooldown entre variantes, limite por
+board/dia, similaridade visual (dHash) e de headline. Fila atrasada não vira rajada (anti-flood reagenda).
+
+### ADR-ML-022 — Templates e presets no banco
+**Decisão:** prompts são `ml_prompt_templates` versionados (um ativo por chave; nova versão desativa a anterior) e
+renderizados com placeholders; a versão (`chave@vN`) é gravada em cada criativo. Presets de cena são linhas editáveis.

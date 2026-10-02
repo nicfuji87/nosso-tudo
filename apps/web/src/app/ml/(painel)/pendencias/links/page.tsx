@@ -4,8 +4,9 @@ import { ArrowLeft, PartyPopper, RotateCcw } from "lucide-react";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { Button } from "@/components/ui/button";
 import { ehUuid, fotoPrincipal } from "@/components/ml/criativos/carregar";
-import { FilaLinks } from "@/components/ml/pendencias/fila-links";
+import { FilaLinks, type LinkAtivo } from "@/components/ml/pendencias/fila-links";
 import { getMlRole, temPapel } from "@/lib/ml/acesso";
+import { lerConfig } from "@/lib/ml/config";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "Fila de links de afiliado" };
@@ -40,7 +41,7 @@ export default async function FilaLinksPage({ searchParams }: { searchParams: Pa
   const idParam = um(searchParams.id);
 
   const supabase = createClient();
-  const role = await getMlRole();
+  const [role, geral] = await Promise.all([getMlRole(), lerConfig("geral")]);
 
   let produto: ProdutoFila | null = null;
   if (ehUuid(idParam)) {
@@ -60,8 +61,21 @@ export default async function FilaLinksPage({ searchParams }: { searchParams: Pa
     produto = ((data ?? []) as ProdutoFila[])[0] ?? null;
   }
 
-  const { count } = await supabase.from("ml_products").select("id", { count: "exact", head: true }).eq("status", "waiting_affiliate_link");
+  const [{ count }, linkRes] = await Promise.all([
+    supabase.from("ml_products").select("id", { count: "exact", head: true }).eq("status", "waiting_affiliate_link"),
+    produto
+      ? supabase
+          .from("ml_affiliate_links")
+          .select("id, affiliate_url, label, redirect_status, final_url, final_host, last_checked_at, validated_at, created_at")
+          .eq("product_id", produto.id)
+          .eq("active", true)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
   const restantes = count ?? 0;
+  const linkAtivo = (linkRes.data as LinkAtivo | null) ?? null;
 
   const voltar = (
     <Button asChild variant="ghost" size="sm" className="-ml-3">
@@ -124,6 +138,8 @@ export default async function FilaLinksPage({ searchParams }: { searchParams: Pa
         restantes={restantes}
         pular={pular}
         podeOperar={temPapel(role, "operator")}
+        linkAtivo={linkAtivo}
+        tz={geral.timezone}
       />
     </div>
   );

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { ImageUp, Loader2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { enviarImagem } from "@/app/ml/(painel)/criativos/actions";
+import { enviarImagemVariante } from "@/app/ml/(painel)/criativos/actions-v2";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -31,12 +32,15 @@ export function UploadImagem({
   aoEnviar,
   desabilitado,
   compacto,
+  feitaComIA,
 }: {
   creativeId: string;
   rotuloEnviar?: string;
-  aoEnviar?: (r: { avisos: string[] }) => void;
+  aoEnviar?: (r: { avisos: string[]; mensagem?: string }) => void;
   desabilitado?: boolean;
   compacto?: boolean;
+  /** Variante V2: envia pelo fluxo novo (fidelidade + pacote) informando se a imagem foi feita com IA. */
+  feitaComIA?: boolean;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [arquivo, setArquivo] = useState<File | null>(null);
@@ -92,7 +96,8 @@ export function UploadImagem({
     iniciar(async () => {
       const fd = new FormData();
       fd.set("arquivo", arquivo);
-      const r = await enviarImagem(creativeId, fd);
+      if (feitaComIA !== undefined) fd.set("feita_com_ia", feitaComIA ? "true" : "false");
+      const r = feitaComIA !== undefined ? await enviarImagemVariante(creativeId, fd) : await enviarImagem(creativeId, fd);
       if (!r.ok) {
         toast.error(r.error);
         return;
@@ -102,7 +107,7 @@ export function UploadImagem({
       else toast.success(r.mensagem);
       setArquivo(null);
       if (input.current) input.current.value = "";
-      aoEnviar?.({ avisos });
+      aoEnviar?.({ avisos, mensagem: r.mensagem });
     });
   }
 

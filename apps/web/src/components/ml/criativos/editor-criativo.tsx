@@ -3,25 +3,45 @@
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Download, History, ImageOff, Loader2, RefreshCw, Save, Sparkles, Type } from "lucide-react";
+import { AlertTriangle, Download, History, ImageOff, Loader2, RefreshCw, Save, Sparkles, Type } from "lucide-react";
 import { toast } from "sonner";
 import { editarCriativo, regerarCopy, regerarImagem, usarImagem } from "@/app/ml/(painel)/criativos/actions";
-import { historicoCriativo, type AssetHistorico, type RevisaoHistorico } from "@/app/ml/(painel)/criativos/consultas";
+import { editarPacoteExtra } from "@/app/ml/(painel)/criativos/actions-v2";
+import { historicoCriativo, tiposAssets, type AssetHistorico, type RevisaoHistorico } from "@/app/ml/(painel)/criativos/consultas";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Campo, NativeSelect, Textarea } from "@/components/ml/campos";
+import { Campo, Checkbox, NativeSelect, Textarea } from "@/components/ml/campos";
 import { JobStatus } from "@/components/ml/job-status";
 import { StatusBadge } from "@/components/ml/status";
 import { labelAngulo } from "@/lib/ml/conteudo/angulos";
 import { LIMITES_PIN } from "@/lib/ml/conteudo/guardrails";
 import { formatarNoFuso } from "@/lib/ml/tempo";
 import { cn } from "@/lib/utils";
+import { DetalhesV2 } from "./detalhes-v2";
 import { UploadImagem } from "./upload-imagem";
 import { RecorteImagem } from "./recorte-imagem";
-import { MODOS_IMAGEM, REVISAO_LABEL, baixarArquivo, editavel, labelModo, nomeArquivo, type BoardOpcao, type CriativoView } from "./rotulos";
+import {
+  ASSET_KIND_LABEL,
+  MODOS_IMAGEM,
+  PACOTE_LABEL,
+  REVISAO_LABEL,
+  baixarArquivo,
+  editavel,
+  labelModo,
+  nomeArquivo,
+  type BoardOpcao,
+  type CriativoView,
+} from "./rotulos";
+
+const listaVirgula = (s: string, max: number) =>
+  s
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean)
+    .slice(0, max);
 
 function Contador({ atual, max }: { atual: number; max: number }) {
   const perto = atual > max * 0.9;
@@ -54,6 +74,8 @@ export function EditorCriativo({
   aberto,
   aoMudar,
   acoes,
+  erroAprovacao,
+  aoJob,
 }: {
   criativo: CriativoView;
   boards: BoardOpcao[];
@@ -62,9 +84,19 @@ export function EditorCriativo({
   aberto: boolean;
   aoMudar: (v: boolean) => void;
   acoes?: React.ReactNode;
+  /** Motivo da última aprovação que falhou (V2). */
+  erroAprovacao?: string | null;
+  /** Encaminha jobs disparados aqui para o acompanhamento da tela. */
+  aoJob?: (jobId: string, rotulo: string) => void;
 }) {
   const router = useRouter();
   const pode = podeOperar && editavel(criativo.status);
+  const v2 = Boolean(criativo.family_id);
+  const manualV2 = v2 && (criativo.image_mode === "manual_chatgpt" || criativo.image_mode === "upload");
+  const [secao, setSecao] = useState(criativo.board_section_id ?? "");
+  const [interesses, setInteresses] = useState(criativo.interests.join(", "));
+  const [feitaComIA, setFeitaComIA] = useState(criativo.image_mode === "manual_chatgpt");
+  const [tipos, setTipos] = useState<Record<string, string>>({});
   const [headline, setHeadline] = useState(criativo.headline ?? "");
   const [titulo, setTitulo] = useState(criativo.title ?? "");
   const [descricao, setDescricao] = useState(criativo.description ?? "");
@@ -88,6 +120,8 @@ export function EditorCriativo({
     setCta(criativo.cta ?? "");
     setKeywords(criativo.keywords.join(", "));
     setBoardId(criativo.board_id ?? "");
+    setSecao(criativo.board_section_id ?? "");
+    setInteresses(criativo.interests.join(", "));
     // Só quando o servidor muda o criativo (updated_at) — refresh comum não apaga o que está sendo digitado.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [criativo.updated_at]);
@@ -98,18 +132,30 @@ export function EditorCriativo({
     void historicoCriativo(criativo.id).then((r) => {
       if (vivo && r.ok) setHistorico({ revisoes: r.revisoes, assets: r.assets });
     });
+    // V2: rótulo de cada versão (sem texto / final / cenário).
+    if (v2)
+      void tiposAssets(criativo.id).then((r) => {
+        if (vivo && r.ok) setTipos(r.tipos);
+      });
     return () => {
       vivo = false;
     };
-  }, [aberto, criativo.id, criativo.updated_at, versao]);
+  }, [aberto, criativo.id, criativo.updated_at, versao, v2]);
 
   const listaKeywords = keywords
     .split(",")
     .map((k) => k.trim())
     .filter(Boolean);
+  const listaInteresses = listaVirgula(interesses, 10);
+  const secaoInvalida = secao.trim() !== "" && !/^\d+$/.test(secao.trim());
+  const extrasMudaram = v2 && ((secao.trim() || null) !== (criativo.board_section_id ?? null) || listaInteresses.join("|") !== criativo.interests.join("|"));
 
   function salvar() {
     if (!pode) return;
+    if (secaoInvalida) {
+      toast.error("A seção do board é o ID numérico da seção no Pinterest.");
+      return;
+    }
     iniciarSalvar(async () => {
       const r = await editarCriativo(criativo.id, {
         headline,
@@ -124,6 +170,14 @@ export function EditorCriativo({
         toast.error(r.error);
         return;
       }
+      if (extrasMudaram) {
+        const e = await editarPacoteExtra(criativo.id, { board_section_id: secao.trim() || null, interests: listaInteresses });
+        if (!e.ok) {
+          toast.error(`Textos salvos, mas o pacote não: ${e.error}`);
+          router.refresh();
+          return;
+        }
+      }
       if (r.alteracoes.length) toast.warning(r.mensagem);
       else toast.success(r.mensagem);
       setVersao((v) => v + 1);
@@ -133,13 +187,18 @@ export function EditorCriativo({
 
   function regerar(tipo: "imagem" | "copy") {
     iniciarRegerar(async () => {
-      const r = tipo === "imagem" ? await regerarImagem(criativo.id, modo || undefined) : await regerarCopy(criativo.id);
+      const r = tipo === "imagem" ? await regerarImagem(criativo.id, (!v2 && modo) || undefined) : await regerarCopy(criativo.id);
       if (!r.ok) {
         toast.error(r.error);
         return;
       }
       toast.success(r.mensagem);
-      setJobs((j) => [{ id: r.jobId, rotulo: tipo === "imagem" ? "Imagem" : "Textos" }, ...j.filter((x) => x.id !== r.jobId)].slice(0, 3));
+      const jobId = r.jobId;
+      const rotulo = tipo === "imagem" ? (v2 ? "Cena" : "Imagem") : v2 ? "Pacote Pinterest" : "Textos";
+      if (jobId) {
+        setJobs((j) => [{ id: jobId, rotulo }, ...j.filter((x) => x.id !== jobId)].slice(0, 3));
+        aoJob?.(jobId, rotulo);
+      }
       router.refresh();
     });
   }
@@ -170,6 +229,38 @@ export function EditorCriativo({
         </SheetHeader>
 
         {acoes && <div className="mt-4 flex flex-wrap gap-2">{acoes}</div>}
+
+        {erroAprovacao && (
+          <p className="mt-4 flex gap-2 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-body-sm text-warning">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden /> Não aprovado: {erroAprovacao}
+          </p>
+        )}
+
+        {v2 && (
+          <section
+            aria-label="Pacote Pinterest e fidelidade"
+            className={cn(
+              "mt-4 space-y-2 rounded-xl border px-3 py-3",
+              criativo.package_status === "ready" ? "border-border/70 bg-secondary/30" : criativo.package_status === "invalid" ? "border-destructive/30 bg-destructive/5" : "border-warning/30 bg-warning/5",
+            )}
+          >
+            <DetalhesV2 c={criativo} mostrarTitulo={false} />
+            {criativo.package_errors.length > 0 ? (
+              <div>
+                <p className="text-caption font-medium">{PACOTE_LABEL[criativo.package_status] ?? criativo.package_status} — falta resolver:</p>
+                <ul className="mt-1 space-y-0.5 text-caption text-muted-foreground">
+                  {criativo.package_errors.map((e, i) => (
+                    <li key={`${e.campo}-${i}`}>• {e.mensagem}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : criativo.package_status === "ready" ? (
+              <p className="text-caption text-muted-foreground">Pacote completo: título, descrição, alt text, board e link de afiliado prontos para o Pinterest.</p>
+            ) : (
+              <p className="text-caption text-muted-foreground">O pacote é gerado automaticamente quando a imagem final fica pronta. Use “Regerar copy” para refazer.</p>
+            )}
+          </section>
+        )}
 
         {criativo.rejection_reason && criativo.status === "rejected" && (
           <p className="mt-4 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-body-sm text-destructive">
@@ -274,6 +365,22 @@ export function EditorCriativo({
               <CampoContado label="Palavras-chave" atual={listaKeywords.length} max={15} dica="Separe por vírgula (até 15).">
                 <Input value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="organização, cozinha, achadinho" />
               </CampoContado>
+              {v2 && (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Campo label="Seção do board" dica={secaoInvalida ? "Use o ID numérico da seção no Pinterest." : "Opcional — ID da seção no Pinterest."}>
+                    <Input
+                      value={secao}
+                      onChange={(e) => setSecao(e.target.value)}
+                      inputMode="numeric"
+                      placeholder="Ex.: 5498...21"
+                      aria-invalid={secaoInvalida}
+                    />
+                  </Campo>
+                  <CampoContado label="Interesses (referência)" atual={listaInteresses.length} max={10} dica="Separe por vírgula. Ficam no app para revisão — não vão pela API.">
+                    <Input value={interesses} onChange={(e) => setInteresses(e.target.value)} placeholder="banheiro pequeno, organização" />
+                  </CampoContado>
+                </div>
+              )}
             </fieldset>
             <div className="flex flex-wrap items-center gap-2">
               <Button type="submit" variant="tech" disabled={!pode || salvando}>
@@ -293,24 +400,37 @@ export function EditorCriativo({
             Imagem e textos
           </h3>
           <div className="flex flex-wrap items-end gap-2">
-            <Campo label="Modo da nova imagem" className="min-w-48">
-              <NativeSelect className="w-full" value={modo} onChange={(e) => setModo(e.target.value)} disabled={!pode}>
-                <option value="">Manter ({labelModo(criativo.image_mode)})</option>
-                {MODOS_IMAGEM.filter((m) => m !== criativo.image_mode).map((m) => (
-                  <option key={m} value={m}>
-                    {labelModo(m)}
-                  </option>
-                ))}
-              </NativeSelect>
-            </Campo>
-            <Button type="button" variant="secondary" disabled={!pode || regerando} onClick={() => regerar("imagem")}>
+            {!v2 && (
+              <Campo label="Modo da nova imagem" className="min-w-48">
+                <NativeSelect className="w-full" value={modo} onChange={(e) => setModo(e.target.value)} disabled={!pode}>
+                  <option value="">Manter ({labelModo(criativo.image_mode)})</option>
+                  {MODOS_IMAGEM.filter((m) => m !== criativo.image_mode).map((m) => (
+                    <option key={m} value={m}>
+                      {labelModo(m)}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Campo>
+            )}
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!pode || regerando || manualV2}
+              title={manualV2 ? "Variante manual: envie uma nova imagem abaixo." : undefined}
+              onClick={() => regerar("imagem")}
+            >
               {regerando ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-              Regerar imagem
+              {v2 ? "Regerar cena" : "Regerar imagem"}
             </Button>
             <Button type="button" variant="secondary" disabled={!pode || regerando} onClick={() => regerar("copy")}>
               <Type /> Regerar copy
             </Button>
           </div>
+          {v2 && pode && (
+            <p className="text-caption text-muted-foreground">
+              {manualV2 ? "Variante feita fora do app (ChatGPT/upload): para refazer, envie outra imagem." : "Nova cena = nova versão; a anterior fica no histórico."}
+            </p>
+          )}
           {criativo.status === "approved" && pode && (
             <p className="text-caption text-muted-foreground">Regerar volta o criativo para revisão.</p>
           )}
@@ -324,7 +444,20 @@ export function EditorCriativo({
           {pode && (
             <div className="space-y-1.5">
               <p className="text-body-sm font-medium">Substituir imagem</p>
-              <UploadImagem creativeId={criativo.id} rotuloEnviar="Substituir" compacto aoEnviar={() => setVersao((v) => v + 1)} />
+              {v2 && (
+                <label className="flex items-center gap-2 text-caption text-muted-foreground">
+                  <Checkbox checked={feitaComIA} onChange={(e) => setFeitaComIA(e.target.checked)} />
+                  Imagem feita com IA (marca o AI disclosure)
+                </label>
+              )}
+              <UploadImagem
+                creativeId={criativo.id}
+                rotuloEnviar="Substituir"
+                compacto
+                feitaComIA={v2 ? feitaComIA : undefined}
+                aoEnviar={() => setVersao((v) => v + 1)}
+              />
+              {v2 && <p className="text-caption text-muted-foreground">Após o envio, a fidelidade é checada e o pacote Pinterest é gerado automaticamente.</p>}
             </div>
           )}
         </section>
@@ -360,10 +493,11 @@ export function EditorCriativo({
                         </a>
                         <p className="text-overline text-muted-foreground">
                           {a.id === criativo.asset?.id ? "Atual · " : ""}
+                          {tipos[a.id] ? `${ASSET_KIND_LABEL[tipos[a.id]!] ?? tipos[a.id]} · ` : ""}
                           {labelModo(a.mode)}
                         </p>
                         <p className="text-overline text-muted-foreground tabular">{formatarNoFuso(a.created_at, tz)}</p>
-                        {pode && a.id !== criativo.asset?.id && (
+                        {pode && a.id !== criativo.asset?.id && tipos[a.id] !== "background" && (
                           <Button
                             type="button"
                             size="sm"

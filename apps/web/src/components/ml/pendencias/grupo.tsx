@@ -2,7 +2,18 @@ import type { LucideIcon } from "lucide-react";
 import { Timer } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type TipoGrupo = "produtos" | "links" | "imagens" | "criativos" | "publicacoes" | "excecoes" | "configuracoes";
+export type TipoGrupo =
+  | "bloqueios"
+  | "links"
+  | "referencias"
+  | "imagens"
+  | "fidelidade"
+  | "criativos"
+  | "pacote"
+  | "publicacoes"
+  | "produtos"
+  | "excecoes"
+  | "configuracoes";
 
 /** Bloco de um tipo de pendência na Central (âncora `#grupo-<tipo>` para ?tipo=). */
 export function GrupoPendencia({

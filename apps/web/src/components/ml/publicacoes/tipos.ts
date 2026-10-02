@@ -36,12 +36,54 @@ export interface PinView {
   validacao: ItemValidacao[];
   board: { id: string; name: string } | null;
   product: { id: string; title: string; permalink: string | null } | null;
-  creative: { id: string; headline: string | null } | null;
+  creative: CriativoResumo | null;
+  /** V2: família (pin.family_id ou creative.family_id). */
+  familia: { id: string; name: string } | null;
+  /** V2: flag interno de IA (pin.ai_modified) e se a declaração foi aceita pela API ao publicar. */
+  ai_modified: boolean;
+  ai_disclosure_sent: boolean | null;
+  /** V2: link de afiliado usado pelo Pin (validação de redirect). */
+  link: LinkResumo | null;
+  /** V2 §16: outros Pins do mesmo produto em ±7 dias (agendados/publicados). */
+  repeticao: { ordem: number; total: number } | null;
+  /** V2 §16: cooldown entre variantes do mesmo produto, calculado no servidor. */
+  cooldown: { regraHoras: number; faltamHoras: number; liberaEm: string | null } | null;
 }
+
+export interface CriativoResumo {
+  id: string;
+  headline: string | null;
+  visual_type: string | null;
+  fidelity_mode: string | null;
+  has_text_overlay: boolean | null;
+  family_id: string | null;
+}
+
+export interface LinkResumo {
+  id: string;
+  label: string | null;
+  redirect_status: string;
+  final_host: string | null;
+  final_url: string | null;
+  last_checked_at: string | null;
+}
+
+/** Validação do redirect do link de afiliado (V2 §10). */
+export const REDIRECT_STATUS: Record<string, { label: string; tom: "success" | "warning" | "destructive" | "muted"; dica: string }> = {
+  ok: { label: "Destino ok", tom: "success", dica: "O link redireciona para o anúncio esperado no Mercado Livre." },
+  ok_unverified: {
+    label: "Destino ML (não confirmado)",
+    tom: "warning",
+    dica: "Redireciona para o Mercado Livre, mas não foi possível confirmar que é o mesmo anúncio.",
+  },
+  inconsistent: { label: "Destino inconsistente", tom: "destructive", dica: "O link leva a outro destino — gere um novo link de afiliado." },
+  error: { label: "Erro ao validar", tom: "destructive", dica: "Não foi possível seguir o redirecionamento. Tente validar de novo." },
+  unchecked: { label: "Destino não validado", tom: "muted", dica: "O redirecionamento ainda não foi verificado." },
+};
 
 /** Colunas lidas de ml_pins (sem os blobs que a tela não usa). */
 export const PIN_COLUNAS: string =
-  "id, status, title, description, alt_text, link_url, media_url, scheduled_at, published_at, environment, last_error, external_url, attempts, validated_at, created_at, updated_at, duplicated_from, validation, board_id, product_id, creative_id";
+  "id, status, title, description, alt_text, link_url, media_url, scheduled_at, published_at, environment, last_error, external_url, attempts, validated_at, created_at, updated_at, duplicated_from, validation, board_id, product_id, creative_id, family_id, ai_modified, ai_disclosure_sent, affiliate_link_id";
 
 /** Extrai `validation.itens` de forma defensiva (jsonb livre). */
 export function itensValidacao(v: unknown): ItemValidacao[] {
@@ -69,6 +111,11 @@ export const ROTULO_VALIDACAO: Record<string, string> = {
   imagem: "Imagem",
   repeticao: "Repetição",
   textos: "Textos",
+  criativo_aprovado: "Criativo",
+  pacote: "Pacote Pinterest",
+  fidelidade: "Fidelidade",
+  redirect: "Destino do link",
+  ai_disclosure: "Declaração de IA",
 };
 
 /** Instante de referência do Pin no calendário: publicado > agendado. */

@@ -57,6 +57,11 @@ itens-e-buscas, buscador-de-produtos, opinioes-sobre-um-produto, boas-praticas-p
 `GET /v5/pins/{id}/analytics?start_date&end_date&metric_types=IMPRESSION,SAVE,PIN_CLICK,OUTBOUND_CLICK` (UTC, ≤90 dias,
 resposta `{all:{daily_metrics:[{date,data_status,metrics}]}}`).
 
+**V2 — campos de escrita confirmados no OpenAPI oficial v5.28.0 (`PinCreate`, 02/10/2026):** `board_id`, `board_section_id`,
+`title`, `description`, `link`, `alt_text`, `dominant_color`, `parent_pin_id`, `media_source`, `sponsor_id` (beta fechado) e
+**`ai_disclosures: {values: ["AI_MODIFIED" | "SYNTHETIC_PERFORMER"]}`**. Não há campo de interesses/tags na criação —
+o app guarda interesses só internamente. Fonte: github.com/pinterest/api-description/v5/openapi.yaml.
+
 **Acesso / sandbox**
 - **Trial**: Pins criados só ficam visíveis ao criador (sandbox), 1000 req/dia. **Standard** exige vídeo-demo do OAuth.
 - Sandbox: `https://api-sandbox.pinterest.com/v5`, token próprio (gerado em My Apps ou OAuth no endpoint sandbox).
