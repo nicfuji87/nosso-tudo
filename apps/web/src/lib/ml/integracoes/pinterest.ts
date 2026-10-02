@@ -175,6 +175,12 @@ export async function salvarCredenciaisApp(p: { clientId: string; clientSecret?:
 // ---------------------------------------------------------------------------
 // Chamadas autenticadas
 // ---------------------------------------------------------------------------
+/** 401 code 3 "consumer type is not supported" = app com trial access pendente (não é token inválido). */
+const APP_NAO_APROVADO = /consumer type is not supported/i;
+const MSG_APP_PENDENTE =
+  "O Pinterest ainda não liberou o acesso deste app (trial access pendente): toda chamada é recusada até a aprovação. " +
+  "Acompanhe em developers.pinterest.com/apps ou abra um chamado no suporte de desenvolvedores do Pinterest. Depois de aprovado, clique em Testar conexão.";
+
 async function api<T>(
   operation: string,
   caminho: string,
@@ -197,6 +203,18 @@ async function api<T>(
   try {
     return await chamar(token);
   } catch (e) {
+    // App sem acesso liberado: o gateway recusa tudo antes do endpoint. Renovar token não adianta.
+    if (e instanceof ErroApiExterna && e.status === 401 && APP_NAO_APROVADO.test(e.message)) {
+      await atualizarIntegracao(PROVIDER, { status: "error", last_error: MSG_APP_PENDENTE });
+      await abrirPendencia({
+        tipo: "integration_auth",
+        titulo: "Pinterest: app aguardando aprovação",
+        detalhe: MSG_APP_PENDENTE,
+        dedupeKey: "integration_auth:pinterest",
+        prioridade: 5,
+      });
+      throw new ErroPermanente(MSG_APP_PENDENTE);
+    }
     if (e instanceof ErroApiExterna && e.status === 401 && (await lerSegredo(PROVIDER, "refresh_token"))) {
       await atualizarIntegracao(PROVIDER, { access_expires_at: new Date(0).toISOString() });
       return chamar(await obterTokenValido(PROVIDER, renovarToken));
