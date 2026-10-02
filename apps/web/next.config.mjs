@@ -6,6 +6,11 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: "10mb",
     },
+    // Módulo ML: a composição de criativos (next/og) lê as fontes Geist do disco.
+    outputFileTracingIncludes: {
+      "/api/ml/**": ["./node_modules/geist/dist/fonts/geist-sans/*.ttf"],
+      "/ml/**": ["./node_modules/geist/dist/fonts/geist-sans/*.ttf"],
+    },
   },
   images: {
     remotePatterns: [
