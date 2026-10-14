@@ -32,7 +32,7 @@ async function blobParaBase64(blob: Blob): Promise<string> {
 }
 
 /** Modelo barato (visão) para a leitura textual de notas/recibos. */
-const MODELO_LEITURA = "claude-haiku-4-5";
+const MODELO_LEITURA = "claude-haiku-5-5";
 
 /**
  * Lê uma imagem/PDF e devolve a transcrição dos dados em texto corrido (estabelecimento,
@@ -65,7 +65,10 @@ async function lerDocumento(
       },
       body: JSON.stringify({
         model: MODELO_LEITURA,
-        max_tokens: 1024,
+        // O Haiku 5.5 pensa por padrão e o thinking conta no max_tokens: effort
+        // baixo (transcrição é tarefa simples) e folga pra não cortar a nota.
+        max_tokens: 4096,
+        output_config: { effort: "low" },
         messages: [{ role: "user", content: [fonte, { type: "text", text: instrucao }] }],
       }),
     });

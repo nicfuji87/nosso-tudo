@@ -117,7 +117,7 @@ export function NiaConsoleForm({
               value={modelo}
               onChange={(e) => setModelo(e.target.value)}
               disabled={!canEdit}
-              placeholder="claude-haiku-4-5"
+              placeholder="claude-haiku-5-5"
               className={inputCls}
             />
             <datalist id="nia-modelos">

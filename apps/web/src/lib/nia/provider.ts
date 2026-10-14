@@ -129,8 +129,15 @@ interface AnthropicStreamEvent {
       cache_read_input_tokens?: number;
     };
   };
-  content_block?: { type?: string; id?: string; name?: string };
-  delta?: { type?: string; text?: string; partial_json?: string; stop_reason?: string };
+  content_block?: { type?: string; id?: string; name?: string; data?: string };
+  delta?: {
+    type?: string;
+    text?: string;
+    partial_json?: string;
+    thinking?: string;
+    signature?: string;
+    stop_reason?: string;
+  };
   usage?: { output_tokens?: number };
   error?: unknown;
 }
@@ -138,6 +145,16 @@ interface AnthropicMessage {
   role: "user" | "assistant";
   content: string | unknown[];
 }
+
+/** Modelos Anthropic novos (Opus 4.7+, família 5.x) rejeitam temperature ≠ default
+ *  com 400 — o comportamento vem do prompt. Também pensam por padrão (thinking
+ *  adaptativo), então os blocos de thinking precisam voltar intactos no tool-loop. */
+function anthropicSemSampling(modelo: string): boolean {
+  return /^claude-(?:[a-z]+-5|opus-4-[78])/.test(modelo);
+}
+
+const TEXTO_RECUSA =
+  "Não consegui responder a esse pedido. Pode reformular de outro jeito?";
 
 const anthropicProvider: NiaProvider = async (input) => {
   const messages: AnthropicMessage[] = [
@@ -179,7 +196,7 @@ const anthropicProvider: NiaProvider = async (input) => {
       body: JSON.stringify({
         model: input.modelo,
         max_tokens: input.maxTokens,
-        temperature: input.temperature,
+        ...(anthropicSemSampling(input.modelo) ? {} : { temperature: input.temperature }),
         system: systemPayload,
         tools: toolsPayload,
         messages,
@@ -206,6 +223,7 @@ const anthropicProvider: NiaProvider = async (input) => {
       (b): b is AnthropicToolUseBlock => b.type === "tool_use",
     );
     if (textBlocks.length > 0) textoFinal = textBlocks.map((b) => b.text).join("\n").trim();
+    if (data.stop_reason === "refusal" && !textoFinal) textoFinal = TEXTO_RECUSA;
 
     if (data.stop_reason !== "tool_use" || toolBlocks.length === 0) {
       if (data.stop_reason === "max_tokens" && toolBlocks.length > 0) throw new Error(ERRO_TRUNCADO);
@@ -547,7 +565,7 @@ const anthropicStream: NiaStreamProvider = async (input, cb) => {
       body: JSON.stringify({
         model: input.modelo,
         max_tokens: input.maxTokens,
-        temperature: input.temperature,
+        ...(anthropicSemSampling(input.modelo) ? {} : { temperature: input.temperature }),
         system: systemPayload,
         tools: toolsPayload,
         messages,
@@ -563,7 +581,19 @@ const anthropicStream: NiaStreamProvider = async (input, cb) => {
     const decoder = new TextDecoder();
     let buffer = "";
     let stopReason = "";
-    const blocks = new Map<number, { type: string; text?: string; id?: string; name?: string; json?: string }>();
+    const blocks = new Map<
+      number,
+      {
+        type: string;
+        text?: string;
+        id?: string;
+        name?: string;
+        json?: string;
+        thinking?: string;
+        signature?: string;
+        data?: string;
+      }
+    >();
 
     let parar = false;
     while (!parar) {
@@ -594,6 +624,10 @@ const anthropicStream: NiaStreamProvider = async (input, cb) => {
             blocks.set(ev.index, { type: "tool_use", id: ev.content_block.id, name: ev.content_block.name, json: "" });
           } else if (ev.content_block?.type === "text") {
             blocks.set(ev.index, { type: "text", text: "" });
+          } else if (ev.content_block?.type === "thinking") {
+            blocks.set(ev.index, { type: "thinking", thinking: "", signature: "" });
+          } else if (ev.content_block?.type === "redacted_thinking") {
+            blocks.set(ev.index, { type: "redacted_thinking", data: ev.content_block.data ?? "" });
           }
         } else if (ev.type === "content_block_delta" && ev.index != null) {
           const b = blocks.get(ev.index);
@@ -603,6 +637,10 @@ const anthropicStream: NiaStreamProvider = async (input, cb) => {
             cb.onText(ev.delta.text);
           } else if (ev.delta?.type === "input_json_delta" && ev.delta.partial_json != null) {
             if (b) b.json = (b.json ?? "") + ev.delta.partial_json;
+          } else if (ev.delta?.type === "thinking_delta" && ev.delta.thinking) {
+            if (b) b.thinking = (b.thinking ?? "") + ev.delta.thinking;
+          } else if (ev.delta?.type === "signature_delta" && ev.delta.signature) {
+            if (b) b.signature = (b.signature ?? "") + ev.delta.signature;
           }
         } else if (ev.type === "message_delta") {
           if (ev.delta?.stop_reason) stopReason = ev.delta.stop_reason;
@@ -620,15 +658,22 @@ const anthropicStream: NiaStreamProvider = async (input, cb) => {
       if (stopReason === "max_tokens" && [...blocks.values()].some((b) => b.type === "tool_use")) {
         throw new Error(ERRO_TRUNCADO);
       }
+      if (stopReason === "refusal" && !textoFinal) {
+        textoFinal = TEXTO_RECUSA;
+        cb.onText(TEXTO_RECUSA);
+      }
       break;
     }
 
+    // Os blocos de thinking (mesmo com texto vazio — só a assinatura) voltam
+    // intactos e na ordem original, senão a API recusa a continuação do tool-use.
     const ordered = [...blocks.entries()].sort((a, b) => a[0] - b[0]).map(([, b]) => b);
-    const assistantContent = ordered.map((b) =>
-      b.type === "text"
-        ? { type: "text", text: b.text ?? "" }
-        : { type: "tool_use", id: b.id, name: b.name, input: parseJson(b.json) },
-    );
+    const assistantContent = ordered.map((b) => {
+      if (b.type === "thinking") return { type: "thinking", thinking: b.thinking ?? "", signature: b.signature ?? "" };
+      if (b.type === "redacted_thinking") return { type: "redacted_thinking", data: b.data ?? "" };
+      if (b.type === "text") return { type: "text", text: b.text ?? "" };
+      return { type: "tool_use", id: b.id, name: b.name, input: parseJson(b.json) };
+    });
     messages.push({ role: "assistant", content: assistantContent });
 
     const toolResults: unknown[] = [];

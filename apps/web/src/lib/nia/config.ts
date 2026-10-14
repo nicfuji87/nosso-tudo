@@ -19,7 +19,7 @@ export interface NiaConfig {
 
 const FALLBACK: NiaConfig = {
   provedor: "anthropic",
-  modelo: "claude-haiku-4-5",
+  modelo: "claude-haiku-5-5",
   systemPrompt:
     "Você é a Nia, assistente do Nosso Tudo. Fale português do Brasil, de forma breve e clara. " +
     "Use as ferramentas para qualquer dado financeiro; nunca invente. Proponha ações e só execute o que o usuário confirmar.",
