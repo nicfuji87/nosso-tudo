@@ -77,3 +77,9 @@ RPCs: `ml_pins_filtrados` (novos filtros family_id/visual_type/scene/has_text/fi
 `ml_analytics_summary` (+ familias, outbound_por_mil, receita_por_familia), `ml_dashboard_v2()`.
 Agendamentos novos: `refresh_media`, `validate_affiliate_links`, `generate_packages`.
 Índice `ml_job_logs_evento_idx` (`data->>'evento'`, parcial) atende o filtro "Evento do log" em Logs & Erros.
+
+## Páginas (migration `ml07_paginas`)
+
+`ml_paginas`: slug único (`^[a-z0-9-]+$`), produto, link de afiliado (destino do botão, gravado pelo servidor), título,
+resumo, destaques/imagens (jsonb), CTA, status (`draft`/`published`/`paused`), contadores de visitas e cliques.
+RPC `ml_pagina_contar(slug, tipo)` (só service_role; só incrementa página publicada).

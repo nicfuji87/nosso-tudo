@@ -141,3 +141,22 @@ score continua manual e versionado.
 - *Storage*: imagens ficam em `ml-media/creatives/…` e `ml-media/media/…`; a Limpeza remove referências temporárias e,
   depois de `retencao_rejeitados_dias` (Criativos V2), as imagens de variantes rejeitadas que nunca viraram Pin (a linha
   do criativo fica para o histórico).
+
+---
+
+## 10. Páginas para o Pinterest (`/ml/paginas`)
+
+O Pinterest não aceita link do Mercado Livre no Pin. O Pin leva a uma página nossa (`/achados/<slug>`) com foto,
+título, características e o aviso de afiliado; a pessoa clica em "Ver no Mercado Livre". Não há redirecionamento
+automático (o Pinterest proíbe usar redirect para chegar a um site que ele não aceita — ver ADR-ML-023).
+
+**Criar:** Páginas › Nova página → cole o **link de afiliado** e o **link do produto** (a página do anúncio,
+`…/p/MLB…` ou `produto.mercadolivre.com.br/MLB-…`). O link do produto é obrigatório quando o link de afiliado é curto
+(`meli.la`), porque ele leva à sua vitrine e não ao anúncio. Se o produto já tem esse link cadastrado no app, basta o
+link de afiliado. Atalho: Produto › Link de afiliado › "Criar página do produto".
+**Usar:** copie a URL e cole no campo **Link** do Pin. Nos criativos, o editor mostra "Link do Pin" já com essa URL.
+**Revisar:** Páginas › Editar: título, resumo (opcional), destaques, fotos (a primeira é a capa) e texto do botão.
+Não escreva preço nem prazo — mudam no Mercado Livre.
+**Pausar:** a página continua no ar dizendo "não está mais disponível", sem o botão (o Pin não quebra).
+**Domínio próprio (recomendado):** aponte um domínio da marca para o mesmo projeto na Vercel e defina
+`ML_PAGINAS_BASE_URL=https://<dominio>` — as URLs novas passam a usar esse domínio.

@@ -1,4 +1,6 @@
 import "server-only";
+import { urlPagina } from "@/lib/ml/paginas/regras";
+import { basePaginas } from "@/lib/ml/servicos/paginas";
 import { createClient } from "@/lib/supabase/server";
 import type { AssetRow, BoardRow, CriativoRow, ProdutoRow } from "@/lib/ml/tipos";
 import type { BoardOpcao, CriativoView, ErroPacote, FidelidadeIAView, MetricasView } from "./rotulos";
@@ -111,7 +113,7 @@ export async function carregarCriativos(f: FiltrosCriativos = {}): Promise<Criat
   const linhas = (data ?? []) as CriativoLinha[];
   if (!linhas.length) return [];
 
-  const [assets, produtos, angulos, boards, cenas, pins, links] = await Promise.all([
+  const [assets, produtos, angulos, boards, cenas, pins, links, paginasPub] = await Promise.all([
     porIds<Pick<AssetRow, "id" | "public_url" | "width" | "height">>(
       linhas.map((c) => c.current_asset_id ?? ""),
       (lote) => supabase.from("ml_creative_assets").select("id, public_url, width, height").in("id", lote),
@@ -140,8 +142,13 @@ export async function carregarCriativos(f: FiltrosCriativos = {}): Promise<Criat
       linhas.map((c) => c.product_id),
       (lote) => supabase.from("ml_affiliate_links").select("product_id, affiliate_url").in("product_id", lote).eq("active", true),
     ),
+    porIds<{ product_id: string; slug: string }>(
+      linhas.map((c) => c.product_id),
+      (lote) => supabase.from("ml_paginas").select("product_id, slug").in("product_id", lote).eq("status", "published"),
+    ),
   ]);
   const mLink = new Map(links.map((l) => [l.product_id, l.affiliate_url]));
+  const mPagina = new Map(paginasPub.map((p) => [p.product_id, urlPagina(basePaginas(), p.slug)]));
 
   // Métricas: soma das linhas diárias dos Pins publicados (limitado — é só um resumo no card).
   const publicados = pins.filter((p) => p.status === "published");
@@ -204,7 +211,7 @@ export async function carregarCriativos(f: FiltrosCriativos = {}): Promise<Criat
       created_at: c.created_at,
       updated_at: c.updated_at,
       asset: a ? { id: a.id, public_url: a.public_url, width: a.width, height: a.height } : null,
-      produto: p ? { id: p.id, title: p.title, thumbnail: fotoPrincipal(p), link: mLink.get(p.id) ?? null } : null,
+      produto: p ? { id: p.id, title: p.title, thumbnail: fotoPrincipal(p), link: mLink.get(p.id) ?? null, pagina: mPagina.get(p.id) ?? null } : null,
       angulo: c.angle_id ? mAng.get(c.angle_id) ?? null : null,
       board: c.board_id ? mBoard.get(c.board_id) ?? null : null,
       family_id: c.family_id,

@@ -2554,6 +2554,97 @@ export type Database = {
           },
         ]
       }
+      ml_paginas: {
+        Row: {
+          affiliate_link_id: string | null
+          affiliate_url: string
+          cliques: number
+          created_at: string
+          created_by: string | null
+          cta: string
+          destaques: Json
+          external_id: string | null
+          id: string
+          imagens: Json
+          product_id: string | null
+          product_url: string | null
+          published_at: string | null
+          resumo: string | null
+          slug: string
+          status: string
+          titulo: string
+          ultimo_clique_em: string | null
+          updated_at: string
+          visitas: number
+        }
+        Insert: {
+          affiliate_link_id?: string | null
+          affiliate_url: string
+          cliques?: number
+          created_at?: string
+          created_by?: string | null
+          cta?: string
+          destaques?: Json
+          external_id?: string | null
+          id?: string
+          imagens?: Json
+          product_id?: string | null
+          product_url?: string | null
+          published_at?: string | null
+          resumo?: string | null
+          slug: string
+          status?: string
+          titulo: string
+          ultimo_clique_em?: string | null
+          updated_at?: string
+          visitas?: number
+        }
+        Update: {
+          affiliate_link_id?: string | null
+          affiliate_url?: string
+          cliques?: number
+          created_at?: string
+          created_by?: string | null
+          cta?: string
+          destaques?: Json
+          external_id?: string | null
+          id?: string
+          imagens?: Json
+          product_id?: string | null
+          product_url?: string | null
+          published_at?: string | null
+          resumo?: string | null
+          slug?: string
+          status?: string
+          titulo?: string
+          ultimo_clique_em?: string | null
+          updated_at?: string
+          visitas?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ml_paginas_affiliate_link_id_fkey"
+            columns: ["affiliate_link_id"]
+            isOneToOne: false
+            referencedRelation: "ml_affiliate_links"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ml_paginas_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ml_paginas_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "ml_products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ml_performance_stats: {
         Row: {
           commission: number
@@ -6279,6 +6370,10 @@ export type Database = {
           profile_id: string
           role: string
         }[]
+      }
+      ml_pagina_contar: {
+        Args: { p_slug: string; p_tipo: string }
+        Returns: undefined
       }
       ml_pins_filtrados: {
         Args: { p_filters?: Json }

@@ -111,3 +111,19 @@ board/dia, similaridade visual (dHash) e de headline. Fila atrasada não vira ra
 ### ADR-ML-022 — Templates e presets no banco
 **Decisão:** prompts são `ml_prompt_templates` versionados (um ativo por chave; nova versão desativa a anterior) e
 renderizados com placeholders; a versão (`chave@vN`) é gravada em cada criativo. Presets de cena são linhas editáveis.
+
+### ADR-ML-023 — Página de produto como destino do Pin (sem redirecionamento)
+**Contexto:** o Pinterest recusa links do Mercado Livre no Pin, e as Diretrizes da Comunidade proíbem usar
+redirecionamento para chegar a um site não permitido (e bloqueiam "redirecionamento excessivo ou enganoso"). Uma
+página que só redireciona coloca a conta e o DOMÍNIO em risco de bloqueio. Além disso, o `meli.la` leva à vitrine de
+afiliado (`/social/<usuario>`), não ao anúncio — o ID do produto não sai do link curto.
+**Decisão:** o Pin aponta para `/achados/<slug>`, uma página com conteúdo real (fotos e características do anúncio,
+aviso de afiliado visível) e um botão comum (`<a rel="sponsored">`) que a pessoa clica para ir ao Mercado Livre.
+Nada de meta refresh, 30x ou JS de redirecionamento; o mesmo HTML para pessoas e robôs. O destino do botão é gravado
+pelo servidor (só hosts do ML, validado) — a página nunca lê URL de parâmetro (sem open redirect). `noindex`,
+sem cookies/rastreadores, CSP restrita (sem iframe, sem form, imagens só do CDN do ML e do Storage). Contador de
+visitas/cliques via RPC `security definer` só para páginas publicadas, sem IP nem user agent.
+**Domínio:** `ML_PAGINAS_BASE_URL` permite servir as páginas num domínio próprio da marca; recomendado antes de escalar,
+para que um eventual bloqueio no Pinterest não atinja `nossotudo.com.br`.
+**Consequência:** `criarPin` usa a URL da página publicada como `link` quando existe; `validarPin` aceita página
+publicada como destino. Risco residual: a decisão de aceitar o domínio é do Pinterest — reduzimos o risco, não o zeramos.

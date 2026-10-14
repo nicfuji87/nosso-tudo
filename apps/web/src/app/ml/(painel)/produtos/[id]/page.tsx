@@ -14,6 +14,11 @@ import {
   XCircle,
 } from "lucide-react";
 import { getMlRole, temPapel } from "@/lib/ml/acesso";
+import { urlPagina } from "@/lib/ml/paginas/regras";
+import { basePaginas } from "@/lib/ml/servicos/paginas";
+import { CopiarUrl } from "@/components/ml/paginas/copiar-url";
+import { AcaoBotao } from "@/components/ml/acao-botao";
+import { criarPaginaDoProduto } from "@/app/ml/(painel)/paginas/actions";
 import { lerConfig } from "@/lib/ml/config";
 import { PRODUCT_STATUS_LABEL } from "@/lib/ml/estados";
 import { labelJob } from "@/lib/ml/jobs/tipos";
@@ -220,6 +225,8 @@ export default async function ProdutoPage({
   const p = prodData as ProdutoRow;
   const tz = geral.timezone;
   const podeOperar = temPapel(role, "operator");
+  const { data: paginaRow } = await supabase.from("ml_paginas").select("id, slug, status").eq("product_id", params.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  const paginaProduto = paginaRow as { id: string; slug: string; status: string } | null;
   const fmt = (d: string | null | undefined) => formatarNoFuso(d, tz, { dateStyle: "short", timeStyle: "short" });
   const fmtDia = (d: string | null | undefined) => formatarNoFuso(d, tz, { dateStyle: "short" });
 
@@ -780,6 +787,28 @@ export default async function ProdutoPage({
       <div id="link" className="scroll-mt-20">
         <Secao titulo="Link de afiliado" descricao="Obrigatório para publicar. Validado antes de salvar.">
           <LinkAfiliado productId={p.id} ativo={linkAtivo} historico={linksAntigos} podeOperar={podeOperar} />
+          <div className="mt-4 space-y-2 border-t border-border pt-4">
+            <p className="text-body-sm font-medium">Página para o Pinterest</p>
+            {paginaProduto ? (
+              <>
+                <CopiarUrl url={urlPagina(basePaginas(), paginaProduto.slug)} />
+                <p className="text-caption text-muted-foreground">
+                  {paginaProduto.status === "published" ? "Use esta URL no campo Link do Pin." : "A página não está publicada."}{" "}
+                  <Link href={`/ml/paginas/${paginaProduto.id}`} className="underline">
+                    Editar página
+                  </Link>
+                </p>
+              </>
+            ) : linkAtivo ? (
+              podeOperar && (
+                <AcaoBotao size="sm" variant="secondary" acao={() => criarPaginaDoProduto(p.id)}>
+                  Criar página do produto
+                </AcaoBotao>
+              )
+            ) : (
+              <p className="text-caption text-muted-foreground">Cadastre o link de afiliado para criar a página.</p>
+            )}
+          </div>
         </Secao>
       </div>
 

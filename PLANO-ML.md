@@ -122,4 +122,7 @@ lint, typecheck e `next build`.
   Lacunas conhecidas (não bloqueiam): `regerarCena`/`enviarImagemVariante` não devolvem `jobId` (UI mostra só aviso);
   métricas por família somadas no app (limite 1000 linhas/lote — trocar por RPC se crescer); "Família ativa" em
   Descobertas é consulta por página; coorte sem dimensão headline/board/faixa de preço.
+- **14/10/2026** — Páginas de produto para o Pinterest (`/achados/<slug>`) + criador em `/ml/paginas` (migration `ml07`,
+  ADR-ML-023). O Pin passa a apontar para a página publicada; sem redirecionamento automático. Recomendado: domínio
+  próprio da marca via `ML_PAGINAS_BASE_URL`.
 - **Próximo agente**: ver §6 (deploy, integrações reais) e §7 (item 15: produto real em sandbox).

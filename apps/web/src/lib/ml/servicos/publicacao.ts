@@ -7,6 +7,7 @@ import { enfileirar } from "../jobs/fila";
 import { ErroPermanente } from "../jobs/erros";
 import { ErroApiExterna } from "../http";
 import { validarLinkAfiliado } from "../afiliados/validacao";
+import { ehNossaPagina, urlPaginaDoProduto } from "./paginas";
 import { problemasDeTexto } from "../conteudo/guardrails";
 import { proximoHorarioLivre, type RegrasPublicacao } from "../publicacao/janelas";
 import { avaliarRepeticao, escolherVariante, inicioAposCooldown, type PinExistente, type RegrasRepeticao } from "../publicacao/repeticao";
@@ -217,7 +218,7 @@ export async function criarPin(creativeId: string, o: OpcoesCriarPin = {}): Prom
       title: c.title,
       description: c.description,
       alt_text: c.alt_text,
-      link_url: (link as { affiliate_url: string } | null)?.affiliate_url ?? produto.permalink,
+      link_url: (await urlPaginaDoProduto(produto.id)) ?? (link as { affiliate_url: string } | null)?.affiliate_url ?? produto.permalink,
       media_url: (asset as { public_url: string }).public_url,
       status,
       scheduled_at: scheduledAt?.toISOString() ?? null,
@@ -321,7 +322,7 @@ export async function publicarAgora(pinId: string, ator: Ator = {}): Promise<voi
 export async function editarPin(pinId: string, e: { title?: string; description?: string; alt_text?: string; board_id?: string; link_url?: string }, ator: Ator = {}): Promise<void> {
   const pin = await lerPin(pinId);
   if (!NAO_PUBLICADOS.includes(pin.status as PinStatus)) throw new Error("Só dá para editar Pins ainda não publicados.");
-  if (e.link_url) {
+  if (e.link_url && !ehNossaPagina(e.link_url)) {
     const v = validarLinkAfiliado(e.link_url);
     if (!v.ok) throw new Error(v.erros.join(" "));
     e.link_url = v.url!;
@@ -408,8 +409,16 @@ export async function validarPin(pinId: string, opts: { checarProdutoOnline?: bo
   );
 
   // Link de afiliado
-  const vl = pin.link_url ? validarLinkAfiliado(pin.link_url) : null;
-  add("link_afiliado", Boolean(vl?.ok) || !geral.exigir_link_afiliado, vl?.ok ? "Link de afiliado válido" : `Link inválido ou ausente${vl ? `: ${vl.erros.join(" ")}` : ""}`);
+  // Página própria (destino recomendado: o Pinterest recusa link do ML direto) ou link de afiliado.
+  if (pin.link_url && ehNossaPagina(pin.link_url)) {
+    const slug = pin.link_url.split("/").pop()!;
+    const { data: pag } = await mlDb().from("ml_paginas").select("status").eq("slug", slug).maybeSingle();
+    const publicada = (pag as { status: string } | null)?.status === "published";
+    add("link_afiliado", publicada, publicada ? "Destino: página do produto publicada" : "A página de destino não está publicada");
+  } else {
+    const vl = pin.link_url ? validarLinkAfiliado(pin.link_url) : null;
+    add("link_afiliado", Boolean(vl?.ok) || !geral.exigir_link_afiliado, vl?.ok ? "Link de afiliado válido" : `Link inválido ou ausente${vl ? `: ${vl.erros.join(" ")}` : ""}`);
+  }
 
   // Board e integração
   const { data: board } = pin.board_id ? await mlDb().from("ml_pinterest_boards").select("*").eq("id", pin.board_id).maybeSingle() : { data: null };

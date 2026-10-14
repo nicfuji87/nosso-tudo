@@ -12,6 +12,24 @@ const nextConfig = {
       "/ml/**": ["./node_modules/geist/dist/fonts/geist-sans/*.ttf"],
     },
   },
+  // Páginas públicas de produto (destino do Pin): sem iframe, sem formulário, imagens só de hosts conhecidos.
+  async headers() {
+    return [
+      {
+        source: "/achados/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
+          {
+            key: "Content-Security-Policy",
+            value: "frame-ancestors 'none'; base-uri 'self'; form-action 'none'; object-src 'none'; img-src 'self' data: https://*.mlstatic.com https://*.supabase.co",
+          },
+        ],
+      },
+    ];
+  },
   images: {
     remotePatterns: [
       // Supabase Storage (avatars, signed URLs)
