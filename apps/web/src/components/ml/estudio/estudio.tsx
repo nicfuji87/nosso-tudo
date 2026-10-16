@@ -37,7 +37,7 @@ export function Estudio({
   const escolher = (r: ResultadoBusca) => {
     setEscolhendo(r.id);
     iniciar(async () => {
-      const res = await escolherProduto({ idCatalogo: r.idCatalogo, idAnuncio: r.idAnuncio, link: r.link, vendidos: r.vendidos, avaliacao: r.avaliacao, numAvaliacoes: r.numAvaliacoes });
+      const res = await escolherProduto(r);
       setEscolhendo(null);
       if ("error" in res) {
         toast.error(res.error);

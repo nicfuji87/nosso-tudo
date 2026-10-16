@@ -30,12 +30,12 @@ export interface Integracoes {
   mercadolivre: boolean;
 }
 
+/** Produto do link colado: título/foto (do link ou do catálogo) e, se achado na busca, o resultado completo. */
 export interface ProdutoRef {
-  id: string;
-  tipo?: "PRODUCT" | "USER_PRODUCT" | "ITEM";
   titulo: string;
   imagem: string | null;
   preco: number | null;
+  resultado: ResultadoBusca | null;
 }
 
 export const brl = (n: number | null | undefined) => (n == null ? "—" : n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }));

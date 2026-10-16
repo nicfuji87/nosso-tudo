@@ -31,20 +31,32 @@ export async function lerBusca(buscaId: string) {
 }
 
 /** 2. Produto escolhido: registra e devolve fotos + link de afiliado salvo. */
-export async function escolherProduto(r: Pick<ResultadoBusca, "idCatalogo" | "idAnuncio" | "link" | "vendidos" | "avaliacao" | "numAvaliacoes">) {
-  return executarAcao("operator", async () => {
-    const d = z
-      .object({
-        idCatalogo: mlId,
-        idAnuncio: mlId,
-        link: z.string().url().max(2048).nullable(),
-        vendidos: z.number().nullable(),
-        avaliacao: z.number().nullable(),
-        numAvaliacoes: z.number().nullable(),
-      })
-      .parse(r);
-    return estudio.selecionarProduto(d);
-  });
+const resultadoSchema = z.object({
+  id: z.string().regex(/^MLBU?\d{4,}$/i),
+  idCatalogo: mlId,
+  idAnuncio: mlId,
+  idUsuario: z.string().regex(/^MLBU\d{4,}$/i).nullish(),
+  titulo: z.string().trim().min(3).max(300),
+  imagem: z.string().regex(/^https:\/\/[^/]*mlstatic\.com\//).max(2048).nullable(),
+  link: z.string().regex(/^https:\/\/([a-z0-9-]+\.)*mercadoli(vre|bre)\.com(\.br)?\//i).max(4096).nullable(),
+  preco: z.number().nullable(),
+  precoAnterior: z.number().nullable(),
+  descontoPct: z.number().nullable(),
+  vendidos: z.number().nullable(),
+  avaliacao: z.number().nullable(),
+  numAvaliacoes: z.number().nullable(),
+  freteGratis: z.boolean(),
+  lojaOficial: z.boolean(),
+  internacional: z.boolean(),
+  patrocinado: z.boolean(),
+  marca: z.string().max(200).nullable(),
+  vendedor: z.string().max(200).nullable(),
+  categoriaId: z.string().regex(/^MLB\d+$/).nullable().catch(null),
+  posicao: z.number().nullable(),
+});
+
+export async function escolherProduto(r: ResultadoBusca) {
+  return executarAcao("operator", async () => estudio.selecionarProduto(resultadoSchema.parse(r)));
 }
 
 /** 3. Prompts salvos. */
