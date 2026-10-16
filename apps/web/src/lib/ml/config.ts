@@ -80,6 +80,8 @@ export const configSchemas = {
     janela_duplicacao_dias: z.number().int().min(0).max(365).default(30),
     max_pins_produto_semana: z.number().int().min(1).max(50).default(2),
     exigir_disclosure: z.boolean().default(true),
+    /** Destino do Pin: link de afiliado direto (orgânico) ou a página /achados (necessária para anúncios). */
+    destino_link: z.enum(["afiliado", "pagina"]).default("afiliado"),
   }),
   ia: z.object({
     modelo_texto: z.string().min(1).default("gpt-6-luna"),

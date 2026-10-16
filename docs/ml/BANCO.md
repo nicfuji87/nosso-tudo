@@ -83,3 +83,10 @@ Agendamentos novos: `refresh_media`, `validate_affiliate_links`, `generate_packa
 `ml_paginas`: slug único (`^[a-z0-9-]+$`), produto, link de afiliado (destino do botão, gravado pelo servidor), título,
 resumo, destaques/imagens (jsonb), CTA, status (`draft`/`published`/`paused`), contadores de visitas e cliques.
 RPC `ml_pagina_contar(slug, tipo)` (só service_role; só incrementa página publicada).
+
+## Criar Pin e Desempenho (migration `ml08_estudio_desempenho`)
+
+`ml_estudio_buscas` (termo, status, resultados normalizados do Apify), `ml_estudio_prompts` (prompts salvos, `usos`).
+`ml_pins.creative_id`/`product_id` passam a aceitar nulo para `origem = 'importado'` (Pins feitos fora do app;
+CHECK garante criativo+produto quando `origem = 'app'`). RPC `ml_desempenho(dias)` (jsonb: totais, por board, por
+origem, Pins com métricas). Agendamento `sync_account_pins` (06:30).

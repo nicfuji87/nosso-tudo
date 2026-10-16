@@ -127,3 +127,21 @@ visitas/cliques via RPC `security definer` só para páginas publicadas, sem IP 
 para que um eventual bloqueio no Pinterest não atinja `nossotudo.com.br`.
 **Consequência:** `criarPin` usa a URL da página publicada como `link` quando existe; `validarPin` aceita página
 publicada como destino. Risco residual: a decisão de aceitar o domínio é do Pinterest — reduzimos o risco, não o zeramos.
+
+### ADR-ML-024 — Fluxo simples "Criar Pin" + "Desempenho" (16/10/2026)
+**Contexto:** o dono pediu para simplificar: buscar por palavra-chave/link → escolher produto que vende bem → 3 imagens
+com prompt salvo → textos → publicar; e métricas de TODOS os Pins para decidir o próximo.
+**Decisões:**
+- **Busca pelo Apify** (actor que lê a página de busca do ML): a API oficial não expõe unidades vendidas e o
+  `/products/search` volta sem preço/categoria. O actor traz vendidos, preço, desconto, avaliação, frete grátis, loja
+  oficial, internacional e patrocinado (~20–30 s). Filtros e ordenação rodam no navegador sobre ~50 resultados.
+  Link colado → produto pela API oficial → busca por termos do título ("semelhantes").
+- **Imagens:** um criativo (`ml_creatives`, sem família) com 3 jobs `ESTUDIO_GERAR_IMAGEM` em paralelo, cada um
+  `images/edits` com a foto escolhida como referência. Prompts salvos em `ml_estudio_prompts` (`{produto}`).
+- **Textos:** IA com visão olha a imagem escolhida e escreve título, descrição (com aviso de afiliado), alt text e
+  sugere o board pelo nome.
+- **Link do Pin orgânico = link de afiliado direto** (o Pinterest só recusa link do ML em anúncio pago). A página
+  `/achados` vira destino só se `publicacao.destino_link = "pagina"` (para anúncios).
+- **Pins da conta** (feitos direto no Pinterest) entram em `ml_pins` com `origem = 'importado'` (sem criativo/produto),
+  para a coleta de métricas existente e o Desempenho enxergarem tudo. Telas antigas filtram `origem = 'app'`.
+- Menu: Criar Pin, Pins publicados e Desempenho em cima; o resto em "Avançado" (nada foi removido).

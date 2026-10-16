@@ -77,7 +77,7 @@ async function inserirComSlug(dados: Omit<Database["public"]["Tables"]["ml_pagin
 }
 
 /** Produto do ML pelo ID: usa o que já existe no banco ou busca na API e registra. */
-async function produtoPorId(idMl: { id: string; tipo: "PRODUCT" | "USER_PRODUCT" | "ITEM" }): Promise<string> {
+export async function produtoPorId(idMl: { id: string; tipo: "PRODUCT" | "USER_PRODUCT" | "ITEM" }): Promise<string> {
   const db = mlDb();
   const { data: existente } = await db.from("ml_products").select("id").or(`external_id.eq.${idMl.id},item_id.eq.${idMl.id}`).limit(1).maybeSingle();
   if (existente) return (existente as { id: string }).id;

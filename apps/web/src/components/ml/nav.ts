@@ -10,6 +10,8 @@ import {
   Palette,
   PlugZap,
   ScrollText,
+  Sparkles,
+  TrendingUp,
   Settings2,
   type LucideIcon,
 } from "lucide-react";
@@ -20,20 +22,24 @@ export interface MlNavItem {
   icon: LucideIcon;
   exact?: boolean;
   badge?: "pendencias";
+  /** "principal" = fluxo simples (sempre visível); "avancado" = recolhido. */
+  grupo: "principal" | "avancado";
 }
 
-/** Navegação da área ML (spec §5). */
+/** Navegação da área ML: o fluxo simples em cima, o resto em "Avançado". */
 export const ML_NAV: MlNavItem[] = [
-  { href: "/ml", label: "Dashboard", icon: LayoutDashboard, exact: true },
-  { href: "/ml/pendencias", label: "Pendências", icon: ClipboardList, badge: "pendencias" },
-  { href: "/ml/descobertas", label: "Descobertas", icon: Compass },
-  { href: "/ml/produtos", label: "Produtos", icon: Package },
-  { href: "/ml/criativos", label: "Criativos", icon: Palette },
-  { href: "/ml/publicacoes", label: "Publicações", icon: CalendarClock },
-  { href: "/ml/paginas", label: "Páginas", icon: FileText },
-  { href: "/ml/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/ml/automacoes", label: "Automações", icon: Activity },
-  { href: "/ml/integracoes", label: "Integrações", icon: PlugZap },
-  { href: "/ml/configuracoes", label: "Configurações", icon: Settings2 },
-  { href: "/ml/logs", label: "Logs & Erros", icon: ScrollText },
+  { href: "/ml/estudio", label: "Criar Pin", icon: Sparkles, grupo: "principal" },
+  { href: "/ml/publicacoes", label: "Pins publicados", icon: CalendarClock, grupo: "principal" },
+  { href: "/ml/desempenho", label: "Desempenho", icon: TrendingUp, grupo: "principal" },
+  { href: "/ml", label: "Dashboard", icon: LayoutDashboard, exact: true, grupo: "avancado" },
+  { href: "/ml/pendencias", label: "Pendências", icon: ClipboardList, badge: "pendencias", grupo: "avancado" },
+  { href: "/ml/descobertas", label: "Descobertas", icon: Compass, grupo: "avancado" },
+  { href: "/ml/produtos", label: "Produtos", icon: Package, grupo: "avancado" },
+  { href: "/ml/criativos", label: "Criativos", icon: Palette, grupo: "avancado" },
+  { href: "/ml/paginas", label: "Páginas", icon: FileText, grupo: "avancado" },
+  { href: "/ml/analytics", label: "Analytics", icon: BarChart3, grupo: "avancado" },
+  { href: "/ml/automacoes", label: "Automações", icon: Activity, grupo: "avancado" },
+  { href: "/ml/integracoes", label: "Integrações", icon: PlugZap, grupo: "avancado" },
+  { href: "/ml/configuracoes", label: "Configurações", icon: Settings2, grupo: "avancado" },
+  { href: "/ml/logs", label: "Logs & Erros", icon: ScrollText, grupo: "avancado" },
 ];

@@ -305,6 +305,38 @@ export async function pinsRecentesDoBoard(boardId: string): Promise<PinCriado[]>
   return r.items ?? [];
 }
 
+export interface PinDaConta {
+  id: string;
+  created_at?: string;
+  title?: string | null;
+  description?: string | null;
+  link?: string | null;
+  board_id?: string;
+  media?: { images?: Record<string, { url?: string; width?: number; height?: number }> } | null;
+}
+
+/** Todos os Pins de um board (paginado, com teto de segurança) — usado para importar Pins feitos fora do app. */
+export async function listarPinsDoBoard(boardId: string, maximo = 500): Promise<PinDaConta[]> {
+  const todos: PinDaConta[] = [];
+  let bookmark: string | null = null;
+  for (let i = 0; i < 20 && todos.length < maximo; i++) {
+    const qs = new URLSearchParams({ page_size: "100" });
+    if (bookmark) qs.set("bookmark", bookmark);
+    const r: { items?: PinDaConta[]; bookmark?: string | null } = await api("boards.pins", `/boards/${encodeURIComponent(boardId)}/pins?${qs}`);
+    todos.push(...(r.items ?? []));
+    bookmark = r.bookmark ?? null;
+    if (!bookmark) break;
+  }
+  return todos.slice(0, maximo);
+}
+
+/** Melhor URL de imagem de um Pin (prefere ~600px de largura). */
+export function imagemDoPin(p: PinDaConta): string | null {
+  const imgs = p.media?.images ?? {};
+  for (const k of ["600x", "1200x", "400x300", "originals", "150x150"]) if (imgs[k]?.url) return imgs[k]!.url!;
+  return Object.values(imgs).find((x) => x?.url)?.url ?? null;
+}
+
 export interface MetricasDia {
   date: string;
   data_status?: string;

@@ -2235,6 +2235,104 @@ export type Database = {
           },
         ]
       }
+      ml_estudio_buscas: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          erro: string | null
+          id: string
+          job_id: string | null
+          origem_link: string | null
+          produto_ref: Json | null
+          resultados: Json
+          status: string
+          termo: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          erro?: string | null
+          id?: string
+          job_id?: string | null
+          origem_link?: string | null
+          produto_ref?: Json | null
+          resultados?: Json
+          status?: string
+          termo: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          erro?: string | null
+          id?: string
+          job_id?: string | null
+          origem_link?: string | null
+          produto_ref?: Json | null
+          resultados?: Json
+          status?: string
+          termo?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ml_estudio_buscas_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ml_estudio_buscas_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "ml_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ml_estudio_prompts: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          nome: string
+          texto: string
+          ultimo_uso: string | null
+          updated_at: string
+          usos: number
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          nome: string
+          texto: string
+          ultimo_uso?: string | null
+          updated_at?: string
+          usos?: number
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          nome?: string
+          texto?: string
+          ultimo_uso?: string | null
+          updated_at?: string
+          usos?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ml_estudio_prompts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ml_feedback: {
         Row: {
           created_at: string
@@ -2742,7 +2840,7 @@ export type Database = {
           board_section_id: string | null
           created_at: string
           created_by: string | null
-          creative_id: string
+          creative_id: string | null
           description: string | null
           duplicated_from: string | null
           environment: string | null
@@ -2754,7 +2852,8 @@ export type Database = {
           last_error: string | null
           link_url: string | null
           media_url: string | null
-          product_id: string
+          origem: string
+          product_id: string | null
           published_at: string | null
           scheduled_at: string | null
           status: string
@@ -2774,7 +2873,7 @@ export type Database = {
           board_section_id?: string | null
           created_at?: string
           created_by?: string | null
-          creative_id: string
+          creative_id?: string | null
           description?: string | null
           duplicated_from?: string | null
           environment?: string | null
@@ -2786,7 +2885,8 @@ export type Database = {
           last_error?: string | null
           link_url?: string | null
           media_url?: string | null
-          product_id: string
+          origem?: string
+          product_id?: string | null
           published_at?: string | null
           scheduled_at?: string | null
           status?: string
@@ -2806,7 +2906,7 @@ export type Database = {
           board_section_id?: string | null
           created_at?: string
           created_by?: string | null
-          creative_id?: string
+          creative_id?: string | null
           description?: string | null
           duplicated_from?: string | null
           environment?: string | null
@@ -2818,7 +2918,8 @@ export type Database = {
           last_error?: string | null
           link_url?: string | null
           media_url?: string | null
-          product_id?: string
+          origem?: string
+          product_id?: string | null
           published_at?: string | null
           scheduled_at?: string | null
           status?: string
@@ -6351,6 +6452,7 @@ export type Database = {
       ml_cron_tick: { Args: never; Returns: undefined }
       ml_dashboard: { Args: never; Returns: Json }
       ml_dashboard_v2: { Args: never; Returns: Json }
+      ml_desempenho: { Args: { p_dias?: number }; Returns: Json }
       ml_faixa_preco: { Args: { p: number }; Returns: string }
       ml_has_role: { Args: { p_min: string }; Returns: boolean }
       ml_integration_try_lock: {

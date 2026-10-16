@@ -25,10 +25,15 @@ import type { CtxJob } from "../jobs/executor";
 type Ator = { actorId?: string | null; actorType?: "user" | "system" | "automation" };
 const NAO_PUBLICADOS: PinStatus[] = ["draft", "pending_approval", "scheduled", "blocked", "paused", "failed"];
 
-export async function lerPin(id: string): Promise<PinRow> {
+/** Pin criado pelo app (tem criativo e produto). Pins importados da conta só entram no Desempenho. */
+type PinApp = PinRow & { creative_id: string; product_id: string };
+
+export async function lerPin(id: string): Promise<PinApp> {
   const { data } = await mlDb().from("ml_pins").select("*").eq("id", id).maybeSingle();
   if (!data) throw new ErroPermanente("Pin não encontrado.");
-  return data as PinRow;
+  const pin = data as PinRow;
+  if (!pin.creative_id || !pin.product_id) throw new ErroPermanente("Este Pin foi importado da conta do Pinterest — gerencie-o direto no Pinterest.");
+  return pin as PinApp;
 }
 
 export async function mudarStatusPin(id: string, para: PinStatus, opts: Ator & { motivo?: string | null; patch?: Partial<PinRow>; de?: PinStatus } = {}): Promise<void> {
@@ -219,7 +224,10 @@ export async function criarPin(creativeId: string, o: OpcoesCriarPin = {}): Prom
       title: c.title,
       description: c.description,
       alt_text: c.alt_text,
-      link_url: (await urlPaginaDoProduto(produto.id)) ?? (link as { affiliate_url: string } | null)?.affiliate_url ?? produto.permalink,
+      link_url:
+        (pub.destino_link === "pagina" ? await urlPaginaDoProduto(produto.id) : null) ??
+        (link as { affiliate_url: string } | null)?.affiliate_url ??
+        produto.permalink,
       media_url: (asset as { public_url: string }).public_url,
       status,
       scheduled_at: scheduledAt?.toISOString() ?? null,
@@ -570,7 +578,7 @@ export async function publicarPin(pinId: string, ctx: CtxJob): Promise<Record<st
   }
 }
 
-async function marcarPublicado(pin: PinRow, externalId: string, ctx: CtxJob): Promise<void> {
+async function marcarPublicado(pin: PinApp, externalId: string, ctx: CtxJob): Promise<void> {
   const amb = await pinterest.ambiente();
   await mlDb()
     .from("ml_pins")
