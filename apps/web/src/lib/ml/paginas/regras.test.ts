@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { destaquesDosAtributos, ehUrlPagina, extrairIdMl, gerarSlug, imagemPermitida, slugValido, urlPagina } from "./regras";
+import { destaquesDosAtributos, ehUrlPagina, extrairIdMl, extrairIdsMl, gerarSlug, imagemPermitida, slugValido, tituloDoLink, urlPagina } from "./regras";
 
 describe("páginas de produto — regras", () => {
   it("gera slug legível, sem acento e com sufixo", () => {
@@ -51,5 +51,14 @@ describe("páginas de produto — regras", () => {
     expect(ehUrlPagina(u, base)).toBe(true);
     expect(ehUrlPagina("https://outro.com/achados/kit-potes-a7k2", base)).toBe(false);
     expect(ehUrlPagina("https://nossotudo.com.br/achados/../app", base)).toBe(false);
+  });
+
+  it("extrai todos os IDs e o título de um link de user product", () => {
+    const u =
+      "https://www.mercadolivre.com.br/kit-5-conjunto-acessorios-suporte-banheiro-lavabo-inox-304/up/MLBU3398761105?pdp_filters=item_id%3AMLB5664882512&matt_tool_id=1#polycard_client=x&wid=MLB5664882512&sid=recos";
+    expect(extrairIdsMl(u)).toEqual({ catalogo: null, usuario: "MLBU3398761105", anuncios: ["MLB5664882512"] });
+    expect(tituloDoLink(u)).toBe("kit 5 conjunto acessorios suporte banheiro lavabo inox 304");
+    expect(tituloDoLink("https://produto.mercadolivre.com.br/MLB-3456789012-kit-potes-vidro-_JM")).toBe("kit potes vidro");
+    expect(extrairIdsMl("https://www.mercadolivre.com.br/x/p/MLB63904966").catalogo).toBe("MLB63904966");
   });
 });

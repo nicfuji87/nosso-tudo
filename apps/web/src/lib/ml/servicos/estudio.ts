@@ -11,11 +11,12 @@ import * as apify from "../integracoes/apify";
 import * as openai from "../integracoes/openai";
 import * as pinterest from "../integracoes/pinterest";
 import { validarLinkAfiliado } from "../afiliados/validacao";
-import { baixarImagem, salvarAsset } from "../media/storage";
+import { baixarImagem, salvarAsset, variante } from "../media/storage";
 import { comDisclosure, LIMITES_PIN } from "../conteudo/guardrails";
-import { extrairIdMl, imagemPermitida } from "../paginas/regras";
-import { normalizarResultados, termoDoTitulo, type ResultadoBusca } from "../estudio/busca";
+import { extrairIdsMl, imagemPermitida, tituloDoLink } from "../paginas/regras";
+import { acharDoLink, normalizarResultados, termoDoTitulo, type ResultadoBusca } from "../estudio/busca";
 import { hostsImagemExtras, produtoPorId } from "./paginas";
+import { registrarObservacao } from "./produtos";
 import { verificarRedirecionamento, salvarLinkAfiliado } from "./afiliados";
 import { mudarStatusCriativo } from "./criativos";
 import { criarPin } from "./publicacao";
@@ -42,16 +43,31 @@ export async function iniciarBusca(entrada: string, ator: Ator = {}): Promise<{ 
     const v = validarLinkAfiliado(bruto);
     if (!v.url || v.erros.some((e) => e.startsWith("Domínio"))) throw new Error("Esse link não é do Mercado Livre.");
     origemLink = v.url;
-    let id = extrairIdMl(v.url);
-    if (!id && (v.tipo === "curto" || v.tipo === "curto_oficial")) {
+    let destino = v.url;
+    if (v.tipo === "curto" || v.tipo === "curto_oficial") {
       const r = await verificarRedirecionamento(v.url);
-      id = extrairIdMl(r.destino);
+      if (r.destino) destino = r.destino;
     }
-    if (!id) throw new Error("Não deu para identificar o produto. Cole o link da página do anúncio (…/p/MLB… ou produto.mercadolivre.com.br/MLB-…). Links meli.la levam à sua vitrine, não ao produto.");
-    const p = await ml.resolverProduto(id.id, id.tipo);
-    if (!p) throw new Error("Não consegui ler esse produto na API do Mercado Livre.");
-    termo = termoDoTitulo(p.title);
-    produtoRef = { id: id.id, tipo: id.tipo, titulo: p.title, imagem: p.pictures[0]?.url ?? p.thumbnail, preco: p.price };
+    const ids = extrairIdsMl(destino);
+    // A API do ML só deixa ler produto de CATÁLOGO de terceiros (anúncio e user product dão 403):
+    // o título vem do catálogo quando dá, senão do próprio link.
+    let titulo: string | null = null;
+    let imagem: string | null = null;
+    let preco: number | null = null;
+    if (ids.catalogo) {
+      const p = await ml.resolverProduto(ids.catalogo, "PRODUCT").catch(() => null);
+      if (p) {
+        titulo = p.title;
+        imagem = p.pictures[0]?.url ?? p.thumbnail;
+        preco = p.price;
+      }
+    }
+    titulo ??= tituloDoLink(destino);
+    if (!titulo || (!ids.catalogo && !ids.usuario && !ids.anuncios.length)) {
+      throw new Error("Não deu para identificar o produto. Cole o link da página do anúncio no Mercado Livre (links meli.la levam à sua vitrine, não ao produto).");
+    }
+    termo = termoDoTitulo(titulo);
+    produtoRef = { ids, titulo, imagem, preco, resultado: null };
   }
 
   const db = mlDb();
@@ -87,7 +103,7 @@ export async function iniciarBusca(entrada: string, ator: Ator = {}): Promise<{ 
 /** Handler ESTUDIO_BUSCAR: roda o actor (retomável) e guarda os resultados normalizados. */
 export async function executarBusca(buscaId: string, ctx: CtxJob): Promise<Record<string, unknown>> {
   const db = mlDb();
-  const { data } = await db.from("ml_estudio_buscas").select("termo").eq("id", buscaId).maybeSingle();
+  const { data } = await db.from("ml_estudio_buscas").select("termo, produto_ref").eq("id", buscaId).maybeSingle();
   if (!data) throw new ErroPermanente("Busca não encontrada.");
   if (!(await apify.configurada())) {
     await db.from("ml_estudio_buscas").update({ status: "error", erro: "Conecte o Apify em Integrações para buscar com vendidos e avaliações." }).eq("id", buscaId);
@@ -102,7 +118,13 @@ export async function executarBusca(buscaId: string, ctx: CtxJob): Promise<Recor
       maxItens: 60,
     });
     const resultados = normalizarResultados(itens);
-    await db.from("ml_estudio_buscas").update({ status: "done", resultados: resultados as never, erro: null }).eq("id", buscaId);
+    const patch: Record<string, unknown> = { status: "done", resultados, erro: null };
+    const ref = (data as { produto_ref: { ids?: Parameters<typeof acharDoLink>[1] } | null }).produto_ref;
+    if (ref?.ids) {
+      const achado = acharDoLink(resultados, ref.ids);
+      if (achado) patch.produto_ref = { ...ref, titulo: achado.titulo, imagem: achado.imagem, preco: achado.preco, resultado: achado };
+    }
+    await db.from("ml_estudio_buscas").update(patch as never).eq("id", buscaId);
     return { resultados: resultados.length };
   } catch (e) {
     if (e instanceof Error && e.name === "ErroAguardar") throw e;
@@ -124,11 +146,11 @@ export interface ProdutoEstudio {
 }
 
 /** Registra (ou acha) o produto escolhido e devolve fotos e link de afiliado salvo. */
-export async function selecionarProduto(r: Pick<ResultadoBusca, "idCatalogo" | "idAnuncio" | "link" | "vendidos" | "avaliacao" | "numAvaliacoes">): Promise<ProdutoEstudio> {
-  const alvo = r.idCatalogo ? { id: r.idCatalogo, tipo: "PRODUCT" as const } : r.idAnuncio ? { id: r.idAnuncio, tipo: "ITEM" as const } : null;
-  if (!alvo) throw new Error("Produto sem identificação do Mercado Livre.");
-  const productId = await produtoPorId(alvo);
+export async function selecionarProduto(r: ResultadoBusca): Promise<ProdutoEstudio> {
   const db = mlDb();
+  let productId: string | null = null;
+  if (r.idCatalogo) productId = await produtoPorId({ id: r.idCatalogo, tipo: "PRODUCT" }).catch(() => null);
+  if (!productId) productId = await produtoDaBusca(r);
   // Sinais da busca (o ML não expõe vendidos na API oficial).
   const patch: Record<string, unknown> = {};
   if (r.vendidos != null) patch.sold_quantity = Math.round(r.vendidos);
@@ -136,6 +158,50 @@ export async function selecionarProduto(r: Pick<ResultadoBusca, "idCatalogo" | "
   if (r.numAvaliacoes != null) patch.reviews_count = Math.round(r.numAvaliacoes);
   if (Object.keys(patch).length) await db.from("ml_products").update(patch).eq("id", productId);
   return lerProdutoEstudio(productId, r.link);
+}
+
+/**
+ * Produto sem catálogo (anúncio/user product de terceiro): a API do ML recusa a leitura (403),
+ * então o produto é registrado com os dados da própria busca.
+ */
+async function produtoDaBusca(r: ResultadoBusca): Promise<string> {
+  const externalId = r.idAnuncio ?? r.idUsuario ?? r.id;
+  const { data: existente } = await mlDb()
+    .from("ml_products")
+    .select("id")
+    .or([`external_id.eq.${externalId}`, r.idAnuncio ? `item_id.eq.${r.idAnuncio}` : null].filter(Boolean).join(","))
+    .limit(1)
+    .maybeSingle();
+  if (existente) return (existente as { id: string }).id;
+  const p: ml.ProdutoML = {
+    externalId,
+    externalType: r.idAnuncio ? "item" : "user_product",
+    itemId: r.idAnuncio,
+    catalogProductId: r.idCatalogo,
+    title: r.titulo,
+    permalink: r.link,
+    categoryId: r.categoriaId,
+    domainId: null,
+    brand: r.marca,
+    thumbnail: r.imagem,
+    pictures: r.imagem ? [{ url: r.imagem }] : [],
+    attributes: [],
+    description: null,
+    price: r.preco,
+    originalPrice: r.precoAnterior,
+    currency: "BRL",
+    available: true,
+    availabilityReason: null,
+    condition: null,
+    freeShipping: r.freteGratis,
+    seller: null,
+    soldQuantity: r.vendidos,
+    fonteParcial: true,
+  };
+  // ml_products.category_id é FK: garante a categoria (o nome vem depois, na sincronização).
+  if (r.categoriaId) await mlDb().from("ml_categories").upsert({ id: r.categoriaId, name: r.categoriaId }, { onConflict: "id", ignoreDuplicates: true });
+  const reg = await registrarObservacao(p, { fonte: "manual", categoriaId: r.categoriaId });
+  return reg.id;
 }
 
 export async function lerProdutoEstudio(productId: string, linkProduto?: string | null): Promise<ProdutoEstudio> {
@@ -238,7 +304,8 @@ export async function gerarUmaImagem(creativeId: string, indice: number, ctx: Ct
   const c = data as { image_prompt: string | null; reference_image_url: string | null; status: string } | null;
   if (!c?.image_prompt || !c.reference_image_url) throw new ErroPermanente("Criativo sem prompt ou referência.");
   const ia = await lerConfig("ia");
-  const ref = await baixarImagem(c.reference_image_url);
+  // mlstatic serve a mesma foto em JPG (mais compatível como referência que o WEBP).
+  const ref = await baixarImagem(variante(c.reference_image_url)).catch(() => baixarImagem(c.reference_image_url!));
   await ctx.log("info", `Gerando imagem ${indice}/${IMAGENS_POR_VEZ}`, { evento: "imagem_gerada" });
   const g = await openai.gerarImagem({ modelo: ia.modelo_imagem, prompt: c.image_prompt, qualidade: ia.qualidade_imagem, referencias: [ref] });
   const a = await salvarAsset({ creativeId, bytes: g.bytes, modo: "api", prompt: c.image_prompt, modelo: g.modelo, kind: "final" });

@@ -232,37 +232,13 @@ export function PassoBusca({
             <p className="text-caption text-muted-foreground">Produto do link · buscando semelhantes por “{termo}”</p>
             <p className="truncate text-body-sm font-medium">{ref.titulo}</p>
           </div>
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={!podeEditar || !!escolhendo}
-            onClick={() =>
-              aoEscolher({
-                id: ref.id,
-                idCatalogo: ref.tipo === "ITEM" ? null : ref.id,
-                idAnuncio: ref.tipo === "ITEM" ? ref.id : null,
-                titulo: ref.titulo,
-                imagem: ref.imagem,
-                link: null,
-                preco: ref.preco,
-                precoAnterior: null,
-                descontoPct: null,
-                vendidos: null,
-                avaliacao: null,
-                numAvaliacoes: null,
-                freteGratis: false,
-                lojaOficial: false,
-                internacional: false,
-                patrocinado: false,
-                marca: null,
-                vendedor: null,
-                categoriaId: null,
-                posicao: null,
-              })
-            }
-          >
-            {escolhendo === ref.id && <Loader2 className="animate-spin" />} Usar este
-          </Button>
+          {ref.resultado ? (
+            <Button size="sm" variant="secondary" disabled={!podeEditar || !!escolhendo} onClick={() => aoEscolher(ref.resultado!)}>
+              {escolhendo === ref.resultado.id && <Loader2 className="animate-spin" />} Usar este
+            </Button>
+          ) : (
+            <span className="max-w-40 text-right text-caption text-muted-foreground">Não apareceu na busca — escolha um semelhante abaixo.</span>
+          )}
         </div>
       )}
 

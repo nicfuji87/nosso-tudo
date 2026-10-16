@@ -9,6 +9,8 @@ export interface ResultadoBusca {
   id: string;
   idCatalogo: string | null;
   idAnuncio: string | null;
+  /** "User product" (MLBU…) — o mesmo produto vendido em vários anúncios do mesmo vendedor. */
+  idUsuario?: string | null;
   titulo: string;
   imagem: string | null;
   link: string | null;
@@ -47,6 +49,11 @@ function idMl(v: unknown): string | null {
   return s && /^MLB\d{4,}$/i.test(s) ? s.toUpperCase() : null;
 }
 
+function idUsuarioMl(v: unknown): string | null {
+  const s = texto(v);
+  return s && /^MLBU\d{4,}$/i.test(s) ? s.toUpperCase() : null;
+}
+
 export function normalizarItem(it: Record<string, unknown>): ResultadoBusca | null {
   const titulo = texto(it.eTituloProduto) ?? texto(it.titulo) ?? texto(it.title);
   if (!titulo) return null;
@@ -63,6 +70,7 @@ export function normalizarItem(it: Record<string, unknown>): ResultadoBusca | nu
     id,
     idCatalogo,
     idAnuncio,
+    idUsuario: idUsuarioMl(it.idProdutoUsuario),
     titulo,
     imagem: imagem && /^https:\/\/[^/]*mlstatic\.com\//.test(imagem) ? imagem : null,
     link: link && /^https:\/\/([a-z0-9-]+\.)*mercadoli(vre|bre)\.com(\.br)?\//i.test(link) ? link : null,
@@ -158,4 +166,16 @@ export function formatarVendidos(n: number | null): string {
   if (n == null) return "—";
   if (n >= 1000) return `+${(n / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 0 })} mil vendidos`;
   return `+${n} vendidos`;
+}
+
+/** Acha, nos resultados, o produto de um link colado (por catálogo, user product ou anúncio). */
+export function acharDoLink(lista: ResultadoBusca[], ids: { catalogo: string | null; usuario: string | null; anuncios: string[] }): ResultadoBusca | null {
+  return (
+    lista.find(
+      (r) =>
+        (ids.catalogo && r.idCatalogo === ids.catalogo) ||
+        (ids.usuario && r.idUsuario === ids.usuario) ||
+        (r.idAnuncio && ids.anuncios.includes(r.idAnuncio)),
+    ) ?? null
+  );
 }

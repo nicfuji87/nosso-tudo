@@ -67,6 +67,49 @@ export function extrairIdMl(url: string | null | undefined): IdMl | null {
   return null;
 }
 
+/**
+ * Todos os IDs que um link do ML carrega (catálogo, user product, anúncio — inclusive em
+ * `pdp_filters=item_id:…` e no `#…&wid=…`). A API só deixa ler catálogo de terceiros; os
+ * outros servem para achar o produto nos resultados da busca.
+ */
+export function extrairIdsMl(url: string | null | undefined): { catalogo: string | null; usuario: string | null; anuncios: string[] } {
+  const vazio = { catalogo: null, usuario: null, anuncios: [] as string[] };
+  if (!url) return vazio;
+  let u: URL;
+  try {
+    u = new URL(url.trim());
+  } catch {
+    return vazio;
+  }
+  const caminho = decodeURIComponent(u.pathname);
+  const catalogo = /\/p\/(MLB\d{4,})/i.exec(caminho)?.[1]?.toUpperCase() ?? null;
+  const usuario = /\/up\/(MLBU\d{4,})/i.exec(caminho)?.[1]?.toUpperCase() ?? null;
+  const anuncios = new Set<string>();
+  const hash = new URLSearchParams(u.hash.replace(/^#/, ""));
+  for (const v of [u.searchParams.get("item_id"), u.searchParams.get("wid"), hash.get("wid"), hash.get("item_id")]) {
+    if (v && /^MLB\d{4,}$/i.test(v)) anuncios.add(v.toUpperCase());
+  }
+  const pdp = /item_id:(MLB\d{4,})/i.exec(u.searchParams.get("pdp_filters") ?? "");
+  if (pdp) anuncios.add(pdp[1]!.toUpperCase());
+  const doCaminho = /(?:^|\/)MLB-?(\d{4,})(?:[-_/]|$)/i.exec(caminho);
+  if (doCaminho) anuncios.add(`MLB${doCaminho[1]}`);
+  return { catalogo, usuario, anuncios: [...anuncios] };
+}
+
+/** Título legível a partir do "slug" do link (…/kit-5-suporte-banheiro-inox/up/MLBU…). */
+export function tituloDoLink(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const partes = decodeURIComponent(new URL(url.trim()).pathname).split("/").filter(Boolean);
+    const slug = partes.find((p) => /[a-z]-[a-z]/i.test(p) && !/^MLB/i.test(p)) ?? partes.find((p) => /^MLB-\d+-/i.test(p))?.replace(/^MLB-\d+-/i, "");
+    if (!slug) return null;
+    const t = slug.replace(/-_JM$/i, "").replace(/[-_]+/g, " ").trim();
+    return t.length >= 3 ? t : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Atributos que viram destaques (na ordem de preferência). */
 const ATRIBUTOS_DESTAQUE = [
   "material",

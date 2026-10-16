@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filtrarResultados, formatarVendidos, normalizarItem, normalizarResultados, numeroBr, termoDoTitulo } from "./busca";
+import { acharDoLink, filtrarResultados, formatarVendidos, normalizarItem, normalizarResultados, numeroBr, termoDoTitulo } from "./busca";
 
 const item = (o: Record<string, unknown> = {}) => ({
   eTituloProduto: "Kit 10 Potes Herméticos De Vidro 400ml 4 Travas",
@@ -59,5 +59,13 @@ describe("estúdio — busca", () => {
     expect(termoDoTitulo("Kit 10 Potes De Vidro Hermético 640ml Freezer")).toBe("Potes Vidro Hermético Freezer");
     expect(formatarVendidos(100000)).toBe("+100 mil vendidos");
     expect(formatarVendidos(25)).toBe("+25 vendidos");
+  });
+
+  it("acha o produto do link nos resultados", () => {
+    const l = normalizarResultados([item({ idProdutoCatalogo: "", idPublicacao: "MLB5664882512", idProdutoUsuario: "MLBU3398761105" }), item()]);
+    expect(l[0]!.idUsuario).toBe("MLBU3398761105");
+    expect(acharDoLink(l, { catalogo: null, usuario: "MLBU3398761105", anuncios: [] })!.idAnuncio).toBe("MLB5664882512");
+    expect(acharDoLink(l, { catalogo: null, usuario: null, anuncios: ["MLB5664882512"] })).not.toBeNull();
+    expect(acharDoLink(l, { catalogo: "MLB999999", usuario: null, anuncios: [] })).toBeNull();
   });
 });
