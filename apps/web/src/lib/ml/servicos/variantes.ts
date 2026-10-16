@@ -772,11 +772,21 @@ export async function revalidarPacote(creativeId: string): Promise<ReturnType<ty
   const [geral, pub] = await Promise.all([lerConfig("geral"), lerConfig("publicacao")]);
   const { data: link } = await mlDb().from("ml_affiliate_links").select("affiliate_url, redirect_status").eq("product_id", c.product_id).eq("active", true).maybeSingle();
   const l = link as { affiliate_url: string; redirect_status: string } | null;
+  // "Automático" (board_id vazio) vale: usa o board da família, da categoria ou o padrão — o mesmo do Pin.
+  let boardId = c.board_id;
+  if (!boardId && c.family_id) {
+    const { data: fam } = await mlDb().from("ml_creative_families").select("default_board_id").eq("id", c.family_id).maybeSingle();
+    boardId = (fam as { default_board_id: string | null } | null)?.default_board_id ?? null;
+  }
+  if (!boardId) {
+    const { escolherBoard } = await import("./publicacao");
+    boardId = (await escolherBoard(await lerProduto(c.product_id)))?.id ?? null;
+  }
   const r = validarPacote({
     titulo: c.title,
     descricao: c.description,
     altText: c.alt_text,
-    boardId: c.board_id,
+    boardId,
     linkAfiliado: l?.affiliate_url ?? null,
     redirectStatus: l?.redirect_status ?? null,
     exigirLink: geral.exigir_link_afiliado,

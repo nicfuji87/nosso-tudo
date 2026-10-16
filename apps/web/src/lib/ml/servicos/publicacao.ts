@@ -65,7 +65,8 @@ export async function proximoHorario(desde = new Date()): Promise<Date | null> {
 }
 
 /** Board: escolhido → do criativo → mapeado pela categoria (inclui ancestrais) → padrão. */
-async function escolherBoard(produto: ProdutoRow, boardId?: string | null): Promise<BoardRow | null> {
+/** Board do Pin: o escolhido; senão o mapeado para a categoria do produto; senão o padrão. */
+export async function escolherBoard(produto: ProdutoRow, boardId?: string | null): Promise<BoardRow | null> {
   const db = mlDb();
   if (boardId) {
     const { data } = await db.from("ml_pinterest_boards").select("*").eq("id", boardId).maybeSingle();
