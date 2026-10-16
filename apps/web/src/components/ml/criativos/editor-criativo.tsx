@@ -315,6 +315,7 @@ export function EditorCriativo({
             )}
             {img && pode && <RecorteImagem creativeId={criativo.id} src={img.public_url} aoAplicar={() => setVersao((v) => v + 1)} />}
             <ParaPinterest
+              pagina={criativo.produto?.pagina ?? null}
               link={criativo.produto?.link ?? null}
               produtoId={criativo.product_id}
               campos={[
@@ -562,8 +563,11 @@ export function EditorCriativo({
   );
 }
 
-/** Atalhos para publicar à mão no Pinterest: link de afiliado (destino do Pin) e textos com "Copiar". */
-function ParaPinterest({ link, produtoId, campos }: { link: string | null; produtoId: string; campos: [string, string][] }) {
+/**
+ * Atalhos para publicar à mão no Pinterest. O Pinterest não aceita link do Mercado Livre direto:
+ * o destino do Pin é a página do produto (/achados/…); o link de afiliado fica no botão dela.
+ */
+function ParaPinterest({ pagina, link, produtoId, campos }: { pagina: string | null; link: string | null; produtoId: string; campos: [string, string][] }) {
   const copiar = (rotulo: string, texto: string) =>
     void navigator.clipboard.writeText(texto).then(
       () => toast.success(`${rotulo} copiado.`),
@@ -572,22 +576,30 @@ function ParaPinterest({ link, produtoId, campos }: { link: string | null; produ
   return (
     <div className="space-y-2 rounded-xl border border-border p-3">
       <p className="flex items-center gap-1.5 text-caption font-semibold">
-        <Link2 className="size-3.5" aria-hidden /> Link de afiliado (destino do Pin)
+        <Link2 className="size-3.5" aria-hidden /> Link do Pin
       </p>
-      {link ? (
+      {pagina ? (
         <>
-          <p className="break-all font-mono text-caption text-muted-foreground">{link}</p>
+          <p className="break-all font-mono text-caption text-muted-foreground">{pagina}</p>
           <div className="flex gap-2">
-            <Button type="button" variant="secondary" size="sm" className="flex-1" onClick={() => copiar("Link", link)}>
+            <Button type="button" variant="secondary" size="sm" className="flex-1" onClick={() => copiar("Link", pagina)}>
               <Copy /> Copiar link
             </Button>
             <Button type="button" variant="ghost" size="sm" asChild>
-              <a href={link} target="_blank" rel="noopener noreferrer" aria-label="Abrir link de afiliado">
+              <a href={pagina} target="_blank" rel="noopener noreferrer" aria-label="Abrir a página do produto">
                 <ExternalLink />
               </a>
             </Button>
           </div>
         </>
+      ) : link ? (
+        <p className="text-caption text-warning">
+          O Pinterest não aceita o link do Mercado Livre direto.{" "}
+          <Link href="/ml/paginas" className="underline">
+            Crie a página do produto
+          </Link>{" "}
+          e use a URL dela.
+        </p>
       ) : (
         <p className="text-caption text-warning">
           Produto sem link de afiliado.{" "}

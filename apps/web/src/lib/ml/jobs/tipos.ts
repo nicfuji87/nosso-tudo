@@ -39,6 +39,9 @@ export const JOB_TYPES = [
   "CHECK_CREATIVE_FIDELITY",
   "VALIDATE_AFFILIATE_REDIRECT",
   "ROLLUP_CREATIVE_PERFORMANCE",
+  "ESTUDIO_BUSCAR",
+  "ESTUDIO_GERAR_IMAGEM",
+  "SYNC_ACCOUNT_PINS",
 ] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 
@@ -85,6 +88,9 @@ export const META_JOB: Record<JobType, MetaJob> = {
   CHECK_CREATIVE_FIDELITY: { label: "Checar fidelidade do produto", prioridade: 60, timeoutSeg: 120, maxTentativas: 3 },
   VALIDATE_AFFILIATE_REDIRECT: { label: "Validar redirect dos links", prioridade: 35, timeoutSeg: 180, maxTentativas: 3 },
   ROLLUP_CREATIVE_PERFORMANCE: { label: "Rollup de performance (família/variante)", prioridade: 120, timeoutSeg: 120, maxTentativas: 2 },
+  ESTUDIO_BUSCAR: { label: "Buscar produtos (Estúdio)", prioridade: 10, timeoutSeg: 120, maxTentativas: 3 },
+  ESTUDIO_GERAR_IMAGEM: { label: "Gerar imagem (Estúdio)", prioridade: 10, timeoutSeg: 240, maxTentativas: 2 },
+  SYNC_ACCOUNT_PINS: { label: "Importar Pins da conta", prioridade: 60, timeoutSeg: 240, maxTentativas: 3 },
 };
 
 export function labelJob(tipo: string): string {

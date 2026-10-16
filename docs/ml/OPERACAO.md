@@ -141,3 +141,41 @@ score continua manual e versionado.
 - *Storage*: imagens ficam em `ml-media/creatives/…` e `ml-media/media/…`; a Limpeza remove referências temporárias e,
   depois de `retencao_rejeitados_dias` (Criativos V2), as imagens de variantes rejeitadas que nunca viraram Pin (a linha
   do criativo fica para o histórico).
+
+---
+
+## 10. Páginas para o Pinterest (`/ml/paginas`)
+
+O Pinterest não aceita link do Mercado Livre no Pin. O Pin leva a uma página nossa (`/achados/<slug>`) com foto,
+título, características e o aviso de afiliado; a pessoa clica em "Ver no Mercado Livre". Não há redirecionamento
+automático (o Pinterest proíbe usar redirect para chegar a um site que ele não aceita — ver ADR-ML-023).
+
+**Criar:** Páginas › Nova página → cole o **link de afiliado** e o **link do produto** (a página do anúncio,
+`…/p/MLB…` ou `produto.mercadolivre.com.br/MLB-…`). O link do produto é obrigatório quando o link de afiliado é curto
+(`meli.la`), porque ele leva à sua vitrine e não ao anúncio. Se o produto já tem esse link cadastrado no app, basta o
+link de afiliado. Atalho: Produto › Link de afiliado › "Criar página do produto".
+**Usar:** copie a URL e cole no campo **Link** do Pin. Nos criativos, o editor mostra "Link do Pin" já com essa URL.
+**Revisar:** Páginas › Editar: título, resumo (opcional), destaques, fotos (a primeira é a capa) e texto do botão.
+Não escreva preço nem prazo — mudam no Mercado Livre.
+**Pausar:** a página continua no ar dizendo "não está mais disponível", sem o botão (o Pin não quebra).
+**Domínio próprio (recomendado):** aponte um domínio da marca para o mesmo projeto na Vercel e defina
+`ML_PAGINAS_BASE_URL=https://<dominio>` — as URLs novas passam a usar esse domínio.
+
+---
+
+## 11. Criar Pin e Desempenho (fluxo simples)
+
+**Criar Pin (`/ml/estudio`).**
+1. Digite uma palavra-chave (ou cole o link de um produto do ML) → Buscar (~30 s; usa o Apify). Filtros: preço,
+   vendidos, avaliação, frete grátis, loja oficial, sem internacional, sem patrocinado, palavras que o título precisa ter
+   ou não pode ter, e ordenação. Escolha o produto.
+2. Escolha a foto de referência e o prompt salvo (edite; "Salvar como novo" guarda para a próxima). Gerar 3 imagens
+   (~1 min, em paralelo).
+3. Clique na melhor e em "Usar esta imagem" → a IA escreve título, descrição, alt text e sugere o board.
+4. Revise, cole o link de afiliado (gerado no ML: "Compartilhar" no anúncio, logado como afiliado) e Publicar.
+   O link fica salvo no produto para as próximas vezes.
+
+**Desempenho (`/ml/desempenho`).** "Atualizar dados" importa os Pins da conta (inclusive os feitos direto no
+Pinterest) e coleta 30 dias de métricas (também roda sozinho todo dia às 06:30). Mostra totais, por board, ranking de
+Pins, leituras automáticas e "Próximos Pins" (IA) — cada sugestão abre a busca no Criar Pin.
+O Pinterest leva até 48 h para consolidar métricas de um Pin novo.

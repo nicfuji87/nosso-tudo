@@ -29,7 +29,8 @@ interface Filtravel {
 
 /** Aplica status/produto/board a qualquer query de ml_pins (o builder do PostgREST é estrutural). */
 export function filtrar<T>(q: T, f: FiltrosPin): T {
-  let r = q as unknown as Filtravel;
+  // Pins importados da conta (sem criativo) aparecem só no Desempenho.
+  let r = (q as unknown as Filtravel).eq("origem", "app");
   if (f.status?.length) r = f.status.length === 1 ? r.eq("status", f.status[0]!) : r.in("status", f.status);
   if (f.produto) r = r.eq("product_id", f.produto);
   if (f.board) r = r.eq("board_id", f.board);

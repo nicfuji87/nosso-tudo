@@ -37,6 +37,7 @@ import {
   revalidarPacote,
 } from "../servicos/variantes";
 import { validarRedirectLink, validarRedirectsLote } from "../servicos/afiliados";
+import { executarBusca, gerarUmaImagem, importarPinsDaConta } from "../servicos/estudio";
 import { lerConfig } from "../config";
 import { mlDb } from "../db";
 import { lerIntegracao } from "../integracoes/estado";
@@ -234,6 +235,15 @@ export const HANDLERS: RegistroHandlers = {
   },
   // §15: o rollup diário por família/variante/cena/tipo é o mesmo cálculo de performance (dimensões ampliadas na ml05)
   ROLLUP_CREATIVE_PERFORMANCE: () => calcularPerformance(),
+  ESTUDIO_BUSCAR: async (ctx) => {
+    const p = payload(ctx, z.object({ busca_id: uuid }));
+    return executarBusca(p.busca_id, ctx);
+  },
+  ESTUDIO_GERAR_IMAGEM: async (ctx) => {
+    const p = payload(ctx, z.object({ creative_id: uuid, indice: z.number().int().min(1).max(10) }));
+    return gerarUmaImagem(p.creative_id, p.indice, ctx);
+  },
+  SYNC_ACCOUNT_PINS: async (ctx) => (await exigirIntegracao(ctx, "pinterest", "Pinterest")) ?? importarPinsDaConta(ctx),
   CLEANUP: async (ctx) => {
     const p = payload(ctx, z.object({ retention_days: z.number().int().min(1).max(3650).default(30) }).passthrough());
     return limpar(p.retention_days);

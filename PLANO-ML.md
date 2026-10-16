@@ -122,4 +122,11 @@ lint, typecheck e `next build`.
   Lacunas conhecidas (não bloqueiam): `regerarCena`/`enviarImagemVariante` não devolvem `jobId` (UI mostra só aviso);
   métricas por família somadas no app (limite 1000 linhas/lote — trocar por RPC se crescer); "Família ativa" em
   Descobertas é consulta por página; coorte sem dimensão headline/board/faixa de preço.
+- **14/10/2026** — Páginas de produto para o Pinterest (`/achados/<slug>`) + criador em `/ml/paginas` (migration `ml07`,
+  ADR-ML-023). O Pin passa a apontar para a página publicada; sem redirecionamento automático. Recomendado: domínio
+  próprio da marca via `ML_PAGINAS_BASE_URL`.
+- **16/10/2026** — Simplificação pedida pelo dono: **Criar Pin** (`/ml/estudio`: busca Apify com vendidos e filtros →
+  produto → foto + prompt salvo → 3 imagens → textos por IA → publicar com link de afiliado direto) e **Desempenho**
+  (`/ml/desempenho`: todos os Pins da conta, importados inclusive, leituras + sugestões por IA). Migration `ml08`,
+  ADR-ML-024. Menu: fluxo simples em cima, o resto em "Avançado". Pinterest aprovado e conectado (conta Business).
 - **Próximo agente**: ver §6 (deploy, integrações reais) e §7 (item 15: produto real em sandbox).

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { ArrowLeft, Menu, PauseCircle } from "lucide-react";
+import { ArrowLeft, ChevronDown, Menu, PauseCircle } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { ML_NAV, type MlNavItem } from "./nav";
@@ -12,35 +12,57 @@ function ativo(pathname: string, item: MlNavItem) {
   return item.exact ? pathname === item.href : pathname === item.href || pathname.startsWith(`${item.href}/`);
 }
 
+function ItemNav({ item, pendencias, onNavigate }: { item: MlNavItem; pendencias: number; onNavigate?: () => void }) {
+  const pathname = usePathname();
+  const isAtivo = ativo(pathname, item);
+  return (
+    <Link
+      href={item.href}
+      onClick={onNavigate}
+      aria-current={isAtivo ? "page" : undefined}
+      className={cn(
+        "flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-body-sm font-medium transition-colors",
+        isAtivo ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
+      )}
+    >
+      <span className="flex items-center gap-3">
+        <item.icon className={cn("size-[18px]", isAtivo && "text-tech")} />
+        {item.label}
+      </span>
+      {item.badge === "pendencias" && pendencias > 0 && (
+        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-tech px-1.5 text-overline font-semibold text-tech-foreground">
+          {pendencias > 99 ? "99+" : pendencias}
+        </span>
+      )}
+    </Link>
+  );
+}
+
 function NavLinks({ pendencias, onNavigate }: { pendencias: number; onNavigate?: () => void }) {
   const pathname = usePathname();
+  const principais = ML_NAV.filter((i) => i.grupo === "principal");
+  const avancados = ML_NAV.filter((i) => i.grupo === "avancado");
+  const dentroDoAvancado = avancados.some((i) => ativo(pathname, i));
+  const [abertoManual, setAbertoManual] = useState<boolean | null>(null);
+  const aberto = abertoManual ?? dentroDoAvancado;
   return (
     <nav className="space-y-0.5" aria-label="Navegação da área ML">
-      {ML_NAV.map((item) => {
-        const isAtivo = ativo(pathname, item);
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            onClick={onNavigate}
-            aria-current={isAtivo ? "page" : undefined}
-            className={cn(
-              "flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-body-sm font-medium transition-colors",
-              isAtivo ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
-            )}
-          >
-            <span className="flex items-center gap-3">
-              <item.icon className={cn("size-[18px]", isAtivo && "text-tech")} />
-              {item.label}
-            </span>
-            {item.badge === "pendencias" && pendencias > 0 && (
-              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-tech px-1.5 text-overline font-semibold text-tech-foreground">
-                {pendencias > 99 ? "99+" : pendencias}
-              </span>
-            )}
-          </Link>
-        );
-      })}
+      {principais.map((item) => (
+        <ItemNav key={item.href} item={item} pendencias={pendencias} onNavigate={onNavigate} />
+      ))}
+      <button
+        type="button"
+        onClick={() => setAbertoManual(!aberto)}
+        aria-expanded={aberto}
+        className="mt-3 flex w-full items-center justify-between rounded-xl px-3 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground hover:bg-secondary/60"
+      >
+        Avançado
+        <span className="flex items-center gap-2">
+          {!aberto && pendencias > 0 && <span className="size-2 rounded-full bg-tech" aria-label="Há pendências" />}
+          <ChevronDown className={cn("size-4 transition-transform", aberto && "rotate-180")} aria-hidden />
+        </span>
+      </button>
+      {aberto && avancados.map((item) => <ItemNav key={item.href} item={item} pendencias={pendencias} onNavigate={onNavigate} />)}
     </nav>
   );
 }
@@ -73,7 +95,7 @@ export function MlShell({
     <div className="min-h-dvh bg-background">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-border bg-card/60 backdrop-blur-xl lg:flex">
         <div className="flex h-16 items-center px-5">
-          <Link href="/ml" aria-label="Dashboard ML">
+          <Link href="/ml/estudio" aria-label="Criar Pin">
             {marca}
           </Link>
         </div>
@@ -94,7 +116,7 @@ export function MlShell({
       </aside>
 
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-background/85 px-4 backdrop-blur-xl lg:hidden">
-        <Link href="/ml">{marca}</Link>
+        <Link href="/ml/estudio">{marca}</Link>
         <button
           type="button"
           onClick={() => setAberto(true)}

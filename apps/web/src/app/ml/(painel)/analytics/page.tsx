@@ -152,7 +152,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Se
       supabase.rpc("ml_analytics_summary", { p_from: de, p_to: ate, p_filters: pFilters }),
       supabase.rpc("ml_analytics_breakdown", { p_from: de, p_to: ate, p_dimension: "all", p_filters: pFilters }),
       supabase.from("ml_integrations").select("status, config").eq("provider", "pinterest").maybeSingle(),
-      supabase.from("ml_pins").select("id", { count: "exact", head: true }).eq("status", "published"),
+      supabase.from("ml_pins").select("id", { count: "exact", head: true }).eq("status", "published").eq("origem", "app"),
       supabase.from("ml_categories").select("id, name").eq("tracked", true).order("name").limit(300),
       supabase.from("ml_pinterest_boards").select("id, name").is("removed_at", null).order("name").limit(200),
       filtrosUrl.produto ? supabase.from("ml_products").select("id, title").eq("id", filtrosUrl.produto).maybeSingle() : Promise.resolve({ data: null }),
@@ -161,10 +161,10 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Se
         : Promise.resolve({ data: null }),
       qComissoes.order("period_end", { ascending: false }).limit(200),
       supabase.from("ml_products").select("id, title").in("status", ["published", "scheduled"]).order("title").limit(200),
-      supabase.from("ml_pins").select("id, title, product_id, published_at").eq("status", "published").order("published_at", { ascending: false }).limit(300),
+      supabase.from("ml_pins").select("id, title, product_id, published_at").eq("status", "published").eq("origem", "app").order("published_at", { ascending: false }).limit(300),
       supabase.rpc("ml_analytics_cohort", { p_dias: Number(coorteDias), p_dimension: coortePor, p_filters: pFilters }),
       supabase.from("ml_scene_presets").select("key, name, active, sort").order("sort").order("name").limit(200),
-      supabase.from("ml_pins").select("family_id, creative_id").eq("status", "published").order("published_at", { ascending: false }).limit(1000),
+      supabase.from("ml_pins").select("family_id, creative_id").eq("status", "published").eq("origem", "app").order("published_at", { ascending: false }).limit(1000),
     ]);
 
   const resumo = normalizarResumo(resumoRes.data);

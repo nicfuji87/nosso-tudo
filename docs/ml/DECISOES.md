@@ -111,3 +111,37 @@ board/dia, similaridade visual (dHash) e de headline. Fila atrasada não vira ra
 ### ADR-ML-022 — Templates e presets no banco
 **Decisão:** prompts são `ml_prompt_templates` versionados (um ativo por chave; nova versão desativa a anterior) e
 renderizados com placeholders; a versão (`chave@vN`) é gravada em cada criativo. Presets de cena são linhas editáveis.
+
+### ADR-ML-023 — Página de produto como destino do Pin (sem redirecionamento)
+**Contexto:** o Pinterest recusa links do Mercado Livre no Pin, e as Diretrizes da Comunidade proíbem usar
+redirecionamento para chegar a um site não permitido (e bloqueiam "redirecionamento excessivo ou enganoso"). Uma
+página que só redireciona coloca a conta e o DOMÍNIO em risco de bloqueio. Além disso, o `meli.la` leva à vitrine de
+afiliado (`/social/<usuario>`), não ao anúncio — o ID do produto não sai do link curto.
+**Decisão:** o Pin aponta para `/achados/<slug>`, uma página com conteúdo real (fotos e características do anúncio,
+aviso de afiliado visível) e um botão comum (`<a rel="sponsored">`) que a pessoa clica para ir ao Mercado Livre.
+Nada de meta refresh, 30x ou JS de redirecionamento; o mesmo HTML para pessoas e robôs. O destino do botão é gravado
+pelo servidor (só hosts do ML, validado) — a página nunca lê URL de parâmetro (sem open redirect). `noindex`,
+sem cookies/rastreadores, CSP restrita (sem iframe, sem form, imagens só do CDN do ML e do Storage). Contador de
+visitas/cliques via RPC `security definer` só para páginas publicadas, sem IP nem user agent.
+**Domínio:** `ML_PAGINAS_BASE_URL` permite servir as páginas num domínio próprio da marca; recomendado antes de escalar,
+para que um eventual bloqueio no Pinterest não atinja `nossotudo.com.br`.
+**Consequência:** `criarPin` usa a URL da página publicada como `link` quando existe; `validarPin` aceita página
+publicada como destino. Risco residual: a decisão de aceitar o domínio é do Pinterest — reduzimos o risco, não o zeramos.
+
+### ADR-ML-024 — Fluxo simples "Criar Pin" + "Desempenho" (16/10/2026)
+**Contexto:** o dono pediu para simplificar: buscar por palavra-chave/link → escolher produto que vende bem → 3 imagens
+com prompt salvo → textos → publicar; e métricas de TODOS os Pins para decidir o próximo.
+**Decisões:**
+- **Busca pelo Apify** (actor que lê a página de busca do ML): a API oficial não expõe unidades vendidas e o
+  `/products/search` volta sem preço/categoria. O actor traz vendidos, preço, desconto, avaliação, frete grátis, loja
+  oficial, internacional e patrocinado (~20–30 s). Filtros e ordenação rodam no navegador sobre ~50 resultados.
+  Link colado → produto pela API oficial → busca por termos do título ("semelhantes").
+- **Imagens:** um criativo (`ml_creatives`, sem família) com 3 jobs `ESTUDIO_GERAR_IMAGEM` em paralelo, cada um
+  `images/edits` com a foto escolhida como referência. Prompts salvos em `ml_estudio_prompts` (`{produto}`).
+- **Textos:** IA com visão olha a imagem escolhida e escreve título, descrição (com aviso de afiliado), alt text e
+  sugere o board pelo nome.
+- **Link do Pin orgânico = link de afiliado direto** (o Pinterest só recusa link do ML em anúncio pago). A página
+  `/achados` vira destino só se `publicacao.destino_link = "pagina"` (para anúncios).
+- **Pins da conta** (feitos direto no Pinterest) entram em `ml_pins` com `origem = 'importado'` (sem criativo/produto),
+  para a coleta de métricas existente e o Desempenho enxergarem tudo. Telas antigas filtram `origem = 'app'`.
+- Menu: Criar Pin, Pins publicados e Desempenho em cima; o resto em "Avançado" (nada foi removido).
