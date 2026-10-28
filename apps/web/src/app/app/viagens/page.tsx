@@ -12,7 +12,6 @@ export default async function ViagensPage() {
   return (
     <div className="space-y-6">
       <div className="space-y-1">
-        <h1 className="text-h2 font-semibold tracking-tight">Viagens</h1>
         <p className="max-w-2xl text-body-sm text-muted-foreground">
           Sua carteira de milhas com o custo real de cada uma — o que você de fato pagou, não uma
           estimativa de mercado. É esse número que decide se vale emitir com milha ou pagar em

@@ -342,3 +342,44 @@ em cima de conta errada.
 - Shutdown do Amadeus Self-Service — https://www.phocuswire.com/amadeus-shut-down-self-service-apis-portal-developers
 - SerpApi Google Flights — https://serpapi.com/google-flights-api
 - Duffel (futuro, emissão) — https://duffel.com/docs
+
+---
+
+## 12. Radar de rotas e Promoções do dia — entregue em 28/10/2026
+
+Duas abas novas em `/app/viagens` (gate `isPlatformAdmin`, como o resto do uso do token Pro):
+
+- **Radar de rotas** (`/app/viagens/radar`): rotas fixas (origens → destinos, janela,
+  duração em dias, pessoas, cabine, programas). Toda manhã: Cached Search na ida e na
+  volta, combinação ida + volta dentro da duração (programas podem diferir entre as
+  pernas), custo em R$ pelo milheiro da família, e um snapshot por dia
+  (`viagem_radar_snapshots`) — vira histórico e gráfico. Dinheiro via SerpApi Google
+  Flights a cada 3 dias por rota (plano grátis = 250/mês).
+- **Promoções** (`/app/viagens/promocoes`): origens fixas por workspace. Uma Cached Search
+  por grupo de destino (9/dia, todas as origens juntas, `order_by=lowest_mileage`) →
+  mínimo por rota/programa/mês → gravado em `viagem_precos_historico` (global). É
+  promoção o que estiver ≥ X% abaixo do "preço normal": mediana do histórico próprio
+  (≥ 5 dias) ou, até lá, dos outros meses da mesma rota hoje. Dinheiro: Google Travel
+  Explore, 1 busca por origem por dia.
+- **Aviso no WhatsApp**: 1 resumo/dia pela uazapi da Nia para os números verificados do
+  workspace, só quando há promoção nova ou meta de rota batida. O botão manual não envia.
+
+| Peça | Onde |
+|---|---|
+| Tabelas, RLS, Vault, pg_cron (`viagens-diario`, a cada 5 min 09–11 UTC) | `supabase/migrations/20261028115336_0044_viagem_radar.sql`, `…115513_0045_…controle.sql` |
+| Lógica pura + testes | `lib/viagens/radar-calc.ts`, `promocoes-calc.ts`, `milheiro.ts`, `aeroportos.ts` |
+| Clientes | `lib/viagens/seats-aero.ts` (cota + reserva), `serpapi.ts` (teto mensal), `cambio.ts` |
+| Rotina | `lib/viagens/rotina.ts` ← `app/api/viagens/cron/route.ts` (segredo `viagens/cron/secret`) |
+| Telas | `components/viagens/radar-painel.tsx`, `promocoes-painel.tsx` |
+
+Decisões e limites conhecidos:
+- **Batidas idempotentes**: o pg_cron chama várias vezes; cada batida faz só o pendente do
+  dia com orçamento de tempo. Uma execução completa gasta ~15 chamadas do seats.aero.
+- **Custo do milheiro**: carteira > derivado por transferência (≤ 2 saltos, bônus vigente)
+  > `valor_por_mil_cents` > R$ 25 estimado (a UI marca). Hoje o grafo não tem aresta
+  Livelo → Flying Blue, então Flying Blue cai no estimado.
+- **Taxas**: Qatar, Turkish e Singapore não informam; Smiles costuma vir 0. A UI diz
+  "taxas não informadas" — o custo em R$ fica subestimado nesses casos.
+- **Só itinerário de um programa**: GRU→Doha (Qatar) + Doha→Tóquio não é montado como
+  uma viagem; cadastre um radar por trecho.
+- **LATAM Pass não é coberta** pelo seats.aero.
