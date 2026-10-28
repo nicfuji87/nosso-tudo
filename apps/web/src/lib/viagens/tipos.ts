@@ -70,6 +70,13 @@ export interface TransferenciaViagem {
 export interface SaldoPrograma {
   programaId: string;
   saldo: number;
+  /**
+   * Custo REAL por mil milhas, vindo dos lotes de aquisição (o que a família
+   * de fato pagou). Quando presente, vence a estimativa global do programa —
+   * é a diferença entre "Livelo vale ~R$22/mil no mercado" e "as SUAS Livelo
+   * custaram R$11/mil porque você comprou em promoção com 100% de bônus".
+   */
+  custoPorMilCents?: number | null;
 }
 
 /** O que a emissão custa: N milhas no programa X. */

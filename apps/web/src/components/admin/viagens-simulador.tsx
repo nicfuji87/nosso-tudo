@@ -5,6 +5,7 @@ import {
   ArrowRight,
   BadgeCheck,
   CircleAlert,
+  Coins,
   Layers,
   Route,
   ShieldAlert,
@@ -45,6 +46,7 @@ const ICONE_AVISO: Record<AvisoCaminho["tipo"], typeof ShieldAlert> = {
   bonus_vencendo: TriangleAlert,
   muitos_saltos: Layers,
   sem_valor_referencia: CircleAlert,
+  custo_estimado: Coins,
 };
 
 /** Aviso que compromete a confiança no número vs. aviso que é só contexto. */
