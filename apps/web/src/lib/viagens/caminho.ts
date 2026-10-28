@@ -37,7 +37,9 @@ export type TipoAviso =
   | "bonus_expirado"
   | "bonus_vencendo"
   | "muitos_saltos"
-  | "sem_valor_referencia";
+  | "sem_valor_referencia"
+  /** O custo veio da estimativa global do programa, não dos lotes da família. */
+  | "custo_estimado";
 
 export interface AvisoCaminho {
   tipo: TipoAviso;
@@ -316,6 +318,8 @@ function montarCaminho(
   necessario: number,
   nomes: Map<string, string>,
   hoje: string,
+  /** Custo real por mil vindo dos lotes. Ausente = cai na estimativa global. */
+  custoRealPorMilCents?: number | null,
 ): CaminhoMilhas | null {
   // Quanto realmente precisa sair da origem para entregar o alvo. Se nem o
   // saldo inteiro dá conta, o caminho ainda serve para a combinação — por isso
@@ -351,14 +355,23 @@ function montarCaminho(
   }
 
   const avisos = avisosDaRota(rota, nomes, hoje);
-  const custoEstimadoCents =
-    origem.valorPorMilCents != null
-      ? Math.round((consumido / 1000) * origem.valorPorMilCents)
-      : null;
+
+  // O que a família REALMENTE pagou vence a estimativa de mercado. Só cai no
+  // `valorPorMilCents` do programa quando não há lote nenhum de onde tirar a
+  // base de custo (ex.: simular um programa em que ainda não se tem milha).
+  const porMil = custoRealPorMilCents ?? origem.valorPorMilCents;
+  const custoEstimadoCents = porMil != null ? Math.round((consumido / 1000) * porMil) : null;
+  const custoReal = custoRealPorMilCents != null;
+
   if (custoEstimadoCents === null && rota.length > 0) {
     avisos.push({
       tipo: "sem_valor_referencia",
-      mensagem: `${origem.nome} não tem valor de referência cadastrado, então este caminho não entra na comparação por custo em reais.`,
+      mensagem: `${origem.nome} não tem custo conhecido (nenhum lote na carteira, nem valor de referência), então este caminho não entra na comparação por custo em reais.`,
+    });
+  } else if (!custoReal && rota.length > 0) {
+    avisos.push({
+      tipo: "custo_estimado",
+      mensagem: `O custo de ${origem.nome} é uma estimativa de mercado, não o que você pagou. Importe o extrato do programa para a conta ficar real.`,
     });
   }
 
@@ -448,7 +461,8 @@ export function calcularCaminhos(entrada: EntradaCalculo): ResultadoCaminhos {
   }
 
   const saldos = entrada.saldos.filter((s) => s.saldo > 0 && porId.has(s.programaId));
-  const saldoNoAlvo = saldos.find((s) => s.programaId === alvo.programaId)?.saldo ?? 0;
+  const noAlvo = saldos.find((s) => s.programaId === alvo.programaId);
+  const saldoNoAlvo = noAlvo?.saldo ?? 0;
 
   const caminhos: CaminhoMilhas[] = [];
 
@@ -456,6 +470,7 @@ export function calcularCaminhos(entrada: EntradaCalculo): ResultadoCaminhos {
   // caminho quando cobre — nada a transferir, nada a arriscar.
   if (saldoNoAlvo > 0) {
     const usado = Math.min(saldoNoAlvo, alvo.milhas);
+    const porMil = noAlvo?.custoPorMilCents ?? alvoPrograma.valorPorMilCents;
     caminhos.push({
       origemId: alvoPrograma.id,
       origemNome: alvoPrograma.nome,
@@ -468,10 +483,7 @@ export function calcularCaminhos(entrada: EntradaCalculo): ResultadoCaminhos {
       cobreSozinho: saldoNoAlvo >= alvo.milhas,
       prazoDiasMin: 0,
       prazoDiasMax: 0,
-      custoEstimadoCents:
-        alvoPrograma.valorPorMilCents != null
-          ? Math.round((usado / 1000) * alvoPrograma.valorPorMilCents)
-          : null,
+      custoEstimadoCents: porMil != null ? Math.round((usado / 1000) * porMil) : null,
       avisos: [],
     });
   }
@@ -485,7 +497,15 @@ export function calcularCaminhos(entrada: EntradaCalculo): ResultadoCaminhos {
     const rotas = enumerarRotas(s.programaId, alvo.programaId, porOrigem, maxSaltos);
     const daOrigem: CaminhoMilhas[] = [];
     for (const rota of rotas) {
-      const c = montarCaminho(rota, origem, s.saldo, alvo.milhas, nomes, hoje);
+      const c = montarCaminho(
+        rota,
+        origem,
+        s.saldo,
+        alvo.milhas,
+        nomes,
+        hoje,
+        s.custoPorMilCents,
+      );
       if (c) daOrigem.push(c);
     }
     daOrigem.sort(compararCaminhos);
