@@ -106,9 +106,9 @@ object Sync {
     // ------------------------------------------------------------------ HTTP
 
     private fun post(corpo: JSONObject): Pair<Int, JSONObject> {
-        // Trava de ambiente: o build dev nunca fala com produção, e sem URL configurada não envia nada.
-        check(URL_FUNCAO.isNotBlank()) { "ambiente ${BuildConfig.AMBIENTE} sem URL do Supabase (saude.dev.url)" }
-        check(BuildConfig.AMBIENTE == "production" || !URL_FUNCAO.contains("ecwcqooogsvsrddwjavh")) { "build dev apontando para produção" }
+        // Trava de ambiente: cada build só fala com a sua função (o dev nunca grava pela função de produção).
+        val esperado = if (BuildConfig.AMBIENTE == "production") "/saude-relogio" else "/saude-relogio-dev"
+        check(URL_FUNCAO.endsWith(esperado)) { "build ${BuildConfig.AMBIENTE} com URL de outro ambiente" }
         val c = URL(URL_FUNCAO).openConnection() as HttpURLConnection
         try {
             c.requestMethod = "POST"

@@ -1,26 +1,34 @@
-# Supabase de desenvolvimento — Nosso Tudo Saúde
+# Ambiente de desenvolvimento — Nosso Tudo Saúde
 
-Projeto **separado**, no plano Free, só para desenvolver e testar o módulo Saúde.
-Nada daqui roda em produção (`ecwcqooogsvsrddwjavh`).
+Decisão (16/11/2026): o desenvolvimento usa o **mesmo projeto Supabase do Nosso Tudo**
+(`ecwcqooogsvsrddwjavh`). A separação é feita por **workspace de teste + Edge Function própria**,
+não por projeto.
 
 | | production | development |
 |---|---|---|
-| Projeto Supabase | `ecwcqooogsvsrddwjavh` | projeto Free próprio (ref em `apps/saude-android/local.properties` e `apps/web/.env.local` da worktree) |
+| Usuário / workspace | seus workspaces reais | usuário só de teste, workspace com `settings.saude_ambiente = "development"` |
+| Edge Function | `saude-relogio` (v0.3, não muda até a promoção) | `saude-relogio-dev` (recebe as mudanças da v0.4 primeiro) |
 | Relógio | flavor `prod` → `app.nossotudo.saude.wear` ("Saúde NT") | flavor `dev` → `app.nossotudo.saude.wear.dev` ("Saúde NT DEV"), medição automática desligada |
-| Site | Vercel (`NEXT_PUBLIC_APP_ENV=production`) | `next dev` na worktree `nosso-tudo-saude` |
+| Site | Vercel (`NEXT_PUBLIC_APP_ENV=production`) | `next dev` na worktree `nosso-tudo-saude`, logado com o usuário de teste |
 | Dados | reais | **sintéticos** (`seed_saude_sintetico.sql`) |
 
-## Travas contra mistura de ambientes
-- **Relógio:** o build falha se `saude.dev.url` apontar para produção. O app dev não envia nada sem URL configurada e recusa a URL de produção em tempo de execução.
-- **Site:** em development, ações de Saúde que escrevem são bloqueadas se o Supabase configurado for o de produção. A página mostra um selo "DEV".
-- **Banco:** `seed_saude_sintetico.sql` só roda onde existe a marca `public._ambiente = 'development'`, criada por `00_marcar_dev.sql`, que nunca é aplicado em produção.
+## Travas contra mistura
+- **Relógio:** cada flavor só fala com a sua função (checado no build e em tempo de execução).
+- **Edge Function dev:** só aceita relógio vinculado a workspace de teste; senão 403 e o relógio volta a pedir pareamento.
+- **Site:** em development, ações de Saúde só escrevem em workspace de teste. Selo "DEV" na página.
+- **Seed:** só grava no único workspace de teste e aborta se o dono dele também estiver num workspace real.
 
-## Montar o projeto dev (ordem)
-1. Criar o projeto no painel da Supabase (org no plano Free, região São Paulo).
-2. Aplicar `00_marcar_dev.sql`.
-3. Aplicar as migrações de `supabase/migrations/` em ordem (schema base + `saude01_fundacao`).
-4. Deploy da Edge Function `saude-relogio` com `verify_jwt = false`.
-5. Criar um usuário de teste pelo site local (cadastro normal) e o workspace dele.
-6. Aplicar `seed_saude_sintetico.sql`.
+## Regras para mudanças de schema (v0.4 em diante)
+Como o banco é o de produção, toda migração nova:
+1. é apresentada antes (diagnóstico + plano) e só roda com OK;
+2. é **aditiva** (tabela/coluna nova com default) — nada de alterar ou apagar o que a v0.3 usa;
+3. entra no histórico de migrações (`supabase/migrations/`), nunca SQL solto.
 
-Nunca copie para cá: dados reais do relógio, chaves de produção, `.env.local` de produção.
+## Montar (ordem)
+1. Criar um usuário de teste no Nosso Tudo (cadastro normal) e concluir o onboarding → workspace de teste.
+2. Marcar só esse workspace: `settings = settings || '{"saude_ambiente":"development"}'`.
+3. Deploy da Edge Function `saude-relogio-dev` (`verify_jwt = false`).
+4. Rodar `seed_saude_sintetico.sql`.
+5. Instalar o flavor `dev` no relógio e parear com o workspace de teste.
+
+Nunca: copiar dados reais para o workspace de teste, nem parear o relógio dev com um workspace real.

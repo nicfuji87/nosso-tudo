@@ -1,5 +1,3 @@
-import java.util.Properties
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -9,18 +7,13 @@ plugins {
 val temSdkSamsung = file("libs").listFiles { f -> f.name.endsWith(".aar") }?.isNotEmpty() == true
 
 // ---- Ambientes -------------------------------------------------------------------------------
-// prod: Supabase de PRODUÇÃO (dados reais). Mesmo applicationId da v0.3 → atualiza o app instalado.
-// dev : Supabase de DESENVOLVIMENTO (dados sintéticos). Outro applicationId → instala lado a lado,
-//       medição automática DESLIGADA por padrão (dois apps disputando o sensor gastariam bateria).
-// A URL do dev vem de local.properties (saude.dev.url) e o build FALHA se ela apontar para produção.
-val REF_PRODUCAO = "ecwcqooogsvsrddwjavh"
-val URL_PRODUCAO = "https://$REF_PRODUCAO.supabase.co/functions/v1/saude-relogio"
-val propsLocais = Properties().apply {
-    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
-}
-val urlDev: String = (propsLocais.getProperty("saude.dev.url") ?: "").trim()
-require(!urlDev.contains(REF_PRODUCAO)) { "saude.dev.url aponta para o projeto de PRODUÇÃO — corrija local.properties." }
-require(urlDev.isEmpty() || urlDev.startsWith("https://")) { "saude.dev.url precisa ser https://<ref-dev>.supabase.co/functions/v1/saude-relogio" }
+// Os dois usam o MESMO projeto Supabase (o do Nosso Tudo), separados por Edge Function e workspace:
+// prod: função saude-relogio (dados reais). Mesmo applicationId da v0.3 → atualiza o app instalado.
+// dev : função saude-relogio-dev, que só aceita relógios vinculados a um workspace de TESTE.
+//       Outro applicationId (instala lado a lado) e medição automática DESLIGADA por padrão.
+val BASE_FUNCOES = "https://ecwcqooogsvsrddwjavh.supabase.co/functions/v1"
+val URL_PROD = "$BASE_FUNCOES/saude-relogio"
+val URL_DEV = "$BASE_FUNCOES/saude-relogio-dev"
 
 android {
     namespace = "app.nossotudo.saude.wear"
@@ -40,7 +33,7 @@ android {
         create("prod") {
             dimension = "ambiente"
             buildConfigField("String", "AMBIENTE", "\"production\"")
-            buildConfigField("String", "SAUDE_URL", "\"$URL_PRODUCAO\"")
+            buildConfigField("String", "SAUDE_URL", "\"$URL_PROD\"")
             buildConfigField("boolean", "AUTO_PADRAO", "true")
             manifestPlaceholders["rotuloApp"] = "Saúde NT"
         }
@@ -49,7 +42,7 @@ android {
             applicationIdSuffix = ".dev"
             versionNameSuffix = "-dev"
             buildConfigField("String", "AMBIENTE", "\"development\"")
-            buildConfigField("String", "SAUDE_URL", "\"$urlDev\"")
+            buildConfigField("String", "SAUDE_URL", "\"$URL_DEV\"")
             buildConfigField("boolean", "AUTO_PADRAO", "false")
             manifestPlaceholders["rotuloApp"] = "Saúde NT DEV"
         }

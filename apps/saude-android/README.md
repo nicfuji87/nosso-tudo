@@ -29,19 +29,13 @@ JDK: o JBR do Android Studio (`D:\Android Studio\jbr`).
 
 ## Compilar, instalar, coletar
 
-Dois ambientes (flavors), nunca misturados:
+Dois ambientes (flavors) no mesmo projeto Supabase, separados por Edge Function e workspace
+(detalhes em `supabase/dev/README.md`):
 
-| Flavor | App no relógio | Supabase | Medição automática |
+| Flavor | App no relógio | Edge Function | Medição automática |
 |---|---|---|---|
-| `prod` | `app.nossotudo.saude.wear` · "Saúde NT" | produção (dados reais) | ligada |
-| `dev` | `app.nossotudo.saude.wear.dev` · "Saúde NT DEV" | `saude.dev.url` do `local.properties` | desligada |
-
-`local.properties` (não versionado):
-```
-sdk.dir=...
-saude.dev.url=https://<ref-do-projeto-dev>.supabase.co/functions/v1/saude-relogio
-```
-O build falha se `saude.dev.url` apontar para produção; sem ela, o app dev não envia nada.
+| `prod` | `app.nossotudo.saude.wear` · "Saúde NT" | `saude-relogio` (dados reais) | ligada |
+| `dev` | `app.nossotudo.saude.wear.dev` · "Saúde NT DEV" | `saude-relogio-dev` (só workspace de teste) | desligada |
 
 ```powershell
 $env:JAVA_HOME = "D:\Android Studio\jbr"

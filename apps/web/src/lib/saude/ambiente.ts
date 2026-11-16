@@ -1,15 +1,16 @@
-/**
- * Ambientes do módulo Saúde.
- *
- * - production : Supabase de produção (dados reais do relógio). Só o site publicado escreve aqui.
- * - development: Supabase de desenvolvimento (dados sintéticos). É o que `next dev` deve usar.
- *
- * O ambiente vem de NEXT_PUBLIC_APP_ENV; sem ela, `next dev` = development e build = production.
- * Trava: em development, nenhuma ação de Saúde ESCREVE no projeto de produção. Leitura é permitida
- * (o resto do Nosso Tudo continua funcionando localmente contra produção, como hoje).
- */
+import "server-only";
+import { createClient } from "@/lib/supabase/server";
 
-export const REF_PRODUCAO = "ecwcqooogsvsrddwjavh";
+/**
+ * Ambientes do módulo Saúde — os dois no MESMO projeto Supabase (o do Nosso Tudo):
+ *
+ * - production : workspaces reais. Só o site publicado escreve aqui.
+ * - development: um workspace de TESTE (workspaces.settings.saude_ambiente = "development"),
+ *                de um usuário de teste, com dados sintéticos. É o que `next dev` usa para testar.
+ *
+ * O ambiente do site vem de NEXT_PUBLIC_APP_ENV; sem ela, `next dev` = development e build = production.
+ * Trava: em development, ações de Saúde só ESCREVEM em workspace de teste. Leitura é livre.
+ */
 
 export type Ambiente = "production" | "development";
 
@@ -19,22 +20,24 @@ export function ambienteAtual(): Ambiente {
   return process.env.NODE_ENV === "production" ? "production" : "development";
 }
 
-export function supabaseEhProducao(): boolean {
-  return (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").includes(REF_PRODUCAO);
+export async function workspaceDeTeste(workspaceId: string): Promise<boolean> {
+  const supabase = createClient();
+  const { data } = await supabase.from("workspaces").select("settings").eq("id", workspaceId).maybeSingle();
+  const settings = ((data as { settings?: unknown } | null)?.settings ?? {}) as Record<string, unknown>;
+  return settings.saude_ambiente === "development";
 }
 
-/** Retorna uma mensagem de erro se a escrita deve ser bloqueada; `null` se pode escrever. */
-export function bloqueioDeEscrita(): string | null {
-  if (ambienteAtual() === "development" && supabaseEhProducao()) {
-    return "Ambiente de desenvolvimento apontando para a produção: alterações de Saúde estão bloqueadas. Use o Supabase de desenvolvimento.";
-  }
-  return null;
-}
-
-/** Rótulo para o selo da página. */
-export function rotuloAmbiente(): { texto: string; alerta: boolean } | null {
+/** Mensagem de erro se a escrita deve ser bloqueada; `null` se pode escrever. */
+export async function bloqueioDeEscrita(workspaceId: string): Promise<string | null> {
   if (ambienteAtual() === "production") return null;
-  return supabaseEhProducao()
-    ? { texto: "DEV · lendo produção (somente leitura)", alerta: true }
-    : { texto: "DEV · Supabase de desenvolvimento", alerta: false };
+  if (await workspaceDeTeste(workspaceId)) return null;
+  return "Site local (development) em um workspace real: alterações de Saúde estão bloqueadas. Entre com o usuário de teste.";
+}
+
+/** Rótulo para o selo da página (só aparece fora de produção). */
+export async function rotuloAmbiente(workspaceId: string): Promise<{ texto: string; alerta: boolean } | null> {
+  if (ambienteAtual() === "production") return null;
+  return (await workspaceDeTeste(workspaceId))
+    ? { texto: "DEV · workspace de teste (dados sintéticos)", alerta: false }
+    : { texto: "DEV · workspace real — somente leitura", alerta: true };
 }

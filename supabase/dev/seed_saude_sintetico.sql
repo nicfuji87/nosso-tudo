@@ -1,11 +1,11 @@
--- Dados SINTÉTICOS de Saúde para o projeto de desenvolvimento.
+-- Dados SINTÉTICOS de Saúde para o WORKSPACE DE TESTE (no mesmo projeto da produção).
+-- Só grava no único workspace com settings.saude_ambiente = "development"; nunca em workspace real.
 -- Gera 35 dias de batimento por minuto, janelas de VFC noturnas e registros, com cenários conhecidos
 -- para testar os algoritmos:
 --   * treinos seg/qua/sex 07:20–08:20 (FC 120–170, intervalos de descanso);
 --   * um episódio de "desvio" (dias -12 a -10): FC de repouso +6 bpm, RMSSD −35%;
 --   * lacunas (relógio fora do pulso) e minutos com poucas amostras.
 -- Reexecutável: apaga e recria só o dispositivo sintético.
--- Usa o primeiro workspace do banco (crie seu usuário de teste pelo site antes).
 
 DO $$
 DECLARE
@@ -13,16 +13,17 @@ DECLARE
   v_owner UUID;
   v_disp UUID;
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM public._ambiente WHERE nome = 'development') THEN
-    RAISE EXCEPTION 'Este banco não está marcado como development (rode supabase/dev/00_marcar_dev.sql). Abortado.';
+  IF (SELECT count(*) FROM workspaces WHERE settings->>'saude_ambiente' = 'development') <> 1 THEN
+    RAISE EXCEPTION 'É preciso exatamente 1 workspace de teste (settings.saude_ambiente = development). Abortado.';
+  END IF;
+  SELECT id, owner_id INTO v_ws, v_owner FROM workspaces WHERE settings->>'saude_ambiente' = 'development';
+  -- o dono do workspace de teste não pode ser membro de nenhum workspace real
+  IF EXISTS (SELECT 1 FROM workspace_members m JOIN workspaces w ON w.id = m.workspace_id
+             WHERE m.profile_id = v_owner AND coalesce(w.settings->>'saude_ambiente', '') <> 'development') THEN
+    RAISE EXCEPTION 'O dono do workspace de teste também está num workspace real. Use um usuário só de teste. Abortado.';
   END IF;
 
-  SELECT id, owner_id INTO v_ws, v_owner FROM workspaces ORDER BY created_at LIMIT 1;
-  IF v_ws IS NULL THEN
-    RAISE EXCEPTION 'Nenhum workspace. Cadastre um usuário de teste pelo site local primeiro.';
-  END IF;
-
-  DELETE FROM saude_dispositivos WHERE modelo = 'SINTETICO';
+  DELETE FROM saude_dispositivos WHERE modelo = 'SINTETICO' AND workspace_id = v_ws;
 
   -- Segredo de teste conhecido ("relogio-sintetico-dev-somente-teste-0001", 40 caracteres), só existe neste banco.
   INSERT INTO saude_dispositivos (workspace_id, profile_id, nome, modelo, segredo_hash, ultimo_envio_em)

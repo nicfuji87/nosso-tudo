@@ -51,8 +51,8 @@ const ICONE_REGISTRO: Record<string, { icone: typeof HeartPulse; cor: string; ti
 };
 const REGISTRO_PADRAO = { icone: Coffee, cor: "#C9962A", titulo: (r: RegistroSaude) => r.valor };
 
-function SeloAmbiente() {
-  const r = rotuloAmbiente();
+async function SeloAmbiente({ workspaceId }: { workspaceId: string }) {
+  const r = await rotuloAmbiente(workspaceId);
   if (!r) return null;
   return (
     <p className={cn("rounded-lg px-3 py-2 text-caption font-medium", r.alerta ? "bg-warning/15 text-warning" : "bg-info/15 text-info")}>
@@ -69,7 +69,7 @@ export default async function SaudePage() {
   if (p.dispositivos.length === 0) {
     return (
       <div className="space-y-6">
-        <SeloAmbiente />
+        <SeloAmbiente workspaceId={workspace.id} />
         <div className="space-y-1">
           <h1 className="text-h2 font-semibold tracking-tight">Saúde</h1>
           <p className="max-w-2xl text-body-sm text-muted-foreground">
@@ -86,7 +86,7 @@ export default async function SaudePage() {
 
   return (
     <div className="space-y-6">
-      <SeloAmbiente />
+      <SeloAmbiente workspaceId={workspace.id} />
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="space-y-1">
           <h1 className="text-h2 font-semibold tracking-tight">Saúde</h1>

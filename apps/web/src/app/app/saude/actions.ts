@@ -29,13 +29,13 @@ const schema = z.object({
 });
 
 export async function vincularRelogio(raw: unknown): Promise<Resultado> {
-  const bloqueio = bloqueioDeEscrita();
-  if (bloqueio) return { error: bloqueio };
   const parsed = schema.safeParse(raw);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
 
   const ctx = await resolveWorkspaceId();
   if ("error" in ctx) return { error: ctx.error };
+  const bloqueio = await bloqueioDeEscrita(ctx.workspaceId);
+  if (bloqueio) return { error: bloqueio };
 
   const supabase = createClient();
   const { error } = await supabase.rpc("saude_vincular_dispositivo", {
@@ -53,11 +53,11 @@ export async function vincularRelogio(raw: unknown): Promise<Resultado> {
 }
 
 export async function desvincularRelogio(dispositivoId: string): Promise<Resultado> {
-  const bloqueio = bloqueioDeEscrita();
-  if (bloqueio) return { error: bloqueio };
   if (!z.string().uuid().safeParse(dispositivoId).success) return { error: "Relógio inválido." };
   const ctx = await resolveWorkspaceId();
   if ("error" in ctx) return { error: ctx.error };
+  const bloqueio = await bloqueioDeEscrita(ctx.workspaceId);
+  if (bloqueio) return { error: bloqueio };
 
   // RLS (p_ws_update) garante que só membros do workspace alteram; GRANT só libera nome/revogado_em.
   const supabase = createClient();
