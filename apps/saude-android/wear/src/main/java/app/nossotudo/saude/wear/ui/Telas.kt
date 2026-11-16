@@ -52,6 +52,7 @@ object Rota {
     const val REGISTROS = "registros"
     const val LABORATORIO = "laboratorio"
     const val CONECTAR = "conectar"
+    const val MALESTAR = "malestar"
 }
 
 /** "Ao vivo" só com leitura válida nos últimos 15 s; sensor ligado sem pulso = procurando. */

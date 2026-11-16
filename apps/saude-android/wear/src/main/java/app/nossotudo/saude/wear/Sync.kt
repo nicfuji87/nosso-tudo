@@ -1,6 +1,9 @@
 package app.nossotudo.saude.wear
 
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
 import android.os.Build
 import android.util.Base64
 import androidx.work.Constraints
@@ -106,9 +109,6 @@ object Sync {
     // ------------------------------------------------------------------ HTTP
 
     private fun post(corpo: JSONObject): Pair<Int, JSONObject> {
-        // Trava de ambiente: cada build só fala com a sua função (o dev nunca grava pela função de produção).
-        val esperado = if (BuildConfig.AMBIENTE == "production") "/saude-relogio" else "/saude-relogio-dev"
-        check(URL_FUNCAO.endsWith(esperado)) { "build ${BuildConfig.AMBIENTE} com URL de outro ambiente" }
         val c = URL(URL_FUNCAO).openConnection() as HttpURLConnection
         try {
             c.requestMethod = "POST"
@@ -219,7 +219,9 @@ object Sync {
         val vfc = ler(ctx, "vfc", POR_ENVIO_VFC)
         val reg = ler(ctx, "registros", POR_ENVIO_REG)
         val ecgItem = ler(ctx, "ecgs", 1)
-        if (bpm.isEmpty() && vfc.isEmpty() && reg.isEmpty() && ecgItem.isEmpty()) return true
+        val vazio = bpm.isEmpty() && vfc.isEmpty() && reg.isEmpty() && ecgItem.isEmpty()
+        // Sem dados novos, ainda manda o estado do relógio a cada ~25 min (o painel sabe se está no pulso/carregando).
+        if (vazio && System.currentTimeMillis() - prefs(ctx).getLong("ultimo_estado", 0) < 25 * 60_000L) return true
 
         val ecgs = JSONArray()
         ecgItem.firstOrNull()?.let { e ->
@@ -231,6 +233,7 @@ object Sync {
         }
         val corpo = JSONObject().put("acao", "enviar").put("segredo", segredo(ctx))
             .put("bpm", JSONArray(bpm)).put("vfc", JSONArray(vfc)).put("registros", JSONArray(reg)).put("ecgs", ecgs)
+            .put("estado", estado(ctx))
 
         val (http, r) = runCatching { post(corpo) }.getOrElse { e ->
             prefs(ctx).edit().putString("erro", "sem rede: ${e.javaClass.simpleName}").apply()
@@ -248,8 +251,24 @@ object Sync {
         descartar(ctx, "vfc", vfc.size)
         descartar(ctx, "registros", reg.size)
         descartar(ctx, "ecgs", ecgItem.size)
-        prefs(ctx).edit().putLong("ultimo_envio", System.currentTimeMillis()).remove("erro").apply()
+        val agora = System.currentTimeMillis()
+        prefs(ctx).edit().putLong("ultimo_envio", agora).putLong("ultimo_estado", agora).remove("erro").apply()
         return true
+    }
+
+    /** Estado do relógio enviado junto com cada lote. */
+    private fun estado(ctx: Context): JSONObject {
+        val b = ctx.applicationContext.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val o = JSONObject().put("versao", BuildConfig.VERSION_NAME)
+        b?.let {
+            val nivel = it.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+            val escala = it.getIntExtra(BatteryManager.EXTRA_SCALE, 100)
+            if (nivel >= 0 && escala > 0) o.put("bateria", nivel * 100 / escala)
+            o.put("carregando", it.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0)
+        }
+        EstadoSaude.noPulso?.let { o.put("no_pulso", it) }
+        if (EstadoSaude.ultimaLeituraMs > 0) o.put("ultima_leitura", EstadoSaude.ultimaLeituraMs)
+        return o
     }
 
     /** Extrai a coluna ECG_MV do CSV gravado na medição. */

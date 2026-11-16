@@ -9,7 +9,9 @@ import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
  *
  *   anunciar { codigo, segredo, modelo }  → cria pareamento pendente (30 min)
  *   status   { segredo }                  → { vinculado, nome? }
- *   enviar   { segredo, bpm[], vfc[], registros[], ecgs[] } → grava (idempotente)
+ *   enviar   { segredo, bpm[], vfc[], registros[], ecgs[], estado? } → grava (idempotente)
+ *            estado = { versao, bateria, carregando, no_pulso, ultima_leitura } — opcional (v0.4+);
+ *            um `enviar` só com `estado` funciona como batida de vida.
  *
  * Escrita com service_role; isolamento por workspace vem do dispositivo.
  */
@@ -42,7 +44,22 @@ const iso = (ms: unknown) => {
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 const LIMITES = { bpm: 3000, vfc: 600, registros: 500, ecgs: 3 };
-const TIPOS = new Set(["checkin", "habito", "respiracao", "ecg"]);
+const TIPOS = new Set(["checkin", "habito", "respiracao", "ecg", "malestar"]);
+
+/** Estado do relógio (v0.4+). Campos inválidos são ignorados, nunca derrubam o envio. */
+function lerEstado(e: unknown): Record<string, unknown> {
+  if (!e || typeof e !== "object") return {};
+  const o = e as Record<string, unknown>;
+  const out: Record<string, unknown> = { estado_em: new Date().toISOString() };
+  if (typeof o.versao === "string") out.versao_app = o.versao.slice(0, 20);
+  const b = num(o.bateria);
+  if (b !== null && b >= 0 && b <= 100) out.bateria_pct = Math.round(b);
+  if (typeof o.carregando === "boolean") out.carregando = o.carregando;
+  if (typeof o.no_pulso === "boolean") out.no_pulso = o.no_pulso;
+  const ul = iso(o.ultima_leitura);
+  if (ul) out.ultima_leitura_em = ul;
+  return out;
+}
 
 // ---- handler ---------------------------------------------------------------
 Deno.serve(async (req) => {
@@ -134,7 +151,10 @@ Deno.serve(async (req) => {
         registros: await gravar("saude_registros", registros, "dispositivo_id,id_local"),
         ecgs: await gravar("saude_ecgs", ecgs, "dispositivo_id,id_local"),
       };
-      await admin.from("saude_dispositivos").update({ ultimo_envio_em: new Date().toISOString() }).eq("id", disp.id);
+      await admin
+        .from("saude_dispositivos")
+        .update({ ultimo_envio_em: new Date().toISOString(), ...lerEstado(corpo.estado) })
+        .eq("id", disp.id);
       return json({ ok: true, ...resultado });
     } catch (e) {
       console.error("saude-relogio enviar", e);

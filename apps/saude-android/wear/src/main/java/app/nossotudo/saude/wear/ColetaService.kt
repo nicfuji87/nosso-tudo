@@ -89,6 +89,7 @@ class ColetaService : Service() {
             },
         )
         main.postDelayed(medirBateria, 1_000)
+        if (modo == MODO_FUNDO) main.postDelayed(enviar, 2 * 60_000L)
         return START_STICKY
     }
 
@@ -127,6 +128,21 @@ class ColetaService : Service() {
             }
         }
         atualizarResumo()
+    }
+
+    /**
+     * Envio a partir do próprio serviço a cada 30 min. Com a tela apagada o Wear OS adia muito o
+     * WorkManager (Doze); o serviço em primeiro plano continua acordado e com rede. O WorkManager fica de reserva.
+     */
+    private val enviar = object : Runnable {
+        override fun run() {
+            val app = applicationContext
+            Thread {
+                EstadoSaude.fecharMinutoSeAntigo()
+                runCatching { Sync.enviarTudoAgora(app) }
+            }.start()
+            main.postDelayed(this, 30 * 60_000L)
+        }
     }
 
     private val medirBateria = object : Runnable {
@@ -224,7 +240,7 @@ fun Context.pararColeta() {
 object Automatico {
     private fun prefs(ctx: Context) = ctx.applicationContext.getSharedPreferences("sync", Context.MODE_PRIVATE)
 
-    fun ligadoPeloUsuario(ctx: Context) = prefs(ctx).getBoolean("auto", BuildConfig.AUTO_PADRAO)
+    fun ligadoPeloUsuario(ctx: Context) = prefs(ctx).getBoolean("auto", true)
     fun ativo(ctx: Context) = ligadoPeloUsuario(ctx) && Sync.status(ctx).vinculado
 
     fun definir(ctx: Context, ligado: Boolean) {

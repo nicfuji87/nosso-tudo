@@ -259,7 +259,7 @@ private fun Rosto(humor: Humor, modifier: Modifier) {
 }
 
 @Composable
-fun TelaCheckin(voltar: () -> Unit) {
+fun TelaCheckin(voltar: () -> Unit, ir: (String) -> Unit) {
     val ctx = LocalContext.current
     var escolha by remember { mutableStateOf<Humor?>(null) }
     var salvo by remember { mutableStateOf(false) }
@@ -303,6 +303,8 @@ fun TelaCheckin(voltar: () -> Unit) {
                     fundo = if (ativo) Cor.Acao else Cor.Chip, cor = if (ativo) Cor.AcaoTexto else Cor.TextoTerc,
                     modifier = Modifier.width(e.d(180)),
                 )
+                Spacer(Modifier.height(e.d(10)))
+                AtalhoMalEstar(e, ir)
             }
         }
     }

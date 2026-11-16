@@ -63,6 +63,19 @@ object EstadoSaude {
 
     private var app: Context? = null
 
+    // Estado do relógio para o painel: no pulso? última leitura válida? ECG em andamento?
+    @Volatile var noPulso: Boolean? = null
+        private set
+    @Volatile var ultimaLeituraMs: Long = 0
+        private set
+    /** Durante o ECG o batimento contínuo pode sair inválido: não entra no cálculo. */
+    @Volatile var pausado = false
+
+    /** Horário estimado do último batimento (soma dos IBIs). 0 = sem cadeia. */
+    private var relogioBatimento = 0L
+    private const val LACUNA_MS = 5_000L      // > 5 s sem batimento: a cadeia recomeça
+    private const val DESVIO_MAX_MS = 120_000L // relógio de batimentos muito à frente do registro: ressincroniza
+
     // agregação por minuto para o envio ao Nosso Tudo
     private var minutoAtual = -1L
     private var minutoSoma = 0
@@ -88,18 +101,38 @@ object EstadoSaude {
         }
     }
 
-    /** Recebe um lote do rastreador HEART_RATE_CONTINUOUS (do serviço de coleta ou da tela ao vivo). */
+    /**
+     * Recebe um lote do rastreador HEART_RATE_CONTINUOUS (do serviço de coleta ou da tela ao vivo).
+     *
+     * IBI (v0.4): com a tela apagada o SDK entrega vários intervalos presos ao 1º registro do lote.
+     * O horário de cada batimento é reconstruído somando os intervalos a partir do registro; se houver
+     * lacuna (> 5 s sem batimento: relógio frouxo, fora do pulso, ECG) a cadeia recomeça e nenhuma
+     * diferença sucessiva atravessa a lacuna.
+     */
     @Synchronized
     fun registrarLote(lote: List<DataPoint>) {
         for (dp in lote) {
             val ts = dp.timestamp
             val hr = runCatching { dp.getValue(ValueKey.HeartRateSet.HEART_RATE) }.getOrNull() ?: 0
             val st = runCatching { dp.getValue(ValueKey.HeartRateSet.HEART_RATE_STATUS) }.getOrNull() ?: -1
-            if (hr in 30..220 && st >= 0) registrarBpm(hr, ts)
+            if (st == -3) noPulso = false // SDK: relógio fora do pulso
+            if (hr in 30..220 && st >= 0) {
+                noPulso = true
+                ultimaLeituraMs = ts
+                if (!pausado) registrarBpm(hr, ts)
+            }
+            if (pausado) { anteriorIbi = null; relogioBatimento = 0L; continue }
 
             val ibis = runCatching { dp.getValue(ValueKey.HeartRateSet.IBI_LIST) }.getOrNull().orEmpty()
+            if (ibis.isEmpty()) continue
             val sts = runCatching { dp.getValue(ValueKey.HeartRateSet.IBI_STATUS_LIST) }.getOrNull().orEmpty()
-            ibis.forEachIndexed { k, ibi -> registrarIbi(ibi, sts.getOrNull(k) ?: 0, ts) }
+            val novaCadeia = relogioBatimento == 0L || ts - relogioBatimento > LACUNA_MS || relogioBatimento - ts > DESVIO_MAX_MS
+            var t = if (novaCadeia) { anteriorIbi = null; ts } else relogioBatimento
+            ibis.forEachIndexed { k, ibi ->
+                t += ibi.coerceIn(0, 3000)
+                registrarIbi(ibi, sts.getOrNull(k) ?: 0, t)
+            }
+            relogioBatimento = t
         }
     }
 
@@ -127,6 +160,12 @@ object EstadoSaude {
             runCatching { Sync.enfileirarBpm(ctx, minutoAtual * 60_000, minutoSoma.toFloat() / minutoN, minutoMin, minutoMax, minutoN) }
         }
         minutoAtual = -1; minutoN = 0
+    }
+
+    /** Fecha o minuto aberto se ele já passou (ex.: relógio tirado do pulso no meio do minuto). */
+    @Synchronized
+    fun fecharMinutoSeAntigo() {
+        if (minutoAtual >= 0 && System.currentTimeMillis() / 60_000 > minutoAtual + 1) fecharMinuto()
     }
 
     private fun registrarIbi(ibi: Int, status: Int, ts: Long) {
@@ -291,6 +330,12 @@ class MonitorCardiaco(private val ctx: Context) {
 /** Registros manuais (check-in, hábitos) e eventos (ECG, respiração), em JSON Lines no relógio. */
 object Registros {
     data class Registro(val ts: Long, val tipo: String, val valor: String)
+
+    /** Mal-estar: grava na hora (offline) e tenta enviar já, sem esperar o ciclo de 30 min. */
+    fun malEstar(ctx: Context, situacao: String) {
+        adicionar(ctx, "malestar", situacao)
+        runCatching { Sync.enviarAgora(ctx) }
+    }
 
     private fun arquivo(ctx: Context) = File(ctx.filesDir, "registros.jsonl")
 

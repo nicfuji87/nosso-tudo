@@ -29,22 +29,13 @@ JDK: o JBR do Android Studio (`D:\Android Studio\jbr`).
 
 ## Compilar, instalar, coletar
 
-Dois ambientes (flavors) no mesmo projeto Supabase, separados por Edge Function e workspace
-(detalhes em `supabase/dev/README.md`):
-
-| Flavor | App no relógio | Edge Function | Medição automática |
-|---|---|---|---|
-| `prod` | `app.nossotudo.saude.wear` · "Saúde NT" | `saude-relogio` (dados reais) | ligada |
-| `dev` | `app.nossotudo.saude.wear.dev` · "Saúde NT DEV" | `saude-relogio-dev` (só workspace de teste) | desligada |
-
 ```powershell
 $env:JAVA_HOME = "D:\Android Studio\jbr"
-.\gradlew.bat :wear:assembleProdDebug :wear:assembleDevDebug
+.\gradlew.bat :wear:assembleDebug
 $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
 & $adb pair <ip>:<porta-de-pareamento>       # código mostrado no relógio
 & $adb connect <ip>:<porta>
-& $adb install -r wear\build\outputs\apk\prod\debug\wear-prod-debug.apk   # seus dados reais
-& $adb install -r wear\build\outputs\apk\dev\debug\wear-dev-debug.apk     # testes
+& $adb install -r wear\build\outputs\apk\debug\wear-debug.apk
 ```
 
 No relógio: **1. Permissões** → **2. Capacidades** → **Coletar**. Depois:

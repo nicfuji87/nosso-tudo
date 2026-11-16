@@ -18,6 +18,7 @@ import app.nossotudo.saude.wear.ui.TelaEcg
 import app.nossotudo.saude.wear.ui.TelaHabitos
 import app.nossotudo.saude.wear.ui.TelaHub
 import app.nossotudo.saude.wear.ui.TelaLaboratorio
+import app.nossotudo.saude.wear.ui.TelaMalEstar
 import app.nossotudo.saude.wear.ui.TelaProntidao
 import app.nossotudo.saude.wear.ui.TelaRegistros
 import app.nossotudo.saude.wear.ui.TelaRespiracao
@@ -62,11 +63,12 @@ private fun App() {
             composable(Rota.SONO) { TelaSono() }
             composable(Rota.RESPIRACAO) { TelaRespiracao() }
             composable(Rota.ECG) { TelaEcg() }
-            composable(Rota.CHECKIN) { TelaCheckin(voltar) }
+            composable(Rota.CHECKIN) { TelaCheckin(voltar, ir) }
             composable(Rota.HABITOS) { TelaHabitos() }
             composable(Rota.REGISTROS) { TelaRegistros() }
             composable(Rota.LABORATORIO) { TelaLaboratorio(ir) }
             composable(Rota.CONECTAR) { TelaConectar() }
+            composable(Rota.MALESTAR) { TelaMalEstar(ir) }
         }
     }
 }

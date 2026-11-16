@@ -6,15 +6,6 @@ plugins {
 
 val temSdkSamsung = file("libs").listFiles { f -> f.name.endsWith(".aar") }?.isNotEmpty() == true
 
-// ---- Ambientes -------------------------------------------------------------------------------
-// Os dois usam o MESMO projeto Supabase (o do Nosso Tudo), separados por Edge Function e workspace:
-// prod: função saude-relogio (dados reais). Mesmo applicationId da v0.3 → atualiza o app instalado.
-// dev : função saude-relogio-dev, que só aceita relógios vinculados a um workspace de TESTE.
-//       Outro applicationId (instala lado a lado) e medição automática DESLIGADA por padrão.
-val BASE_FUNCOES = "https://ecwcqooogsvsrddwjavh.supabase.co/functions/v1"
-val URL_PROD = "$BASE_FUNCOES/saude-relogio"
-val URL_DEV = "$BASE_FUNCOES/saude-relogio-dev"
-
 android {
     namespace = "app.nossotudo.saude.wear"
     compileSdk = 36
@@ -23,29 +14,10 @@ android {
         applicationId = "app.nossotudo.saude.wear"
         minSdk = 30          // Wear OS 3+
         targetSdk = 36       // Wear OS 6 (One UI 8 Watch)
-        versionCode = 3
-        versionName = "0.3"
-    }
-
-    // Endpoint público da Edge Function (a URL do projeto não é segredo; o relógio não leva chave nenhuma).
-    flavorDimensions += "ambiente"
-    productFlavors {
-        create("prod") {
-            dimension = "ambiente"
-            buildConfigField("String", "AMBIENTE", "\"production\"")
-            buildConfigField("String", "SAUDE_URL", "\"$URL_PROD\"")
-            buildConfigField("boolean", "AUTO_PADRAO", "true")
-            manifestPlaceholders["rotuloApp"] = "Saúde NT"
-        }
-        create("dev") {
-            dimension = "ambiente"
-            applicationIdSuffix = ".dev"
-            versionNameSuffix = "-dev"
-            buildConfigField("String", "AMBIENTE", "\"development\"")
-            buildConfigField("String", "SAUDE_URL", "\"$URL_DEV\"")
-            buildConfigField("boolean", "AUTO_PADRAO", "false")
-            manifestPlaceholders["rotuloApp"] = "Saúde NT DEV"
-        }
+        versionCode = 4
+        versionName = "0.4"
+        // Endpoint público da Edge Function (a URL do projeto não é segredo; o relógio não leva chave nenhuma).
+        buildConfigField("String", "SAUDE_URL", "\"https://ecwcqooogsvsrddwjavh.supabase.co/functions/v1/saude-relogio\"")
     }
 
     buildTypes {

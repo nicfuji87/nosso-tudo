@@ -59,6 +59,7 @@ class EcgSessao(private val ctx: Context) {
             return encerrar(Estado.Erro(e.message ?: "falha ao abrir ECG"))
         }
         tracker = t
+        EstadoSaude.pausado = true // os minutos do ECG não entram no batimento contínuo nem na VFC
         inicio = System.currentTimeMillis()
         t.setEventListener(object : HealthTracker.TrackerEventListener {
             override fun onDataReceived(list: List<DataPoint>) {
@@ -94,6 +95,7 @@ class EcgSessao(private val ctx: Context) {
     fun cancelar() = encerrar(Estado.Parado)
 
     private fun encerrar(final: Estado) {
+        EstadoSaude.pausado = false
         main.removeCallbacksAndMessages(null)
         runCatching { tracker?.unsetEventListener() }
         tracker = null
