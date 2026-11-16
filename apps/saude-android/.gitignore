@@ -1,0 +1,12 @@
+.gradle/
+build/
+*/build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+captures/
+# SDK proprietário da Samsung: cada dev baixa o seu (licença não permite redistribuir)
+wear/libs/**
+# Dados biométricos puxados do relógio nunca vão para o repositório
+dados/

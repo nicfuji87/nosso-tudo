@@ -3,6 +3,7 @@ import {
   ArrowLeftRight,
   BarChart3,
   CreditCard,
+  HeartPulse,
   Layers,
   Plane,
   SlidersHorizontal,
@@ -22,6 +23,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/app/faturas", label: "Faturas", icon: CreditCard },
   { href: "/app/relatorios", label: "Relatórios", icon: BarChart3 },
   { href: "/app/viagens", label: "Viagens", icon: Plane },
+  { href: "/app/saude", label: "Saúde", icon: HeartPulse },
   { href: "/app/colecoes", label: "Coleções", icon: Layers },
   { href: "/app/cadastros", label: "Cadastros", icon: SlidersHorizontal },
 ];
