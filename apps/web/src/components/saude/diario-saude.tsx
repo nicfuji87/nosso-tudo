@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import {
-  AlertTriangle, Pill, Wine, Coffee, Thermometer, Brain, BedDouble, StickyNote, Stethoscope, ClipboardCheck, Wind, Activity, Watch, Trash2,
+  Flame, AlertTriangle, Pill, Wine, Coffee, Thermometer, Brain, BedDouble, StickyNote, Stethoscope, ClipboardCheck, Wind, Activity, Watch, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import type { EventoDiario, MalEstar, RegistroSaude } from "@/lib/saude/dados";
 import { excluirEvento, registrarEvento } from "@/app/app/saude/actions";
 import { MiniBpm } from "./graficos-saude";
+import { ESFORCO, MODALIDADES } from "./modalidades";
 
 const TZ = "America/Sao_Paulo";
 const hora = (iso: string) => new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: TZ });
@@ -23,9 +24,10 @@ const diaRel = (iso: string) => {
   return new Date(iso).toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "short", timeZone: TZ });
 };
 
-type TipoEvento = "malestar" | "sintoma" | "medicamento" | "alcool" | "cafeina" | "doenca" | "estresse" | "sono" | "nota";
+type TipoEvento = "treino" | "malestar" | "sintoma" | "medicamento" | "alcool" | "cafeina" | "doenca" | "estresse" | "sono" | "nota";
 
 const TIPOS: { tipo: TipoEvento; rotulo: string; icone: typeof Pill; cor: string; dica: string }[] = [
+  { tipo: "treino", rotulo: "Treino", icone: Flame, cor: "#F08A3C", dica: "Para o treino que o relógio não pegou: lutou sem relógio, natação, musculação com descansos longos." },
   { tipo: "malestar", rotulo: "Mal-estar", icone: AlertTriangle, cor: "#D6336C", dica: "Tontura, palpitação, fraqueza… guarda o batimento ao redor." },
   { tipo: "sintoma", rotulo: "Sintoma", icone: Thermometer, cor: "#E5536A", dica: "Dor, febre, gripe, garganta…" },
   { tipo: "doenca", rotulo: "Fiquei doente", icone: Stethoscope, cor: "#B5475B", dica: "Ajuda a medir, depois, se os sinais do relógio anteciparam." },
@@ -61,13 +63,20 @@ function NovoEvento({ tipo, aoFechar }: { tipo: TipoEvento | null; aoFechar: () 
   const [sintomas, setSintomas] = useState<string[]>([]);
   const meta = tipo ? META[tipo] : null;
   const ehMalEstar = tipo === "malestar";
+  const ehTreino = tipo === "treino";
+  const [modalidade, setModalidade] = useState<string | null>(null);
+  const [duracao, setDuracao] = useState("60");
+  const [esforco, setEsforco] = useState<number | null>(null);
   const urgente = sintomas.some((s) => s === "Dor no peito" || s === "Desmaio" || s === "Falta de ar");
 
   const salvar = () => iniciar(async () => {
     if (!tipo) return;
+    const ini = new Date(inicio);
+    const min = Math.max(5, Math.min(600, Number(duracao) || 60));
     const r = await registrarEvento({
-      tipo, inicio: new Date(inicio).toISOString(), nota: nota || undefined,
-      detalhes: {
+      tipo, inicio: ini.toISOString(), nota: nota || undefined,
+      ...(ehTreino ? { fim: new Date(ini.getTime() + min * 60_000).toISOString() } : {}),
+      detalhes: ehTreino ? { modalidade: modalidade!, ...(esforco != null ? { esforco } : {}) } : {
         ...(intensidade != null ? { intensidade } : {}),
         ...(ehMalEstar && situacao ? { situacao } : {}),
         ...(ehMalEstar && sintomas.length ? { sintomas } : {}),
@@ -87,10 +96,48 @@ function NovoEvento({ tipo, aoFechar }: { tipo: TipoEvento | null; aoFechar: () 
           <DialogDescription>{meta?.dica}</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="ev-inicio">Quando</Label>
-            <Input id="ev-inicio" type="datetime-local" value={inicio} max={agoraLocal()} onChange={(e) => setInicio(e.target.value)} />
+          <div className={cn("grid gap-3", ehTreino && "grid-cols-[1fr_7rem]")}>
+            <div className="space-y-1.5">
+              <Label htmlFor="ev-inicio">{ehTreino ? "Começou" : "Quando"}</Label>
+              <Input id="ev-inicio" type="datetime-local" value={inicio} max={agoraLocal()} onChange={(e) => setInicio(e.target.value)} />
+            </div>
+            {ehTreino && (
+              <div className="space-y-1.5">
+                <Label htmlFor="ev-duracao">Duração (min)</Label>
+                <Input id="ev-duracao" type="number" inputMode="numeric" min={5} max={600} step={5} value={duracao} onChange={(e) => setDuracao(e.target.value)} />
+              </div>
+            )}
           </div>
+          {ehTreino && (
+            <>
+              <fieldset className="space-y-1.5">
+                <legend className="text-body-sm font-medium">Modalidade</legend>
+                <div className="flex flex-wrap gap-2">
+                  {MODALIDADES.map(({ nome, icone: Icone }) => (
+                    <button key={nome} type="button" aria-pressed={modalidade === nome} onClick={() => setModalidade(nome)}
+                      className={cn("inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-body-sm",
+                        modalidade === nome ? "border-[#F08A3C] bg-[#F08A3C] text-white" : "border-border hover:bg-secondary")}>
+                      <Icone className="size-4" /> {nome}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+              <fieldset className="space-y-1.5">
+                <legend className="text-body-sm font-medium">
+                  Esforço percebido{esforco != null && <span className="font-normal text-muted-foreground"> · {esforco} — {ESFORCO[esforco]}</span>}
+                </legend>
+                <div className="grid grid-cols-11 gap-1">
+                  {ESFORCO.map((rotulo, i) => (
+                    <button key={i} type="button" aria-pressed={esforco === i} title={rotulo} onClick={() => setEsforco(i)}
+                      className={cn("tabular h-8 rounded-md text-caption font-medium", esforco === i ? "text-white" : "bg-secondary text-muted-foreground hover:text-foreground")}
+                      style={esforco === i ? { backgroundColor: `hsl(${30 - i * 3} 85% ${58 - i * 2}%)` } : undefined}>
+                      {i}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+            </>
+          )}
           {ehMalEstar && (
             <>
               <fieldset className="space-y-1.5">
@@ -125,7 +172,7 @@ function NovoEvento({ tipo, aoFechar }: { tipo: TipoEvento | null; aoFechar: () 
               )}
             </>
           )}
-          {tipo !== "nota" && tipo !== "medicamento" && (
+          {tipo !== "nota" && tipo !== "medicamento" && !ehTreino && (
             <fieldset className="space-y-1.5">
               <legend className="text-body-sm font-medium">Intensidade</legend>
               <div className="grid grid-cols-5 gap-1.5">
@@ -141,12 +188,12 @@ function NovoEvento({ tipo, aoFechar }: { tipo: TipoEvento | null; aoFechar: () 
           <div className="space-y-1.5">
             <Label htmlFor="ev-nota">{tipo === "medicamento" ? "Qual e quanto" : "Observação"}</Label>
             <Input id="ev-nota" value={nota} maxLength={500} onChange={(e) => setNota(e.target.value)}
-              placeholder={tipo === "medicamento" ? "Ex.: dipirona 1 g" : tipo === "alcool" ? "Ex.: 2 taças de vinho" : "Opcional"} />
+              placeholder={tipo === "medicamento" ? "Ex.: dipirona 1 g" : tipo === "alcool" ? "Ex.: 2 taças de vinho" : ehTreino ? "Ex.: rola leve, 5 lutas de 6 min" : "Opcional"} />
           </div>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={aoFechar}>Cancelar</Button>
-          <Button variant="accent" disabled={pendente || (ehMalEstar && !situacao)} onClick={salvar}>Salvar</Button>
+          <Button variant="accent" disabled={pendente || (ehMalEstar && !situacao) || (ehTreino && !modalidade)} onClick={salvar}>Salvar</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
