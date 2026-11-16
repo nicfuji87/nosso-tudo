@@ -9,10 +9,10 @@ import { createClient } from "@/lib/supabase/server";
  * O PostgREST corta em 1000 linhas — por isso `paginar`.
  *
  * Algoritmos versionados (a interpretação de dados antigos não muda em silêncio):
- *   noites-v2 (SQL) · treino-v1 (SQL) · base-v1 e insights-v1 (aqui)
+ *   noites-v3 · treino-v1 · radar-v1 (SQL) · padrao-v1 e insights-v2 (aqui)
  */
 
-export const ALGORITMOS = { noites: "noites-v2", treino: "treino-v1", padrao: "padrao-v1", base: "base-v1", insights: "insights-v1" } as const;
+export const ALGORITMOS = { noites: "noites-v3", treino: "treino-v1", padrao: "padrao-v1", radar: "radar-v1", insights: "insights-v2" } as const;
 export const NOITES_BASE = 28; // linha de base pessoal completa
 export const NOITES_MIN_COMPARAR = 7; // antes disso não há "seu normal" para comparar
 
@@ -34,7 +34,19 @@ export interface PontoBpm { minuto: string; bpm: number; min: number; max: numbe
 export interface RegistroSaude { id: string; ts: string; tipo: string; valor: string }
 export interface EcgResumo { id: string; ts: string; duracaoS: number; hz: number }
 
-export interface Noite { noite: string; minutos: number; fcRepouso: number | null; vfc: number | null; janelas: number }
+export interface Noite { noite: string; minutos: number; fcRepouso: number | null; vfc: number | null; janelas: number; temp: number | null; janelasTemp: number }
+
+export type NivelRadar = "calibrando" | "normal" | "observar" | "estresse";
+/** Uma noite do Radar de Saúde (radar-v1, função SQL saude_radar). */
+export interface RadarNoite {
+  noite: string;
+  fc: number | null; fcNormal: number | null; fcFora: boolean;
+  vfc: number | null; vfcNormal: number | null; vfcFora: boolean;
+  temp: number | null; tempNormal: number | null; tempFora: boolean;
+  sinais: number; base: number; doente: boolean; nivel: NivelRadar;
+}
+/** Placar do radar contra os dias em que você marcou "fiquei doente". */
+export interface PlacarRadar { episodios: number; avisadosAntes: number; avisos: number; avisosSemNada: number }
 
 export interface Zonas { leve: number; moderado: number; intenso: number; maximo: number }
 export interface Treino {
@@ -101,6 +113,9 @@ export interface PainelSaude {
   noitesBase: number;
   desvioFc: Desvio | null;
   desvioVfc: Desvio | null;
+  desvioTemp: Desvio | null;
+  radar: RadarNoite[]; // mais recente primeiro
+  placar: PlacarRadar;
   treinos: Treino[];
   carga7d: number;
   carga7dAnterior: number;
@@ -120,13 +135,6 @@ export function diaLocal(iso: string, tz: string): string {
 export function horaLocal(iso: string, tz: string): string {
   return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: tz });
 }
-
-const mediana = (v: number[]): number => {
-  const s = [...v].sort((a, b) => a - b);
-  const m = Math.floor(s.length / 2);
-  if (!s.length) return 0;
-  return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
-};
 
 async function paginar<T>(buscar: (de: number, ate: number) => PromiseLike<{ data: T[] | null; error: unknown }>, maximo = 6000): Promise<T[]> {
   const tudo: T[] = [];
@@ -168,15 +176,13 @@ function palpiteModalidade(inicio: string, historico: { inicio: string; modalida
   return escolher(perto.filter((h) => momentoLocal(h.inicio, tz).dia === alvo.dia), 1) ?? escolher(perto, 2);
 }
 
-/** base-v1: valor da última noite vs mediana das anteriores (até 28). */
-function desvio(noites: Noite[], campo: "fcRepouso" | "vfc"): Desvio | null {
-  const validas = noites.filter((n) => n[campo] != null);
-  const ultima = validas.at(-1);
-  const anteriores = validas.slice(0, -1).slice(-NOITES_BASE);
-  if (!ultima || anteriores.length < NOITES_MIN_COMPARAR) return null;
-  const normal = mediana(anteriores.map((n) => n[campo]!));
-  const valor = ultima[campo]!;
-  return { valor, normal, delta: valor - normal, deltaPct: normal ? (valor / normal - 1) * 100 : 0, noites: anteriores.length };
+/** Desvio de um sinal na noite do radar (só quando já existe "seu normal"). */
+function desvioDe(r: RadarNoite | undefined, valor: "fc" | "vfc" | "temp", normal: "fcNormal" | "vfcNormal" | "tempNormal"): Desvio | null {
+  if (!r || r.nivel === "calibrando") return null;
+  const v = r[valor];
+  const n = r[normal];
+  if (v == null || n == null) return null;
+  return { valor: v, normal: n, delta: v - n, deltaPct: n ? (v / n - 1) * 100 : 0, noites: r.base };
 }
 
 const ROTULO_EVENTO: Record<string, string> = {
@@ -191,7 +197,7 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
   const desde24h = new Date(agora - 24 * 3600_000).toISOString();
   const desde60d = new Date(agora - 60 * 86_400_000).toISOString();
 
-  const [disp, bpm, vfc24, regs, ecgs, noitesR, treinosR, eventosR] = await Promise.all([
+  const [disp, bpm, vfc24, regs, ecgs, noitesR, treinosR, eventosR, radarR] = await Promise.all([
     supabase
       .from("saude_dispositivos")
       .select("id, nome, modelo, criado_em, ultimo_envio_em, versao_app, bateria_pct, carregando, no_pulso, ultima_leitura_em, estado_em")
@@ -219,6 +225,7 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
       .gte("inicio", desde60d)
       .order("inicio", { ascending: false })
       .limit(300),
+    supabase.rpc("saude_radar", { p_workspace_id: workspaceId, p_tz: tz }),
   ]);
 
   // ---- dispositivos
@@ -235,15 +242,27 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
   const faixaHoje = deHoje.length ? { min: Math.min(...deHoje.map((b) => b.min)), max: Math.max(...deHoje.map((b) => b.max)) } : null;
 
   // ---- noites e linha de base
-  type NoiteRow = { noite: string; minutos: number; fc_repouso: number | null; vfc_noturna: number | null; janelas: number };
+  type NoiteRow = { noite: string; minutos: number; fc_repouso: number | null; vfc_noturna: number | null; janelas: number; temp_pele: number | null; janelas_temp: number };
   const noites: Noite[] = ((noitesR.data ?? []) as NoiteRow[]).map((n) => ({
     noite: n.noite, minutos: n.minutos, fcRepouso: n.fc_repouso != null ? Math.round(n.fc_repouso * 10) / 10 : null,
     vfc: n.vfc_noturna != null ? Math.round(n.vfc_noturna) : null, janelas: n.janelas,
+    temp: n.temp_pele != null ? Math.round(n.temp_pele * 100) / 100 : null, janelasTemp: n.janelas_temp,
   }));
   const noitesValidas = noites.filter((n) => n.fcRepouso != null);
   const ultimaNoite = noitesValidas.at(-1) ?? null;
-  const desvioFc = desvio(noites, "fcRepouso");
-  const desvioVfc = desvio(noites, "vfc");
+  // ---- Radar de Saúde (radar-v1)
+  type RadarRow = {
+    noite: string; fc: number | null; fc_normal: number | null; fc_fora: boolean; vfc: number | null; vfc_normal: number | null; vfc_fora: boolean;
+    temp: number | null; temp_normal: number | null; temp_fora: boolean; sinais: number; base: number; doente: boolean; nivel: NivelRadar;
+  };
+  const radar: RadarNoite[] = ((radarR.data ?? []) as RadarRow[]).map((r) => ({
+    noite: r.noite, fc: r.fc, fcNormal: r.fc_normal, fcFora: r.fc_fora, vfc: r.vfc, vfcNormal: r.vfc_normal, vfcFora: r.vfc_fora,
+    temp: r.temp, tempNormal: r.temp_normal, tempFora: r.temp_fora, sinais: r.sinais, base: r.base, doente: r.doente, nivel: r.nivel,
+  }));
+  const radarHoje = radar[0]?.noite === hoje ? radar[0] : undefined;
+  const desvioFc = desvioDe(radar[0], "fc", "fcNormal");
+  const desvioVfc = desvioDe(radar[0], "vfc", "vfcNormal");
+  const desvioTemp = desvioDe(radar[0], "temp", "tempNormal");
 
   // ---- eventos do diário
   type EventoRow = EventoDiario & { descartado: boolean };
@@ -251,6 +270,17 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
   const eventos: EventoDiario[] = eventosTodos
     .filter((e) => !e.descartado)
     .map((e) => ({ id: e.id, tipo: e.tipo, inicio: e.inicio, fim: e.fim, detalhes: e.detalhes ?? {}, nota: e.nota, origem: e.origem }));
+
+  // ---- placar do radar: avisou antes dos dias "fiquei doente"? quantos avisos não deram em nada?
+  const diasDoente = eventos.filter((e) => e.tipo === "doenca").map((e) => diaLocal(e.inicio, tz));
+  const somaDias = (d: string, n: number) => new Date(new Date(`${d}T12:00:00Z`).getTime() + n * 86_400_000).toISOString().slice(0, 10);
+  const estresse = radar.filter((r) => r.nivel === "estresse").map((r) => r.noite);
+  const placar: PlacarRadar = {
+    episodios: diasDoente.length,
+    avisadosAntes: diasDoente.filter((d) => estresse.some((n) => n >= somaDias(d, -3) && n <= d)).length,
+    avisos: estresse.length,
+    avisosSemNada: estresse.filter((n) => n <= somaDias(hoje, -5) && !diasDoente.some((d) => d >= n && d <= somaDias(n, 5))).length,
+  };
 
   // ---- treinos: detectados (SQL) + confirmados/descartados (diário)
   type TreinoRow = { inicio: string; fim: string; minutos: number; fc_media: number; fc_max: number; z_leve: number; z_moderado: number; z_intenso: number; z_maximo: number; carga: number };
@@ -362,26 +392,28 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
     }
     return [...lista];
   })();
-  if (desvioFc && desvioFc.delta >= 3) {
-    insights.push({
-      id: "fc-repouso-alta", tom: "atencao",
-      titulo: `FC de repouso ${desvioFc.delta.toFixed(0)} bpm acima do seu normal`,
-      texto: `Noite: ${desvioFc.valor.toFixed(0)} bpm · seu normal: ${desvioFc.normal.toFixed(0)} (${desvioFc.noites} noites). ` +
-        "Treino intenso, pouco sono, álcool, estresse ou o começo de uma alteração de saúde podem fazer isso. Vale observar as próximas noites.",
-      influencias,
-    });
-  } else if (desvioFc && desvioFc.delta <= -2) {
-    insights.push({ id: "fc-repouso-baixa", tom: "bom", titulo: `FC de repouso ${Math.abs(desvioFc.delta).toFixed(0)} bpm abaixo do seu normal`, texto: "Noite tranquila para o coração." });
-  }
-  if (desvioVfc && desvioVfc.deltaPct <= -20) {
-    insights.push({
-      id: "vfc-baixa", tom: "atencao",
-      titulo: `VFC noturna ${Math.abs(desvioVfc.deltaPct).toFixed(0)}% abaixo do seu normal`,
-      texto: `Noite: ${desvioVfc.valor} ms · seu normal: ${desvioVfc.normal.toFixed(0)} ms. Corpo mais exigido que o habitual; um dia mais leve ajuda a recuperar.`,
-      influencias,
-    });
-  } else if (desvioVfc && desvioVfc.deltaPct >= 15) {
-    insights.push({ id: "vfc-alta", tom: "bom", titulo: `VFC noturna ${desvioVfc.deltaPct.toFixed(0)}% acima do seu normal`, texto: "Sinal de boa recuperação." });
+  // insights-v2: o Radar decide o nível; o texto mostra o que saiu do normal e as causas possíveis (nunca as descarta)
+  if (radarHoje && radarHoje.nivel !== "calibrando") {
+    const fora = [
+      radarHoje.fcFora && desvioFc ? `repouso +${desvioFc.delta.toFixed(0)} bpm` : null,
+      radarHoje.vfcFora && desvioVfc ? `VFC ${desvioVfc.deltaPct.toFixed(0)}%` : null,
+      radarHoje.tempFora && desvioTemp ? `pele +${desvioTemp.delta.toFixed(1).replace(".", ",")} °C` : null,
+    ].filter(Boolean).join(", ");
+    if (radarHoje.nivel === "estresse") {
+      insights.push({
+        id: "radar-estresse", tom: "atencao", titulo: "Radar: corpo sob estresse",
+        texto: `Fora do seu normal: ${fora}. Treino forte, pouco sono, álcool, estresse ou o começo de uma infecção podem fazer isso. Um dia mais leve e atenção a sintomas nas próximas 48 h.`,
+        influencias,
+      });
+    } else if (radarHoje.nivel === "observar") {
+      insights.push({
+        id: "radar-observar", tom: "neutro", titulo: `Radar: ${radarHoje.sinais === 1 ? "1 sinal" : `${radarHoje.sinais} sinais`} fora do normal esta noite`,
+        texto: `Fora do normal: ${fora}. Uma noite só costuma dizer pouco — o radar fica atento à próxima.`,
+        influencias,
+      });
+    } else {
+      insights.push({ id: "radar-normal", tom: "bom", titulo: "Radar: noite dentro do seu normal", texto: "Repouso, VFC e temperatura da pele dentro da sua faixa." });
+    }
   }
   if (noitesValidas.length < NOITES_BASE) {
     insights.push({
@@ -401,7 +433,7 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
 
   return {
     dispositivos, bpm24h, ultimoBpm: ultimo ? { bpm: ultimo.bpm, minuto: ultimo.minuto } : null, faixaHoje,
-    noites, ultimaNoite, noitesBase: noitesValidas.length, desvioFc, desvioVfc,
+    noites, ultimaNoite, noitesBase: noitesValidas.length, desvioFc, desvioVfc, desvioTemp, radar, placar,
     treinos, carga7d, carga7dAnterior, eventos, registros, malEstares,
     ecgs: (ecgs.data ?? []).map((e) => ({ id: e.id, ts: e.ts, duracaoS: e.duracao_s, hz: e.hz })),
     qualidade, insights,
