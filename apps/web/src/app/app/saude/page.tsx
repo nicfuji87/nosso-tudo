@@ -148,9 +148,9 @@ function Medidor({ rotulo, valor, total, sufixo }: { rotulo: string; valor: numb
   const pct = total ? Math.min(100, (valor / total) * 100) : 0;
   return (
     <div>
-      <div className="flex items-baseline justify-between text-body-sm">
+      <div className="text-body-sm">
         <span>{rotulo}</span>
-        <span className="tabular text-muted-foreground">{sufixo}</span>
+        <span className="tabular block text-caption text-muted-foreground">{sufixo}</span>
       </div>
       <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-secondary">
         <div className="h-full rounded-full bg-success transition-all" style={{ width: `${pct}%` }} />
