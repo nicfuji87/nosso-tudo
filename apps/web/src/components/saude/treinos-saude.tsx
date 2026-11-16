@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Dumbbell, Footprints, Bike, Waves, Swords, Activity, Check, X, Info } from "lucide-react";
+import { Check, X, Info, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Treino } from "@/lib/saude/dados";
 import { descartarTreino, excluirEvento, registrarEvento } from "@/app/app/saude/actions";
+import { BAIXA_CONFIANCA, ESFORCO, MODALIDADES, iconeModalidade, motivoBaixaConfianca } from "./modalidades";
 
 const TZ = "America/Sao_Paulo";
 const hora = (iso: string) => new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: TZ });
@@ -17,18 +18,6 @@ const quando = (iso: string) => {
   const dd = d.toLocaleDateString("pt-BR", { timeZone: TZ });
   return dd === hoje ? "Hoje" : dd === ontem ? "Ontem" : d.toLocaleDateString("pt-BR", { weekday: "short", day: "numeric", month: "short", timeZone: TZ });
 };
-
-const MODALIDADES = [
-  { nome: "Judô", icone: Swords },
-  { nome: "Musculação", icone: Dumbbell },
-  { nome: "Corrida", icone: Footprints },
-  { nome: "Bike", icone: Bike },
-  { nome: "Natação", icone: Waves },
-  { nome: "Outro", icone: Activity },
-];
-/** No pulso, a FC do PPG erra mais quando há pegada/força no punho ou água. */
-const BAIXA_CONFIANCA = new Set(["Judô", "Musculação", "Natação"]);
-const ESFORCO = ["Repouso", "Muito leve", "Leve", "Moderado", "Um pouco forte", "Forte", "Forte+", "Muito forte", "Muito forte+", "Quase máximo", "Máximo"];
 
 const ZONAS = [
   { chave: "leve", rotulo: "< 120", cor: "#F6C27A" },
@@ -60,7 +49,7 @@ function BarraZonas({ t }: { t: Treino }) {
 }
 
 function Sugestao({ t }: { t: Treino }) {
-  const [modalidade, setModalidade] = useState<string | null>(null);
+  const [modalidade, setModalidade] = useState<string | null>(t.palpite);
   const [esforco, setEsforco] = useState<number | null>(null);
   const [pendente, iniciar] = useTransition();
 
@@ -86,7 +75,14 @@ function Sugestao({ t }: { t: Treino }) {
       </div>
       <div className="mt-3"><BarraZonas t={t} /></div>
 
-      <p className="mt-4 text-caption font-medium text-muted-foreground">O que foi?</p>
+      <p className="mt-4 flex items-center gap-1.5 text-caption font-medium text-muted-foreground">
+        O que foi?
+        {t.palpite && modalidade === t.palpite && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-[#8B6CE0]/10 px-2 py-0.5 text-[#7A5BD0]">
+            <Sparkles className="size-3" /> pelo seu padrão
+          </span>
+        )}
+      </p>
       <div className="mt-1.5 flex flex-wrap gap-2">
         {MODALIDADES.map(({ nome, icone: Icone }) => (
           <button key={nome} type="button" onClick={() => setModalidade(nome)} aria-pressed={modalidade === nome}
@@ -118,7 +114,7 @@ function Sugestao({ t }: { t: Treino }) {
       {modalidade && BAIXA_CONFIANCA.has(modalidade) && (
         <p className="mt-3 flex gap-1.5 text-caption text-muted-foreground">
           <Info className="mt-0.5 size-3.5 shrink-0" />
-          Em {modalidade.toLowerCase()} a FC do pulso pode errar (pegada, força no punho{modalidade === "Natação" ? ", água" : ""}). O treino conta, mas a FC fica marcada como baixa confiança.
+          Em {modalidade.toLowerCase()} a FC do pulso pode errar ({motivoBaixaConfianca(modalidade)}). O treino conta, mas a FC fica marcada como baixa confiança.
         </p>
       )}
 
@@ -136,7 +132,7 @@ function Sugestao({ t }: { t: Treino }) {
 
 function Confirmado({ t }: { t: Treino }) {
   const [pendente, iniciar] = useTransition();
-  const Icone = MODALIDADES.find((m) => m.nome === t.modalidade)?.icone ?? Activity;
+  const Icone = iconeModalidade(t.modalidade);
   return (
     <li className="group flex gap-3 py-3">
       <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[#F08A3C]/12 text-[#E2701F]">
@@ -148,7 +144,7 @@ function Confirmado({ t }: { t: Treino }) {
             {t.modalidade ?? "Treino"} <span className="font-normal text-muted-foreground">· {quando(t.inicio)}, {hora(t.inicio)}–{hora(t.fim)}</span>
           </p>
           <p className="tabular text-caption text-muted-foreground">
-            {t.minutos} min{t.fcMedia ? ` · média ${t.fcMedia} · pico ${t.fcMax}` : ""}
+            {t.minutos} min{t.fcMedia ? ` · média ${t.fcMedia} · pico ${t.fcMax}` : " · lançado à mão"}
             {t.esforco != null && ` · esforço ${t.esforco}/10`}
             {t.carga != null && ` · carga ${t.carga}`}
           </p>

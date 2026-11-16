@@ -243,7 +243,7 @@ export default async function SaudePage() {
       </Cartao>
 
       {/* Treinos */}
-      <Cartao titulo="Treinos" subtitulo={`detectados pelo batimento (${ALGORITMOS.treino}: ≥ 100 bpm por 10 min ou mais) · você confirma a modalidade`}
+      <Cartao titulo="Treinos" subtitulo={`detectados pelo batimento (${ALGORITMOS.treino}) · modalidade sugerida pelo seu padrão (${ALGORITMOS.padrao}) · treinou sem o relógio? lance em Diário › Treino`}
         acao={<Flame className="size-5 text-[#F08A3C]" />}>
         <TreinosSaude treinos={p.treinos} />
       </Cartao>

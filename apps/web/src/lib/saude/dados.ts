@@ -12,7 +12,7 @@ import { createClient } from "@/lib/supabase/server";
  *   noites-v2 (SQL) · treino-v1 (SQL) · base-v1 e insights-v1 (aqui)
  */
 
-export const ALGORITMOS = { noites: "noites-v2", treino: "treino-v1", base: "base-v1", insights: "insights-v1" } as const;
+export const ALGORITMOS = { noites: "noites-v2", treino: "treino-v1", padrao: "padrao-v1", base: "base-v1", insights: "insights-v1" } as const;
 export const NOITES_BASE = 28; // linha de base pessoal completa
 export const NOITES_MIN_COMPARAR = 7; // antes disso não há "seu normal" para comparar
 
@@ -50,6 +50,8 @@ export interface Treino {
   status: "sugerido" | "confirmado";
   modalidade: string | null;
   esforco: number | null;
+  /** padrao-v1: modalidade provável pelo seu histórico (mesmo dia da semana e horário parecido). */
+  palpite: string | null;
 }
 
 export interface EventoDiario {
@@ -135,6 +137,35 @@ async function paginar<T>(buscar: (de: number, ate: number) => PromiseLike<{ dat
     if (!data || data.length < 1000) break;
   }
   return tudo;
+}
+
+/** Dia da semana (0–6) e minuto do dia no fuso local. */
+function momentoLocal(iso: string, tz: string): { dia: number; min: number } {
+  const partes = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+    .formatToParts(new Date(iso));
+  const v = (t: string) => partes.find((p) => p.type === t)?.value ?? "0";
+  const dia = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(v("weekday"));
+  return { dia, min: Number(v("hour")) * 60 + Number(v("minute")) };
+}
+
+/**
+ * padrao-v1: palpite de modalidade a partir dos treinos já confirmados.
+ * 1º mesmo dia da semana e início a ±90 min (1 ocorrência basta); 2º qualquer dia, ±90 min, ≥ 2 ocorrências.
+ * Empate: o mais recente. É só o valor inicial do botão — você sempre confirma.
+ */
+function palpiteModalidade(inicio: string, historico: { inicio: string; modalidade: string }[], tz: string): string | null {
+  const alvo = momentoLocal(inicio, tz);
+  const perto = historico.filter((h) => Math.abs(momentoLocal(h.inicio, tz).min - alvo.min) <= 90);
+  const escolher = (lista: typeof historico, minimo: number) => {
+    const cont = new Map<string, { n: number; ultimo: string }>();
+    for (const h of lista) {
+      const c = cont.get(h.modalidade) ?? { n: 0, ultimo: "" };
+      cont.set(h.modalidade, { n: c.n + 1, ultimo: h.inicio > c.ultimo ? h.inicio : c.ultimo });
+    }
+    const melhor = [...cont.entries()].sort((a, b) => b[1].n - a[1].n || b[1].ultimo.localeCompare(a[1].ultimo))[0];
+    return melhor && melhor[1].n >= minimo ? melhor[0] : null;
+  };
+  return escolher(perto.filter((h) => momentoLocal(h.inicio, tz).dia === alvo.dia), 1) ?? escolher(perto, 2);
 }
 
 /** base-v1: valor da última noite vs mediana das anteriores (até 28). */
@@ -226,6 +257,9 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
   const treinosEv = eventosTodos.filter((e) => e.tipo === "treino");
   const casa = (a: string, b: string) => Math.abs(new Date(a).getTime() - new Date(b).getTime()) <= 20 * 60_000;
   const usados = new Set<string>();
+  const historicoModalidades = treinosEv
+    .filter((e) => !e.descartado && typeof e.detalhes?.modalidade === "string" && e.detalhes.modalidade !== "Outro")
+    .map((e) => ({ inicio: e.inicio, modalidade: e.detalhes.modalidade as string }));
   const treinos: Treino[] = [];
   for (const t of (treinosR.data ?? []) as TreinoRow[]) {
     const ev = treinosEv.find((e) => !usados.has(e.id) && casa(e.inicio, t.inicio));
@@ -238,6 +272,7 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
       status: ev ? "confirmado" : "sugerido",
       modalidade: (ev?.detalhes?.modalidade as string | undefined) ?? null,
       esforco: typeof ev?.detalhes?.esforco === "number" ? (ev.detalhes.esforco as number) : null,
+      palpite: ev ? null : palpiteModalidade(t.inicio, historicoModalidades, tz),
     });
   }
   for (const ev of treinosEv) {
@@ -248,6 +283,7 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
       fcMedia: null, fcMax: null, zonas: null, carga: null, status: "confirmado",
       modalidade: (ev.detalhes?.modalidade as string | undefined) ?? null,
       esforco: typeof ev.detalhes?.esforco === "number" ? (ev.detalhes.esforco as number) : null,
+      palpite: null,
     });
   }
   treinos.sort((a, b) => b.inicio.localeCompare(a.inicio));
@@ -307,7 +343,8 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
     insights.push({
       id: `treino-${t.chave}`, tom: "acao",
       titulo: `Treino detectado ${diaLocal(t.inicio, tz) === hoje ? "hoje" : diaLocal(t.inicio, tz).split("-").reverse().slice(0, 2).join("/")}, ${horaLocal(t.inicio, tz)}–${horaLocal(t.fim, tz)}`,
-      texto: `${t.minutos} min · média ${t.fcMedia} · pico ${t.fcMax} bpm. Confirme a modalidade e o esforço logo abaixo.`,
+      texto: `${t.minutos} min · média ${t.fcMedia} · pico ${t.fcMax} bpm. ` +
+        (t.palpite ? `Pelo seu padrão, parece ${t.palpite.toLowerCase()} — confirme logo abaixo.` : "Confirme a modalidade e o esforço logo abaixo."),
     });
   }
   const influencias = (() => {
