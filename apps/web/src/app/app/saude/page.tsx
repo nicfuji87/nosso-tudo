@@ -5,13 +5,14 @@ import {
 } from "lucide-react";
 import { getWorkspaceContext } from "@/lib/auth";
 import {
-  ALGORITMOS, NOITES_BASE, NOITES_MIN_COMPARAR, getPainelSaude, horaLocal, type Desvio, type Insight, type PainelSaude,
+  ALGORITMOS, NOITES_BASE, NOITES_MIN_COMPARAR, diaLocal, getPainelSaude, horaLocal, type Desvio, type Insight, type PainelSaude,
 } from "@/lib/saude/dados";
 import { ConectarRelogio } from "@/components/saude/conectar-relogio";
 import { GraficoBpm, GraficoNoites } from "@/components/saude/graficos-saude";
 import { ListaRelogios } from "@/components/saude/lista-relogios";
 import { TreinosSaude } from "@/components/saude/treinos-saude";
 import { DiarioSaude } from "@/components/saude/diario-saude";
+import { RadarSaude } from "@/components/saude/radar-saude";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Saúde · Nosso Tudo" };
@@ -181,6 +182,7 @@ export default async function SaudePage() {
   const mal24 = p.malEstares.filter((m) => Date.now() - new Date(m.ts).getTime() < 24 * 3600_000);
   const normalFc = p.desvioFc?.normal ?? null;
   const normalVfc = p.desvioVfc?.normal ?? null;
+  const normalTemp = p.desvioTemp?.normal ?? null;
   const varCarga = p.carga7dAnterior > 0 ? Math.round((p.carga7d / p.carga7dAnterior - 1) * 100) : null;
 
   return (
@@ -229,6 +231,10 @@ export default async function SaudePage() {
         </div>
       </div>
 
+      {/* Radar de Saúde */}
+      <RadarSaude radar={p.radar} hoje={diaLocal(new Date().toISOString(), TZ)} desvioFc={p.desvioFc} desvioVfc={p.desvioVfc}
+        desvioTemp={p.desvioTemp} placar={p.placar} />
+
       {/* Batimento 24 h */}
       <Cartao titulo="Batimento · últimas 24 h" subtitulo="média por minuto · treinos sombreados · mal-estar marcado">
         {p.bpm24h.length >= 2 ? (
@@ -250,9 +256,9 @@ export default async function SaudePage() {
 
       {/* Noites + qualidade */}
       <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
-        <Cartao titulo="Noites" subtitulo={`22h–8h · FC de repouso = menor média de 30 min · VFC = mediana das janelas · ${ALGORITMOS.noites}`}>
-          {p.noites.some((n) => n.fcRepouso != null || n.vfc != null) ? (
-            <GraficoNoites noites={p.noites} normalFc={normalFc} normalVfc={normalVfc} />
+        <Cartao titulo="Noites" subtitulo={`22h–8h · repouso = menor média de 30 min · VFC e pele = mediana das janelas · ${ALGORITMOS.noites}`}>
+          {p.noites.some((n) => n.fcRepouso != null || n.vfc != null || n.temp != null) ? (
+            <GraficoNoites noites={p.noites} normalFc={normalFc} normalVfc={normalVfc} normalTemp={normalTemp} />
           ) : (
             <div className="flex flex-col items-center gap-2 py-10 text-center">
               <Moon className="size-8 text-[#6E7FE0]" />
@@ -267,6 +273,8 @@ export default async function SaudePage() {
             <Medidor rotulo="Batimento medido (24 h)" valor={p.qualidade.minutos24h} total={1440}
               sufixo={`${Math.floor(p.qualidade.minutos24h / 60)} h ${p.qualidade.minutos24h % 60} min · ${Math.round(p.qualidade.cobertura24h * 100)}%`} />
             <Medidor rotulo="Janelas de VFC válidas (24 h)" valor={p.qualidade.janelasVfc24h} total={96} sufixo={`${p.qualidade.janelasVfc24h}`} />
+            <Medidor rotulo="Temperatura da pele (última noite)" valor={p.noites.at(-1)?.janelasTemp ?? 0} total={120}
+              sufixo={`${p.noites.at(-1)?.janelasTemp ?? 0} janelas de 5 min`} />
             <Medidor rotulo="Noites na linha de base" valor={p.noitesBase} total={NOITES_BASE} sufixo={`${p.noitesBase}/${NOITES_BASE}`} />
             <p className="text-caption text-muted-foreground">
               {p.qualidade.atrasoMin != null ? `Último envio do relógio ${p.qualidade.atrasoMin < 1 ? "agora" : `há ${p.qualidade.atrasoMin} min`}. ` : ""}

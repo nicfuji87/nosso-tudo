@@ -17,6 +17,11 @@ class ValueKey<T> {
         @JvmField val IBI_LIST = ValueKey<List<Int>>()
         @JvmField val IBI_STATUS_LIST = ValueKey<List<Int>>()
     }
+    object SkinTemperatureSet {
+        @JvmField val OBJECT_TEMPERATURE = ValueKey<Float>()
+        @JvmField val AMBIENT_TEMPERATURE = ValueKey<Float>()
+        @JvmField val STATUS = ValueKey<Int>()
+    }
     object EcgSet {
         @JvmField val ECG_MV = ValueKey<Float>()
         @JvmField val LEAD_OFF = ValueKey<Int>()

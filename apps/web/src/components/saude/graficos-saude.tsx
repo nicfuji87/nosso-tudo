@@ -79,29 +79,31 @@ export function GraficoBpm({
 }
 
 /** FC de repouso e VFC por noite, cada uma com a linha do seu normal (mediana). */
-export function GraficoNoites({ noites, normalFc, normalVfc }: { noites: Noite[]; normalFc: number | null; normalVfc: number | null }) {
+export function GraficoNoites({ noites, normalFc, normalVfc, normalTemp }: { noites: Noite[]; normalFc: number | null; normalVfc: number | null; normalTemp: number | null }) {
   const grade = useCor("--border", "rgb(222, 219, 211)");
   const texto = useCor("--muted-foreground", "rgb(90, 96, 102)");
-  const dados = noites.filter((n) => n.fcRepouso != null || n.vfc != null);
+  const dados = noites.filter((n) => n.fcRepouso != null || n.vfc != null || n.temp != null);
   const eixo = { tick: { fontSize: 12, fill: texto }, tickLine: false, axisLine: false } as const;
   const series = [
     { chave: "fcRepouso", nome: "FC de repouso", unidade: "bpm", cor: COR.coracao, normal: normalFc },
     { chave: "vfc", nome: "VFC noturna", unidade: "ms", cor: COR.vfc, normal: normalVfc },
+    { chave: "temp", nome: "Pele à noite", unidade: "°C", cor: COR.treino, normal: normalTemp },
   ] as const;
   return (
-    <div className="grid gap-5 sm:grid-cols-2">
+    <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
       {series.map((s) => (
         <div key={s.chave}>
           <p className="mb-1 flex items-center gap-1.5 text-caption font-medium text-muted-foreground">
             <span className="size-2 rounded-full" style={{ backgroundColor: s.cor }} /> {s.nome}
-            {s.normal != null && <span className="tabular ml-auto">seu normal ≈ {Math.round(s.normal)} {s.unidade}</span>}
+            {s.normal != null && <span className="tabular ml-auto">seu normal ≈ {s.chave === "temp" ? s.normal.toFixed(1).replace(".", ",") : Math.round(s.normal)} {s.unidade}</span>}
           </p>
           <div className="h-40 w-full" role="img" aria-label={`${s.nome} por noite`}>
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={dados} margin={{ top: 8, right: 8, bottom: 0, left: -20 }}>
                 <CartesianGrid stroke={grade} strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="noite" tickFormatter={dia} {...eixo} minTickGap={24} />
-                <YAxis domain={["dataMin - 4", "dataMax + 4"]} {...eixo} width={40} allowDecimals={false} />
+                <YAxis domain={s.chave === "temp" ? ["dataMin - 0.5", "dataMax + 0.5"] : ["dataMin - 4", "dataMax + 4"]} {...eixo} width={40}
+                  allowDecimals={s.chave === "temp"} tickFormatter={(v: number) => (s.chave === "temp" ? v.toFixed(1) : String(v))} />
                 {s.normal != null && <ReferenceLine y={s.normal} stroke={s.cor} strokeOpacity={0.35} strokeDasharray="5 4" />}
                 <Tooltip labelFormatter={(v) => `noite de ${dia(String(v))}`} formatter={(v) => [`${v} ${s.unidade}`, s.nome]} contentStyle={estiloTooltip} />
                 <Line type="monotone" dataKey={s.chave} stroke={s.cor} strokeWidth={2.5} dot={{ r: 3, fill: s.cor }} connectNulls isAnimationActive={false} />

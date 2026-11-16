@@ -58,6 +58,8 @@ class ColetaService : Service() {
     private var bateria: LogCsv? = null
     private var inicioMs = 0L
     private val avisos = linkedSetOf<String>()
+    /** Rastreador de temperatura da pele, ligado só à noite no modo automático. */
+    private var temperatura: HealthTracker? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -156,9 +158,36 @@ class ColetaService : Service() {
             val carregando = (st?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0
             val temp = st?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0)?.div(10f)
             bateria?.linha(System.currentTimeMillis(), nivel, carregando, temp, ativos.sumOf { it.second.amostras.get() })
+            if (modo == MODO_FUNDO) ajustarTemperatura()
             atualizarResumo()
             main.postDelayed(this, 60_000)
         }
+    }
+
+    /** Liga a temperatura da pele das 22h às 8h (no pulso) e desliga fora disso. Chamado a cada minuto. */
+    private fun ajustarTemperatura() {
+        val s = sensores ?: return
+        val querer = TemperaturaNoturna.eNoite() && EstadoSaude.noPulso != false
+        if (querer && temperatura == null) {
+            val tipo = runCatching { s.suportados().firstOrNull { it.name == "SKIN_TEMPERATURE_CONTINUOUS" } }.getOrNull() ?: return
+            runCatching {
+                val t = s.rastreador(tipo)
+                t.setEventListener(object : HealthTracker.TrackerEventListener {
+                    override fun onDataReceived(lote: List<DataPoint>) = TemperaturaNoturna.registrarLote(applicationContext, lote)
+                    override fun onFlushCompleted() {}
+                    override fun onError(erro: HealthTracker.TrackerError) { avisos += "temperatura: $erro" }
+                })
+                temperatura = t
+            }
+        } else if (!querer && temperatura != null) {
+            desligarTemperatura()
+        }
+    }
+
+    private fun desligarTemperatura() {
+        runCatching { temperatura?.unsetEventListener() }
+        temperatura = null
+        TemperaturaNoturna.fechar(applicationContext)
     }
 
     private fun atualizarResumo() {
@@ -172,6 +201,7 @@ class ColetaService : Service() {
 
     override fun onDestroy() {
         EstadoSaude.fecharMinuto()
+        desligarTemperatura()
         main.removeCallbacksAndMessages(null)
         for ((tracker, gravador) in ativos) {
             runCatching { tracker.unsetEventListener() }

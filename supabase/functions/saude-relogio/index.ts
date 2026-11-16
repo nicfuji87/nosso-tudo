@@ -9,7 +9,8 @@ import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
  *
  *   anunciar { codigo, segredo, modelo }  → cria pareamento pendente (30 min)
  *   status   { segredo }                  → { vinculado, nome? }
- *   enviar   { segredo, bpm[], vfc[], registros[], ecgs[], estado? } → grava (idempotente)
+ *   enviar   { segredo, bpm[], vfc[], temp[], registros[], ecgs[], estado? } → grava (idempotente)
+ *            e devolve `radar` da noite de hoje (nível + sinais), para o relógio avisar de manhã.
  *            estado = { versao, bateria, carregando, no_pulso, ultima_leitura } — opcional (v0.4+);
  *            um `enviar` só com `estado` funciona como batida de vida.
  *
@@ -43,7 +44,23 @@ const iso = (ms: unknown) => {
 };
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
-const LIMITES = { bpm: 3000, vfc: 600, registros: 500, ecgs: 3 };
+const LIMITES = { bpm: 3000, vfc: 600, temp: 600, registros: 500, ecgs: 3 };
+const TZ = "America/Sao_Paulo";
+const hojeLocal = () => new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+const sinal = (v: number, casas = 0) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(casas).replace(".", ",")}`;
+
+/** Radar da noite de hoje (função SQL saude_radar, radar-v1). Só volta se houver noite de hoje. */
+async function radarDeHoje(admin: SupabaseClient, workspaceId: string) {
+  const { data, error } = await admin.rpc("saude_radar", { p_workspace_id: workspaceId, p_tz: TZ });
+  if (error || !Array.isArray(data) || !data.length) return null;
+  const r = data[0] as Record<string, number | boolean | string | null>;
+  if (r.noite !== hojeLocal()) return null;
+  const partes: string[] = [];
+  if (r.fc_fora && typeof r.fc === "number" && typeof r.fc_normal === "number") partes.push(`repouso ${sinal(r.fc - r.fc_normal)} bpm`);
+  if (r.vfc_fora && typeof r.vfc === "number" && typeof r.vfc_normal === "number") partes.push(`VFC ${sinal((r.vfc / r.vfc_normal - 1) * 100)}%`);
+  if (r.temp_fora && typeof r.temp === "number" && typeof r.temp_normal === "number") partes.push(`pele ${sinal(r.temp - r.temp_normal, 1)} °C`);
+  return { noite: r.noite, nivel: r.nivel, sinais: r.sinais, resumo: partes.join(", ") };
+}
 const TIPOS = new Set(["checkin", "habito", "respiracao", "ecg", "malestar"]);
 
 /** Estado do relógio (v0.4+). Campos inválidos são ignorados, nunca derrubam o envio. */
@@ -125,6 +142,11 @@ Deno.serve(async (req) => {
       if (!inicio || r === null || r <= 0 || r >= 500 || c === null || c < 0 || c > 1.5) return [];
       return [{ ...base, inicio, rmssd_ms: r, cobertura: c }];
     });
+    const temp = lista("temp").flatMap((j: Record<string, unknown>) => {
+      const inicio = iso(j.inicio), p = num(j.pele), a = num(j.ambiente);
+      if (!inicio || p === null || p < 20 || p > 45) return [];
+      return [{ ...base, inicio, pele: p, ambiente: a !== null && a >= -20 && a <= 60 ? a : null, amostras: Math.max(1, Math.round(num(j.n) ?? 1)) }];
+    });
     const registros = lista("registros").flatMap((r: Record<string, unknown>) => {
       const ts = iso(r.ts);
       if (!ts || typeof r.id_local !== "string" || !TIPOS.has(String(r.tipo))) return [];
@@ -148,6 +170,7 @@ Deno.serve(async (req) => {
       const resultado = {
         bpm: await gravar("saude_bpm_minuto", bpm, "dispositivo_id,minuto"),
         vfc: await gravar("saude_vfc_janelas", vfc, "dispositivo_id,inicio"),
+        temp: await gravar("saude_temp_janelas", temp, "dispositivo_id,inicio"),
         registros: await gravar("saude_registros", registros, "dispositivo_id,id_local"),
         ecgs: await gravar("saude_ecgs", ecgs, "dispositivo_id,id_local"),
       };
@@ -155,7 +178,8 @@ Deno.serve(async (req) => {
         .from("saude_dispositivos")
         .update({ ultimo_envio_em: new Date().toISOString(), ...lerEstado(corpo.estado) })
         .eq("id", disp.id);
-      return json({ ok: true, ...resultado });
+      const radar = await radarDeHoje(admin, disp.workspace_id).catch(() => null);
+      return json({ ok: true, ...resultado, radar });
     } catch (e) {
       console.error("saude-relogio enviar", e);
       return json({ erro: "falha_gravar" }, 500);
