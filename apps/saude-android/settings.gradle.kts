@@ -16,5 +16,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "saude-android"
 
-// Fase 1: só o app do relógio. O módulo `mobile` (complementar) entra na Fase 2.
+// wear: app do relógio (Sensor SDK). mobile: app do celular que lê o Samsung Health (Data SDK).
 include(":wear")
+include(":mobile")
