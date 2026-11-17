@@ -63,7 +63,7 @@ async function radarDeHoje(admin: SupabaseClient, workspaceId: string) {
   if (r.temp_fora && typeof r.temp === "number" && typeof r.temp_normal === "number") partes.push(`pele ${sinal(r.temp - r.temp_normal, 1)} °C`);
   return { noite: r.noite, nivel: r.nivel, sinais: r.sinais, resumo: partes.join(", ") };
 }
-const TIPOS = new Set(["checkin", "habito", "respiracao", "ecg", "malestar"]);
+const TIPOS = new Set(["checkin", "habito", "respiracao", "ecg", "malestar", "ortostatico"]);
 
 /** Estado do relógio (v0.4+). Campos inválidos são ignorados, nunca derrubam o envio. */
 function lerEstado(e: unknown): Record<string, unknown> {

@@ -66,6 +66,7 @@ fun TelaLaboratorio(ir: (String) -> Unit) {
             } else {
                 Pilula(e, "Parar coleta", { ctx.pararColeta() }, fundo = Color(0xFF2A1215), cor = Color(0xFFFFB3BB), icone = Icone.Parar)
             }
+            Pilula(e, "Teste em pé (ortostático)", { ir(Rota.ORTOSTATICO) }, fundo = Cor.Chip, cor = Cor.Texto, icone = Icone.Coracao)
             Pilula(e, "Capacidades do relógio", {
                 capacidades = "Consultando…"
                 val s = Sensores(ctx)

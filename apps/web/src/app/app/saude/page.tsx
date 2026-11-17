@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import {
   Activity, BatteryCharging, BatteryMedium, Flame, HeartPulse, Moon, Sparkles, Watch, AlertTriangle, CheckCircle2, Info, Gauge,
-  ArrowDownRight, ArrowUpRight, Hand, Zap, BedDouble,
+  ArrowDownRight, ArrowUpRight, Hand, Zap, BedDouble, Stethoscope,
 } from "lucide-react";
 import { getWorkspaceContext } from "@/lib/auth";
 import {
@@ -285,7 +285,13 @@ export default async function SaudePage() {
               {p.faixaHoje && ` · hoje ${p.faixaHoje.min}–${p.faixaHoje.max} bpm`}
             </p>
           </div>
-          <EstadoRelogio p={p} />
+          <div className="flex flex-col items-end gap-2">
+            <EstadoRelogio p={p} />
+            <a href="/relatorio/saude"
+              className="inline-flex items-center gap-1.5 rounded-full bg-foreground px-3.5 py-1.5 text-caption font-medium text-background transition hover:opacity-90">
+              <Stethoscope className="size-3.5" /> Relatório para o médico
+            </a>
+          </div>
         </div>
       </header>
 
