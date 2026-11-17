@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
 import {
   Activity, BatteryCharging, BatteryMedium, Flame, HeartPulse, Moon, Sparkles, Watch, AlertTriangle, CheckCircle2, Info, Gauge,
-  ArrowDownRight, ArrowUpRight, Hand,
+  ArrowDownRight, ArrowUpRight, Hand, Zap, BedDouble,
 } from "lucide-react";
 import { getWorkspaceContext } from "@/lib/auth";
 import {
-  ALGORITMOS, NOITES_BASE, NOITES_MIN_COMPARAR, diaLocal, getPainelSaude, horaLocal, type Desvio, type Insight, type PainelSaude,
+  ALGORITMOS, NOITES_BASE, NOITES_MIN_COMPARAR, diaLocal, getPainelSaude, horaLocal, type Desvio, type Insight, type PainelSaude, type TrechoRelogio,
 } from "@/lib/saude/dados";
 import { ConectarRelogio } from "@/components/saude/conectar-relogio";
-import { GraficoBpm, GraficoNoites } from "@/components/saude/graficos-saude";
+import { GraficoBpm, GraficoNoites, MiniBateria } from "@/components/saude/graficos-saude";
 import { ListaRelogios } from "@/components/saude/lista-relogios";
 import { TreinosSaude } from "@/components/saude/treinos-saude";
 import { DiarioSaude } from "@/components/saude/diario-saude";
@@ -160,6 +160,82 @@ function Medidor({ rotulo, valor, total, sufixo }: { rotulo: string; valor: numb
   );
 }
 
+const duracao = (min: number) => (min >= 60 ? `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, "0")}` : `${min} min`);
+const minutosEntre = (a: string, b: string) => Math.max(0, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60_000));
+
+const ROTULO_TRECHO: Record<TrechoRelogio["tipo"], { nome: string; cor: string }> = {
+  carregando: { nome: "Carregando", cor: "#D9A21B" },
+  fora_do_pulso: { nome: "Fora do pulso", cor: "#8A9097" },
+  sem_leitura: { nome: "Sem leitura", cor: "#B9BEC4" },
+};
+
+/** Legenda das lacunas do gráfico: por que não houve batimento em cada trecho. */
+function LegendaRelogio({ trechos }: { trechos: TrechoRelogio[] }) {
+  if (!trechos.length) return null;
+  return (
+    <ul className="mt-3 flex flex-wrap gap-2">
+      {trechos.map((t) => {
+        const r = ROTULO_TRECHO[t.tipo];
+        return (
+          <li key={`${t.tipo}-${t.inicio}`} className="tabular inline-flex items-center gap-1.5 rounded-full border border-border/70 px-2.5 py-1 text-caption">
+            {t.tipo === "carregando" ? <Zap className="size-3.5" style={{ color: r.cor }} /> : <span className="size-2 rounded-full" style={{ backgroundColor: r.cor }} />}
+            {r.nome} {horaLocal(t.inicio, TZ)}–{t.emAndamento ? "agora" : horaLocal(t.fim, TZ)}
+            {t.tipo === "carregando" && t.bateriaInicio != null && (
+              <span className="text-muted-foreground">· {t.bateriaInicio}% → {t.bateriaFim ?? "?"}%</span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** Bateria do relógio: agora, gasto por hora no pulso, autonomia, última carga e quanto carregar por dia. */
+function CartaoBateria({ p }: { p: PainelSaude }) {
+  const b = p.bateria;
+  const carga = b.ultimaCarga;
+  const ganho = carga && carga.bateriaInicio != null && carga.bateriaFim != null ? carga.bateriaFim - carga.bateriaInicio : null;
+  return (
+    <div className="space-y-4">
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <p className="tabular text-h2 font-semibold tracking-tight">{b.atual != null ? `${b.atual}%` : "—"}</p>
+          <p className="text-caption text-muted-foreground">
+            {b.carregando ? "carregando agora" : p.dispositivos[0]?.noPulso ? "no pulso, medindo" : "fora do pulso"}
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="tabular text-body font-semibold">{b.autonomiaHoras != null ? `~${b.autonomiaHoras} h` : "—"}</p>
+          <p className="text-caption text-muted-foreground">{b.consumoHora != null ? `por carga · ${String(b.consumoHora).replace(".", ",")}%/h no pulso` : "autonomia: medindo"}</p>
+        </div>
+      </div>
+      <MiniBateria pontos={b.pontos} cargas={p.linhaDoTempo.filter((t) => t.tipo === "carregando")} />
+      <ul className="space-y-1.5 text-body-sm">
+        {carga && (
+          <li className="flex justify-between gap-3">
+            <span className="text-muted-foreground">Última carga</span>
+            <span className="tabular text-right">
+              {horaLocal(carga.inicio, TZ)}–{carga.emAndamento ? "agora" : horaLocal(carga.fim, TZ)}
+              {carga.bateriaInicio != null && ` · ${carga.bateriaInicio}% → ${carga.bateriaFim ?? "?"}%`}
+              {ganho != null && ganho > 0 && !carga.emAndamento && ` em ${duracao(minutosEntre(carga.inicio, carga.fim))}`}
+            </span>
+          </li>
+        )}
+        {b.minutosCargaPorDia != null && (
+          <li className="flex justify-between gap-3">
+            <span className="text-muted-foreground">Para cobrir um dia</span>
+            <span className="tabular">~{duracao(b.minutosCargaPorDia)} de carga</span>
+          </li>
+        )}
+      </ul>
+      <p className="text-caption text-muted-foreground">
+        {b.consumoHora == null ? "O gasto por hora aparece depois de algumas horas de uso com a versão 0.6 do app. " : ""}
+        A medição de saúde gasta pouco; tela sempre ligada e LTE são o que mais consome no Watch.
+      </p>
+    </div>
+  );
+}
+
 export default async function SaudePage() {
   const { workspace } = await getWorkspaceContext();
   const p = await getPainelSaude(workspace.id, TZ);
@@ -183,6 +259,8 @@ export default async function SaudePage() {
   const normalFc = p.desvioFc?.normal ?? null;
   const normalVfc = p.desvioVfc?.normal ?? null;
   const normalTemp = p.desvioTemp?.normal ?? null;
+  const ultimaComSono = [...p.noites].reverse().find((n) => n.sonoInicio && n.sonoFim);
+  const sonoUltima = ultimaComSono ? { inicio: ultimaComSono.sonoInicio!, fim: ultimaComSono.sonoFim! } : null;
   const varCarga = p.carga7dAnterior > 0 ? Math.round((p.carga7d / p.carga7dAnterior - 1) * 100) : null;
 
   return (
@@ -236,16 +314,18 @@ export default async function SaudePage() {
         desvioTemp={p.desvioTemp} placar={p.placar} />
 
       {/* Batimento 24 h */}
-      <Cartao titulo="Batimento · últimas 24 h" subtitulo="média por minuto · treinos sombreados · mal-estar marcado">
+      <Cartao titulo="Batimento · últimas 24 h" subtitulo="média por minuto · treinos em laranja · carregando em âmbar · fora do pulso em cinza">
         {p.bpm24h.length >= 2 ? (
           <GraficoBpm
             pontos={p.bpm24h}
             treinos={treinosHoje.map((t) => ({ inicio: t.inicio, fim: t.fim, rotulo: t.modalidade ?? "treino?" }))}
             marcas={mal24.map((m) => ({ ts: m.ts, rotulo: "mal-estar" }))}
+            relogio={p.linhaDoTempo}
           />
         ) : (
           <p className="py-16 text-center text-body-sm text-muted-foreground">Sem leituras nas últimas 24 horas.</p>
         )}
+        <LegendaRelogio trechos={p.linhaDoTempo} />
       </Cartao>
 
       {/* Treinos */}
@@ -256,7 +336,12 @@ export default async function SaudePage() {
 
       {/* Noites + qualidade */}
       <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
-        <Cartao titulo="Noites" subtitulo={`22h–8h · repouso = menor média de 30 min · VFC e pele = mediana das janelas · ${ALGORITMOS.noites}`}>
+        <Cartao titulo="Noites" subtitulo={`sono estimado pelo batimento · repouso = menor média de 30 min · VFC e pele = mediana dentro do sono · ${ALGORITMOS.noites}`}
+          acao={sonoUltima ? (
+            <span className="tabular inline-flex items-center gap-1.5 rounded-full bg-[#6E7FE0]/10 px-3 py-1 text-caption font-medium text-[#5566C8]">
+              <BedDouble className="size-3.5" /> {horaLocal(sonoUltima.inicio, TZ)}–{horaLocal(sonoUltima.fim, TZ)} · {duracao(minutosEntre(sonoUltima.inicio, sonoUltima.fim))}
+            </span>
+          ) : undefined}>
           {p.noites.some((n) => n.fcRepouso != null || n.vfc != null || n.temp != null) ? (
             <GraficoNoites noites={p.noites} normalFc={normalFc} normalVfc={normalVfc} normalTemp={normalTemp} />
           ) : (
@@ -276,6 +361,14 @@ export default async function SaudePage() {
             <Medidor rotulo="Temperatura da pele (última noite)" valor={p.noites.at(-1)?.janelasTemp ?? 0} total={120}
               sufixo={`${p.noites.at(-1)?.janelasTemp ?? 0} janelas de 5 min`} />
             <Medidor rotulo="Noites na linha de base" valor={p.noitesBase} total={NOITES_BASE} sufixo={`${p.noitesBase}/${NOITES_BASE}`} />
+            {(p.qualidade.semMedir.carregando + p.qualidade.semMedir.foraDoPulso + p.qualidade.semMedir.semExplicacao) > 0 && (
+              <div className="text-caption text-muted-foreground">
+                <p className="font-medium text-foreground">Sem medir nas últimas 24 h</p>
+                {p.qualidade.semMedir.carregando > 0 && <p>⚡ carregando: {duracao(p.qualidade.semMedir.carregando)}</p>}
+                {p.qualidade.semMedir.foraDoPulso > 0 && <p>fora do pulso: {duracao(p.qualidade.semMedir.foraDoPulso)}</p>}
+                {p.qualidade.semMedir.semExplicacao > 0 && <p>sem leitura (relógio frouxo ou motivo não registrado): {duracao(p.qualidade.semMedir.semExplicacao)}</p>}
+              </div>
+            )}
             <p className="text-caption text-muted-foreground">
               {p.qualidade.atrasoMin != null ? `Último envio do relógio ${p.qualidade.atrasoMin < 1 ? "agora" : `há ${p.qualidade.atrasoMin} min`}. ` : ""}
               O relógio envia a cada 30 min; mal-estar e ECG vão na hora.
@@ -307,8 +400,12 @@ export default async function SaudePage() {
           <p className="mt-3 text-caption text-muted-foreground">Para mostrar ao médico, use o ECG do Samsung Health Monitor (registrado na Anvisa).</p>
         </Cartao>
         <div className="space-y-4">
-          <Cartao titulo="Relógios" subtitulo={p.dispositivos[0]?.versao ? `app ${p.dispositivos[0].versao}` : undefined}>
-            <ListaRelogios dispositivos={p.dispositivos} />
+          <Cartao titulo="Relógio e bateria" subtitulo={p.dispositivos[0]?.versao ? `app ${p.dispositivos[0].versao} · bateria-v1` : undefined}
+            acao={<BatteryMedium className="size-5 text-[#3F9B52]" />}>
+            <CartaoBateria p={p} />
+            <div className="mt-5 border-t border-border/70 pt-3">
+              <ListaRelogios dispositivos={p.dispositivos} />
+            </div>
           </Cartao>
           <ConectarRelogio compacto />
         </div>

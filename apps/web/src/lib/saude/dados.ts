@@ -34,7 +34,30 @@ export interface PontoBpm { minuto: string; bpm: number; min: number; max: numbe
 export interface RegistroSaude { id: string; ts: string; tipo: string; valor: string }
 export interface EcgResumo { id: string; ts: string; duracaoS: number; hz: number }
 
-export interface Noite { noite: string; minutos: number; fcRepouso: number | null; vfc: number | null; janelas: number; temp: number | null; janelasTemp: number }
+export interface Noite {
+  noite: string; minutos: number; fcRepouso: number | null; vfc: number | null; janelas: number; temp: number | null; janelasTemp: number;
+  /** sono ESTIMADO pelo batimento (noites-v4) */
+  sonoInicio: string | null; sonoFim: string | null;
+}
+
+/** Trecho da linha do tempo do relógio (explica as lacunas do batimento). */
+export interface TrechoRelogio {
+  tipo: "carregando" | "fora_do_pulso" | "sem_leitura";
+  inicio: string;
+  fim: string;
+  bateriaInicio: number | null;
+  bateriaFim: number | null;
+  emAndamento: boolean;
+}
+export interface Bateria {
+  atual: number | null;
+  carregando: boolean | null;
+  consumoHora: number | null; // % por hora, no pulso e sem carregar (mediana)
+  autonomiaHoras: number | null;
+  ultimaCarga: TrechoRelogio | null;
+  minutosCargaPorDia: number | null; // quanto carregar por dia para cobrir o gasto
+  pontos: { ts: string; bateria: number }[];
+}
 
 export type NivelRadar = "calibrando" | "normal" | "observar" | "estresse";
 /** Uma noite do Radar de Saúde (radar-v1, função SQL saude_radar). */
@@ -98,6 +121,8 @@ export interface Insight {
 
 export interface Qualidade {
   minutos24h: number;
+  /** minutos sem batimento nas últimas 24 h, por causa */
+  semMedir: { carregando: number; foraDoPulso: number; semExplicacao: number };
   cobertura24h: number; // 0–1
   janelasVfc24h: number;
   atrasoMin: number | null;
@@ -125,6 +150,8 @@ export interface PainelSaude {
   ecgs: EcgResumo[];
   qualidade: Qualidade;
   insights: Insight[];
+  linhaDoTempo: TrechoRelogio[]; // últimas 24 h
+  bateria: Bateria;
 }
 
 /** Data local (YYYY-MM-DD) no fuso do workspace. */
@@ -197,7 +224,7 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
   const desde24h = new Date(agora - 24 * 3600_000).toISOString();
   const desde60d = new Date(agora - 60 * 86_400_000).toISOString();
 
-  const [disp, bpm, vfc24, regs, ecgs, noitesR, treinosR, eventosR, radarR] = await Promise.all([
+  const [disp, bpm, vfc24, regs, ecgs, noitesR, treinosR, eventosR, radarR, estadosR] = await Promise.all([
     supabase
       .from("saude_dispositivos")
       .select("id, nome, modelo, criado_em, ultimo_envio_em, versao_app, bateria_pct, carregando, no_pulso, ultima_leitura_em, estado_em")
@@ -226,6 +253,13 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
       .order("inicio", { ascending: false })
       .limit(300),
     supabase.rpc("saude_radar", { p_workspace_id: workspaceId, p_tz: tz }),
+    supabase
+      .from("saude_estado_eventos")
+      .select("ts, tipo, bateria")
+      .eq("workspace_id", workspaceId)
+      .gte("ts", new Date(agora - 72 * 3600_000).toISOString())
+      .order("ts", { ascending: true })
+      .limit(2000),
   ]);
 
   // ---- dispositivos
@@ -242,11 +276,15 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
   const faixaHoje = deHoje.length ? { min: Math.min(...deHoje.map((b) => b.min)), max: Math.max(...deHoje.map((b) => b.max)) } : null;
 
   // ---- noites e linha de base
-  type NoiteRow = { noite: string; minutos: number; fc_repouso: number | null; vfc_noturna: number | null; janelas: number; temp_pele: number | null; janelas_temp: number };
+  type NoiteRow = {
+    noite: string; minutos: number; fc_repouso: number | null; vfc_noturna: number | null; janelas: number; temp_pele: number | null; janelas_temp: number;
+    sono_inicio: string | null; sono_fim: string | null;
+  };
   const noites: Noite[] = ((noitesR.data ?? []) as NoiteRow[]).map((n) => ({
     noite: n.noite, minutos: n.minutos, fcRepouso: n.fc_repouso != null ? Math.round(n.fc_repouso * 10) / 10 : null,
     vfc: n.vfc_noturna != null ? Math.round(n.vfc_noturna) : null, janelas: n.janelas,
     temp: n.temp_pele != null ? Math.round(n.temp_pele * 100) / 100 : null, janelasTemp: n.janelas_temp,
+    sonoInicio: n.sono_inicio, sonoFim: n.sono_fim,
   }));
   const noitesValidas = noites.filter((n) => n.fcRepouso != null);
   const ultimaNoite = noitesValidas.at(-1) ?? null;
@@ -283,39 +321,51 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
   };
 
   // ---- treinos: detectados (SQL) + confirmados/descartados (diário)
+  // Um bloco detectado some da lista de sugestões quando QUALQUER treino do diário (confirmado ou
+  // descartado) se sobrepõe a ele — assim um bloco pode virar dois treinos (ex.: musculação + natação).
+  // Cada treino confirmado mostra os números do SEU intervalo (saude_resumo_intervalos).
   type TreinoRow = { inicio: string; fim: string; minutos: number; fc_media: number; fc_max: number; z_leve: number; z_moderado: number; z_intenso: number; z_maximo: number; carga: number };
   const treinosEv = eventosTodos.filter((e) => e.tipo === "treino");
-  const casa = (a: string, b: string) => Math.abs(new Date(a).getTime() - new Date(b).getTime()) <= 20 * 60_000;
-  const usados = new Set<string>();
+  const ms = (x: string) => new Date(x).getTime();
+  const sobrepoe = (a1: string, a2: string, b1: string, b2: string) => ms(a1) < ms(b2) && ms(b1) < ms(a2);
   const historicoModalidades = treinosEv
     .filter((e) => !e.descartado && typeof e.detalhes?.modalidade === "string" && e.detalhes.modalidade !== "Outro")
     .map((e) => ({ inicio: e.inicio, modalidade: e.detalhes.modalidade as string }));
   const treinos: Treino[] = [];
   for (const t of (treinosR.data ?? []) as TreinoRow[]) {
-    const ev = treinosEv.find((e) => !usados.has(e.id) && casa(e.inicio, t.inicio));
-    if (ev) usados.add(ev.id);
-    if (ev?.descartado) continue;
+    if (treinosEv.some((e) => sobrepoe(e.inicio, e.fim ?? e.inicio, t.inicio, t.fim))) continue;
     treinos.push({
-      chave: t.inicio, eventoId: ev?.id ?? null, inicio: ev?.inicio ?? t.inicio, fim: ev?.fim ?? t.fim, minutos: t.minutos,
+      chave: t.inicio, eventoId: null, inicio: t.inicio, fim: t.fim, minutos: t.minutos,
       fcMedia: Math.round(t.fc_media), fcMax: t.fc_max,
       zonas: { leve: t.z_leve, moderado: t.z_moderado, intenso: t.z_intenso, maximo: t.z_maximo }, carga: t.carga,
-      status: ev ? "confirmado" : "sugerido",
-      modalidade: (ev?.detalhes?.modalidade as string | undefined) ?? null,
-      esforco: typeof ev?.detalhes?.esforco === "number" ? (ev.detalhes.esforco as number) : null,
-      palpite: ev ? null : palpiteModalidade(t.inicio, historicoModalidades, tz),
+      status: "sugerido", modalidade: null, esforco: null,
+      palpite: palpiteModalidade(t.inicio, historicoModalidades, tz),
     });
   }
-  for (const ev of treinosEv) {
-    if (usados.has(ev.id) || ev.descartado) continue; // treino lançado à mão, sem bloco de FC
+  const confirmados = treinosEv.filter((e) => !e.descartado && agora - ms(e.inicio) < 15 * 86_400_000);
+  type ResumoRow = { idx: number; minutos: number; fc_media: number | null; fc_max: number | null; z_leve: number; z_moderado: number; z_intenso: number; z_maximo: number; carga: number };
+  const resumos = confirmados.length
+    ? (((await supabase.rpc("saude_resumo_intervalos", {
+        p_workspace_id: workspaceId,
+        p_inicios: confirmados.map((e) => e.inicio),
+        p_fins: confirmados.map((e) => e.fim ?? e.inicio),
+      })).data ?? []) as ResumoRow[])
+    : [];
+  confirmados.forEach((ev, i) => {
+    const r = resumos.find((x) => x.idx === i + 1);
     const fim = ev.fim ?? ev.inicio;
+    const medido = r && r.minutos >= 3;
     treinos.push({
-      chave: ev.id, eventoId: ev.id, inicio: ev.inicio, fim, minutos: Math.round((new Date(fim).getTime() - new Date(ev.inicio).getTime()) / 60_000),
-      fcMedia: null, fcMax: null, zonas: null, carga: null, status: "confirmado",
+      chave: ev.id, eventoId: ev.id, inicio: ev.inicio, fim,
+      minutos: Math.round((ms(fim) - ms(ev.inicio)) / 60_000),
+      fcMedia: medido && r.fc_media != null ? Math.round(r.fc_media) : null, fcMax: medido ? r.fc_max : null,
+      zonas: medido ? { leve: r.z_leve, moderado: r.z_moderado, intenso: r.z_intenso, maximo: r.z_maximo } : null,
+      carga: medido ? r.carga : null, status: "confirmado",
       modalidade: (ev.detalhes?.modalidade as string | undefined) ?? null,
       esforco: typeof ev.detalhes?.esforco === "number" ? (ev.detalhes.esforco as number) : null,
       palpite: null,
     });
-  }
+  });
   treinos.sort((a, b) => b.inicio.localeCompare(a.inicio));
   const somaCarga = (de: number, ate: number) =>
     treinos.filter((t) => { const x = new Date(t.inicio).getTime(); return x >= de && x < ate; }).reduce((s, t) => s + (t.carga ?? 0), 0);
@@ -348,10 +398,72 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
     }),
   );
 
+  // ---- linha do tempo do relógio (relogio-v1): carregando / fora do pulso / sem leitura
+  type EstadoRow = { ts: string; tipo: string; bateria: number | null };
+  const estados = (estadosR.data ?? []) as EstadoRow[];
+  const agoraIso = new Date(agora).toISOString();
+  const trechos: TrechoRelogio[] = [];
+  const abrir = (tipo: "carregando" | "fora_do_pulso", fecha: string) => {
+    let aberto: EstadoRow | null = null;
+    for (const e of estados) {
+      if (e.tipo === tipo && !aberto) aberto = e;
+      else if (e.tipo === fecha && aberto) {
+        trechos.push({ tipo, inicio: aberto.ts, fim: e.ts, bateriaInicio: aberto.bateria, bateriaFim: e.bateria, emAndamento: false });
+        aberto = null;
+      }
+    }
+    if (aberto) {
+      const ainda = tipo === "carregando" ? dispositivos[0]?.carregando !== false : dispositivos[0]?.noPulso === false;
+      if (ainda) trechos.push({ tipo, inicio: aberto.ts, fim: agoraIso, bateriaInicio: aberto.bateria, bateriaFim: dispositivos[0]?.bateria ?? null, emAndamento: true });
+    }
+  };
+  abrir("carregando", "desconectado");
+  abrir("fora_do_pulso", "no_pulso");
+  // lacunas do batimento (> 10 min) que nenhum estado explica = "sem leitura" (relógio frouxo, app parado…)
+  const explicado = (a: number, b: number) => trechos.some((t) => ms(t.inicio) - 5 * 60_000 <= a && ms(t.fim) + 5 * 60_000 >= b);
+  for (let i = 1; i < bpm24h.length; i++) {
+    const a = ms(bpm24h[i - 1]!.minuto) + 60_000;
+    const b = ms(bpm24h[i]!.minuto);
+    if (b - a >= 10 * 60_000 && !explicado(a, b)) {
+      trechos.push({ tipo: "sem_leitura", inicio: new Date(a).toISOString(), fim: new Date(b).toISOString(), bateriaInicio: null, bateriaFim: null, emAndamento: false });
+    }
+  }
+  const desde24 = agora - 24 * 3600_000;
+  const linhaDoTempo = trechos.filter((t) => ms(t.fim) > desde24).sort((x, y) => x.inicio.localeCompare(y.inicio));
+  const minutosEm = (tipo: TrechoRelogio["tipo"]) => Math.round(linhaDoTempo.filter((t) => t.tipo === tipo)
+    .reduce((acc, t) => acc + (Math.min(ms(t.fim), agora) - Math.max(ms(t.inicio), desde24)), 0) / 60_000);
+
+  // ---- bateria (bateria-v1): gasto por hora no pulso, autonomia e quanto carregar por dia
+  const pontosBat = estados.filter((e) => e.bateria != null).map((e) => ({ ts: e.ts, bateria: e.bateria! }));
+  const carregandoEm = (t: number) => trechos.some((x) => x.tipo === "carregando" && ms(x.inicio) <= t && ms(x.fim) >= t);
+  const taxas: number[] = [];
+  for (let i = 1; i < pontosBat.length; i++) {
+    const p0 = pontosBat[i - 1]!, p1 = pontosBat[i]!;
+    const h = (ms(p1.ts) - ms(p0.ts)) / 3600_000;
+    if (h < 0.3 || h > 6 || carregandoEm(ms(p0.ts)) || carregandoEm(ms(p1.ts)) || p1.bateria > p0.bateria) continue;
+    taxas.push((p0.bateria - p1.bateria) / h);
+  }
+  const consumoHora = taxas.length >= 3 ? [...taxas].sort((x, y) => x - y)[Math.floor(taxas.length / 2)]! : null;
+  const cargas = trechos.filter((t) => t.tipo === "carregando" && !t.emAndamento && t.bateriaInicio != null && t.bateriaFim != null)
+    .sort((x, y) => x.inicio.localeCompare(y.inicio));
+  const ultimaCarga = trechos.filter((t) => t.tipo === "carregando").sort((x, y) => x.inicio.localeCompare(y.inicio)).at(-1) ?? null;
+  const velocidades = cargas.map((t) => (t.bateriaFim! - t.bateriaInicio!) / Math.max(1, (ms(t.fim) - ms(t.inicio)) / 60_000)).filter((v) => v > 0);
+  const pctPorMin = velocidades.length ? velocidades.reduce((x, y) => x + y, 0) / velocidades.length : null;
+  const bateria: Bateria = {
+    atual: dispositivos[0]?.bateria ?? null,
+    carregando: dispositivos[0]?.carregando ?? null,
+    consumoHora: consumoHora != null ? Math.round(consumoHora * 10) / 10 : null,
+    autonomiaHoras: consumoHora ? Math.round(100 / consumoHora) : null,
+    ultimaCarga,
+    minutosCargaPorDia: consumoHora && pctPorMin ? Math.round((consumoHora * 24) / pctPorMin) : null,
+    pontos: pontosBat.filter((p) => ms(p.ts) > desde24),
+  };
+
   // ---- qualidade dos dados
   const ultimoEnvio = dispositivos.map((d) => d.ultimoEnvioEm).filter(Boolean).sort().at(-1) ?? null;
   const qualidade: Qualidade = {
     minutos24h: bpm24h.length,
+    semMedir: { carregando: minutosEm("carregando"), foraDoPulso: minutosEm("fora_do_pulso"), semExplicacao: minutosEm("sem_leitura") },
     cobertura24h: Math.min(1, bpm24h.length / 1440),
     janelasVfc24h: vfc24.count ?? 0,
     atrasoMin: ultimoEnvio ? Math.round((agora - new Date(ultimoEnvio).getTime()) / 60_000) : null,
@@ -415,6 +527,16 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
       insights.push({ id: "radar-normal", tom: "bom", titulo: "Radar: noite dentro do seu normal", texto: "Repouso, VFC e temperatura da pele dentro da sua faixa." });
     }
   }
+  const noiteHoje = noites.at(-1);
+  if (noiteHoje?.noite === hoje && noiteHoje.sonoInicio && noiteHoje.sonoFim) {
+    const h = (ms(noiteHoje.sonoFim) - ms(noiteHoje.sonoInicio)) / 3600_000;
+    if (h < 6) {
+      insights.push({
+        id: "sono-curto", tom: "neutro", titulo: `Noite curta: ~${Math.floor(h)} h ${Math.round((h % 1) * 60)} min de sono estimado`,
+        texto: `Pelo batimento, você adormeceu por volta de ${horaLocal(noiteHoje.sonoInicio, tz)} e levantou ${horaLocal(noiteHoje.sonoFim, tz)}. Noites curtas mexem no repouso e na VFC do dia seguinte.`,
+      });
+    }
+  }
   if (noitesValidas.length < NOITES_BASE) {
     insights.push({
       id: "calibrando", tom: "neutro",
@@ -436,6 +558,6 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
     noites, ultimaNoite, noitesBase: noitesValidas.length, desvioFc, desvioVfc, desvioTemp, radar, placar,
     treinos, carga7d, carga7dAnterior, eventos, registros, malEstares,
     ecgs: (ecgs.data ?? []).map((e) => ({ id: e.id, ts: e.ts, duracaoS: e.duracao_s, hz: e.hz })),
-    qualidade, insights,
+    qualidade, insights, linhaDoTempo, bateria,
   };
 }

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import {
   Area, AreaChart, CartesianGrid, Line, LineChart, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import type { Noite, PontoBpm } from "@/lib/saude/dados";
+import type { Noite, PontoBpm, TrechoRelogio } from "@/lib/saude/dados";
 
 /** Lê um token de cor (`--x: r g b`) para o SVG do recharts (segue tema claro/escuro). */
 function useCor(token: string, fallback: string) {
@@ -29,9 +29,14 @@ export const COR = { coracao: "#E5536A", vfc: "#8B6CE0", treino: "#F08A3C", male
 const estiloTooltip = { borderRadius: 12, fontSize: 12, border: "1px solid rgb(0 0 0 / 0.08)", boxShadow: "0 8px 24px rgb(0 0 0 / 0.08)" };
 
 /** Batimento das últimas 24 h, com treinos sombreados e mal-estar marcados. */
+const COR_RELOGIO: Record<TrechoRelogio["tipo"], string> = { carregando: "#D9A21B", fora_do_pulso: "#8A9097", sem_leitura: "#B9BEC4" };
+
 export function GraficoBpm({
-  pontos, treinos = [], marcas = [],
-}: { pontos: PontoBpm[]; treinos?: { inicio: string; fim: string; rotulo: string }[]; marcas?: { ts: string; rotulo: string }[] }) {
+  pontos, treinos = [], marcas = [], relogio = [],
+}: {
+  pontos: PontoBpm[]; treinos?: { inicio: string; fim: string; rotulo: string }[]; marcas?: { ts: string; rotulo: string }[];
+  relogio?: TrechoRelogio[];
+}) {
   const grade = useCor("--border", "rgb(222, 219, 211)");
   const texto = useCor("--muted-foreground", "rgb(90, 96, 102)");
   // Lacunas (> 3 min sem leitura) ficam em branco em vez de virarem uma reta enganosa.
@@ -57,6 +62,19 @@ export function GraficoBpm({
           <CartesianGrid stroke={grade} strokeDasharray="3 3" vertical={false} />
           <XAxis dataKey="t" type="number" scale="time" domain={["dataMin", "dataMax"]} tickFormatter={hora}
             tick={{ fontSize: 12, fill: texto }} tickLine={false} axisLine={false} minTickGap={56} />
+          {relogio.map((r) => {
+            const a = Math.max(new Date(r.inicio).getTime(), t0);
+            const b = Math.min(new Date(r.fim).getTime(), t1);
+            if (b <= a) return null;
+            const rotulo = r.tipo === "carregando"
+              ? `⚡ ${r.bateriaInicio ?? "?"}%→${r.bateriaFim ?? "?"}%`
+              : r.tipo === "fora_do_pulso" ? "fora do pulso" : "";
+            return (
+              <ReferenceArea key={`${r.tipo}-${r.inicio}`} x1={a} x2={b} fill={COR_RELOGIO[r.tipo]}
+                fillOpacity={r.tipo === "carregando" ? 0.14 : 0.1} strokeOpacity={0}
+                label={rotulo ? { value: rotulo, position: "insideBottom", fill: COR_RELOGIO[r.tipo], fontSize: 11, fontWeight: 600 } : undefined} />
+            );
+          })}
           <YAxis domain={["dataMin - 5", "dataMax + 5"]} tick={{ fontSize: 12, fill: texto }} tickLine={false} axisLine={false} width={40} allowDecimals={false} />
           {treinos.map((t) => {
             const a = Math.max(new Date(t.inicio).getTime(), t0);
@@ -132,6 +150,37 @@ export function MiniBpm({ pontos, momento }: { pontos: PontoBpm[]; momento: stri
           <Tooltip labelFormatter={(v) => hora(Number(v))} formatter={(v) => [`${v} bpm`, "batimento"]} contentStyle={estiloTooltip} />
           <Line type="monotone" dataKey="bpm" stroke={COR.coracao} strokeWidth={2} dot={{ r: 2 }} isAnimationActive={false} />
         </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+/** Bateria nas últimas 24 h, com as cargas sombreadas. */
+export function MiniBateria({ pontos, cargas }: { pontos: { ts: string; bateria: number }[]; cargas: TrechoRelogio[] }) {
+  const texto = useCor("--muted-foreground", "rgb(90, 96, 102)");
+  const dados = pontos.map((p) => ({ t: new Date(p.ts).getTime(), b: p.bateria }));
+  if (dados.length < 2) return null;
+  const t0 = dados[0]!.t, t1 = dados.at(-1)!.t;
+  return (
+    <div className="h-24 w-full" role="img" aria-label="Bateria do relógio nas últimas 24 horas">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={dados} margin={{ top: 6, right: 4, bottom: 0, left: -28 }}>
+          <defs>
+            <linearGradient id="saude-bat" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#3F9B52" stopOpacity={0.25} />
+              <stop offset="100%" stopColor="#3F9B52" stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
+          <XAxis dataKey="t" type="number" scale="time" domain={["dataMin", "dataMax"]} tickFormatter={hora}
+            tick={{ fontSize: 10, fill: texto }} tickLine={false} axisLine={false} minTickGap={48} />
+          <YAxis domain={[0, 100]} ticks={[0, 50, 100]} tick={{ fontSize: 10, fill: texto }} tickLine={false} axisLine={false} width={36} />
+          {cargas.map((c) => {
+            const a = Math.max(new Date(c.inicio).getTime(), t0), b = Math.min(new Date(c.fim).getTime(), t1);
+            return b > a ? <ReferenceArea key={c.inicio} x1={a} x2={b} fill="#D9A21B" fillOpacity={0.15} strokeOpacity={0} /> : null;
+          })}
+          <Tooltip labelFormatter={(v) => hora(Number(v))} formatter={(v) => [`${v}%`, "bateria"]} contentStyle={estiloTooltip} />
+          <Area type="stepAfter" dataKey="b" stroke="#3F9B52" strokeWidth={2} fill="url(#saude-bat)" dot={false} isAnimationActive={false} />
+        </AreaChart>
       </ResponsiveContainer>
     </div>
   );

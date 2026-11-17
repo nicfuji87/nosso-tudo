@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Check, X, Info, Sparkles } from "lucide-react";
+import { Check, X, Info, Sparkles, Scissors, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Treino } from "@/lib/saude/dados";
-import { descartarTreino, excluirEvento, registrarEvento } from "@/app/app/saude/actions";
+import { confirmarTreino, descartarTreino, excluirEvento } from "@/app/app/saude/actions";
 import { BAIXA_CONFIANCA, ESFORCO, MODALIDADES, iconeModalidade, motivoBaixaConfianca } from "./modalidades";
 
 const TZ = "America/Sao_Paulo";
@@ -48,17 +48,60 @@ function BarraZonas({ t }: { t: Treino }) {
   );
 }
 
+/** "HH:MM" local de um ISO. */
+const hhmm = (iso: string) => hora(iso);
+/** ISO a partir do dia local de `base` + "HH:MM" (São Paulo, UTC−3, sem horário de verão). */
+function isoNoDia(base: string, hm: string) {
+  const dia = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(base));
+  return new Date(`${dia}T${hm}:00-03:00`).toISOString();
+}
+const meio = (a: string, b: string) => hhmm(new Date((new Date(a).getTime() + new Date(b).getTime()) / 2 / 60_000 * 60_000).toISOString());
+
+function Chips({ valor, onChange, cor = "#F08A3C" }: { valor: string | null; onChange: (v: string) => void; cor?: string }) {
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-2">
+      {MODALIDADES.map(({ nome, icone: Icone }) => (
+        <button key={nome} type="button" onClick={() => onChange(nome)} aria-pressed={valor === nome}
+          className={cn("inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-body-sm transition-colors",
+            valor === nome ? "text-white" : "border-border bg-card hover:bg-secondary")}
+          style={valor === nome ? { backgroundColor: cor, borderColor: cor } : undefined}>
+          <Icone className="size-4" /> {nome}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function CampoHora({ id, rotulo, valor, onChange }: { id: string; rotulo: string; valor: string; onChange: (v: string) => void }) {
+  return (
+    <label htmlFor={id} className="flex flex-col gap-1 text-caption text-muted-foreground">
+      {rotulo}
+      <input id={id} type="time" value={valor} onChange={(e) => onChange(e.target.value)}
+        className="tabular h-9 rounded-md border border-border bg-card px-2 text-body-sm text-foreground" />
+    </label>
+  );
+}
+
 function Sugestao({ t }: { t: Treino }) {
   const [modalidade, setModalidade] = useState<string | null>(t.palpite);
   const [esforco, setEsforco] = useState<number | null>(null);
+  const [inicio, setInicio] = useState(hhmm(t.inicio));
+  const [fim, setFim] = useState(hhmm(t.fim));
+  const [ajustar, setAjustar] = useState(false);
+  const [dividir, setDividir] = useState(false);
+  const [troca, setTroca] = useState(meio(t.inicio, t.fim));
+  const [modalidade2, setModalidade2] = useState<string | null>(null);
   const [pendente, iniciar] = useTransition();
 
+  const pronto = !!modalidade && (!dividir || (!!modalidade2 && troca > inicio && troca < fim)) && fim > inicio;
   const confirmar = () => iniciar(async () => {
-    const r = await registrarEvento({
-      tipo: "treino", inicio: t.inicio, fim: t.fim, origem: "detectado",
-      detalhes: { modalidade: modalidade!, ...(esforco != null ? { esforco } : {}) },
-    });
-    if (r.error) toast.error(r.error); else toast.success(`${modalidade} registrado.`);
+    const i = isoNoDia(t.inicio, inicio), f = isoNoDia(t.inicio, fim);
+    const partes = dividir
+      ? [{ inicio: i, fim: isoNoDia(t.inicio, troca), modalidade: modalidade! }, { inicio: isoNoDia(t.inicio, troca), fim: f, modalidade: modalidade2! }]
+      : [{ inicio: i, fim: f, modalidade: modalidade! }];
+    const r = await confirmarTreino({ partes, esforco });
+    if (r.error) toast.error(r.error);
+    else toast.success(dividir ? `${modalidade} + ${modalidade2} registrados.` : `${modalidade} registrado.`);
   });
   const descartar = () => iniciar(async () => {
     const r = await descartarTreino({ inicio: t.inicio, fim: t.fim });
@@ -75,25 +118,40 @@ function Sugestao({ t }: { t: Treino }) {
       </div>
       <div className="mt-3"><BarraZonas t={t} /></div>
 
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button type="button" onClick={() => setAjustar((v) => !v)} aria-pressed={ajustar}
+          className={cn("inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-caption", ajustar ? "border-foreground/30 bg-secondary" : "border-border hover:bg-secondary")}>
+          <Clock className="size-3.5" /> Ajustar horário
+        </button>
+        <button type="button" onClick={() => { setDividir((v) => !v); setAjustar(true); }} aria-pressed={dividir}
+          className={cn("inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-caption", dividir ? "border-[#8B6CE0]/50 bg-[#8B6CE0]/10 text-[#7A5BD0]" : "border-border hover:bg-secondary")}>
+          <Scissors className="size-3.5" /> Foram duas atividades
+        </button>
+      </div>
+
+      {ajustar && (
+        <div className="mt-3 flex flex-wrap items-end gap-3">
+          <CampoHora id={`ini-${t.chave}`} rotulo="Começou" valor={inicio} onChange={setInicio} />
+          {dividir && <CampoHora id={`troca-${t.chave}`} rotulo="Trocou às" valor={troca} onChange={setTroca} />}
+          <CampoHora id={`fim-${t.chave}`} rotulo="Terminou" valor={fim} onChange={setFim} />
+        </div>
+      )}
+
       <p className="mt-4 flex items-center gap-1.5 text-caption font-medium text-muted-foreground">
-        O que foi?
+        {dividir ? `1ª atividade (${inicio}–${troca})` : "O que foi?"}
         {t.palpite && modalidade === t.palpite && (
           <span className="inline-flex items-center gap-1 rounded-full bg-[#8B6CE0]/10 px-2 py-0.5 text-[#7A5BD0]">
             <Sparkles className="size-3" /> pelo seu padrão
           </span>
         )}
       </p>
-      <div className="mt-1.5 flex flex-wrap gap-2">
-        {MODALIDADES.map(({ nome, icone: Icone }) => (
-          <button key={nome} type="button" onClick={() => setModalidade(nome)} aria-pressed={modalidade === nome}
-            className={cn(
-              "inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-body-sm transition-colors",
-              modalidade === nome ? "border-[#F08A3C] bg-[#F08A3C] text-white" : "border-border bg-card hover:bg-secondary",
-            )}>
-            <Icone className="size-4" /> {nome}
-          </button>
-        ))}
-      </div>
+      <Chips valor={modalidade} onChange={setModalidade} />
+      {dividir && (
+        <>
+          <p className="mt-3 text-caption font-medium text-muted-foreground">2ª atividade ({troca}–{fim})</p>
+          <Chips valor={modalidade2} onChange={setModalidade2} cor="#8B6CE0" />
+        </>
+      )}
 
       <p className="mt-4 text-caption font-medium text-muted-foreground">
         Esforço percebido{esforco != null && <span className="text-foreground"> · {esforco} — {ESFORCO[esforco]}</span>}
@@ -111,16 +169,16 @@ function Sugestao({ t }: { t: Treino }) {
         ))}
       </div>
 
-      {modalidade && BAIXA_CONFIANCA.has(modalidade) && (
-        <p className="mt-3 flex gap-1.5 text-caption text-muted-foreground">
+      {[modalidade, dividir ? modalidade2 : null].filter((m): m is string => !!m && BAIXA_CONFIANCA.has(m)).map((m) => (
+        <p key={m} className="mt-3 flex gap-1.5 text-caption text-muted-foreground">
           <Info className="mt-0.5 size-3.5 shrink-0" />
-          Em {modalidade.toLowerCase()} a FC do pulso pode errar ({motivoBaixaConfianca(modalidade)}). O treino conta, mas a FC fica marcada como baixa confiança.
+          Em {m.toLowerCase()} a FC do pulso pode errar ({motivoBaixaConfianca(m)}). O treino conta, mas a FC fica marcada como baixa confiança.
         </p>
-      )}
+      ))}
 
       <div className="mt-4 flex flex-wrap gap-2">
-        <Button size="sm" variant="accent" disabled={!modalidade || pendente} onClick={confirmar}>
-          <Check className="size-4" /> Confirmar
+        <Button size="sm" variant="accent" disabled={!pronto || pendente} onClick={confirmar}>
+          <Check className="size-4" /> {dividir ? "Confirmar as duas" : "Confirmar"}
         </Button>
         <Button size="sm" variant="ghost" disabled={pendente} onClick={descartar}>
           <X className="size-4" /> Não foi treino
@@ -144,7 +202,7 @@ function Confirmado({ t }: { t: Treino }) {
             {t.modalidade ?? "Treino"} <span className="font-normal text-muted-foreground">· {quando(t.inicio)}, {hora(t.inicio)}–{hora(t.fim)}</span>
           </p>
           <p className="tabular text-caption text-muted-foreground">
-            {t.minutos} min{t.fcMedia ? ` · média ${t.fcMedia} · pico ${t.fcMax}` : " · lançado à mão"}
+            {t.minutos} min{t.fcMedia ? ` · média ${t.fcMedia} · pico ${t.fcMax}` : " · sem batimento medido"}
             {t.esforco != null && ` · esforço ${t.esforco}/10`}
             {t.carga != null && ` · carga ${t.carga}`}
           </p>

@@ -11,7 +11,8 @@ import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
  *   status   { segredo }                  → { vinculado, nome? }
  *   enviar   { segredo, bpm[], vfc[], temp[], registros[], ecgs[], estado? } → grava (idempotente)
  *            e devolve `radar` da noite de hoje (nível + sinais), para o relógio avisar de manhã.
- *            estado = { versao, bateria, carregando, no_pulso, ultima_leitura } — opcional (v0.4+);
+ *            estado = { versao, bateria, carregando, no_pulso, ultima_leitura, ts? } — opcional (v0.4+);
+ *            transicoes = [{ ts, tipo: carregando|desconectado|no_pulso|fora_do_pulso, bateria }] (v0.6+)
  *            um `enviar` só com `estado` funciona como batida de vida.
  *
  * Escrita com service_role; isolamento por workspace vem do dispositivo.
@@ -44,7 +45,8 @@ const iso = (ms: unknown) => {
 };
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
-const LIMITES = { bpm: 3000, vfc: 600, temp: 600, registros: 500, ecgs: 3 };
+const LIMITES = { bpm: 3000, vfc: 600, temp: 600, transicoes: 500, registros: 500, ecgs: 3 };
+const TIPOS_ESTADO = new Set(["carregando", "desconectado", "no_pulso", "fora_do_pulso"]);
 const TZ = "America/Sao_Paulo";
 const hojeLocal = () => new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const sinal = (v: number, casas = 0) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(casas).replace(".", ",")}`;
@@ -147,6 +149,17 @@ Deno.serve(async (req) => {
       if (!inicio || p === null || p < 20 || p > 45) return [];
       return [{ ...base, inicio, pele: p, ambiente: a !== null && a >= -20 && a <= 60 ? a : null, amostras: Math.max(1, Math.round(num(j.n) ?? 1)) }];
     });
+    const transicoes = lista("transicoes").flatMap((t: Record<string, unknown>) => {
+      const ts = iso(t.ts), b = num(t.bateria);
+      if (!ts || !TIPOS_ESTADO.has(String(t.tipo))) return [];
+      return [{ ...base, ts, tipo: String(t.tipo), bateria: b !== null && b >= 0 && b <= 100 ? Math.round(b) : null }];
+    });
+    // amostra de bateria a cada envio (curva de bateria e gasto por hora)
+    const est = (corpo.estado ?? {}) as Record<string, unknown>;
+    const bat = num(est.bateria);
+    if (bat !== null && bat >= 0 && bat <= 100) {
+      transicoes.push({ ...base, ts: iso(est.ts) ?? new Date().toISOString(), tipo: "amostra", bateria: Math.round(bat) });
+    }
     const registros = lista("registros").flatMap((r: Record<string, unknown>) => {
       const ts = iso(r.ts);
       if (!ts || typeof r.id_local !== "string" || !TIPOS.has(String(r.tipo))) return [];
@@ -171,6 +184,7 @@ Deno.serve(async (req) => {
         bpm: await gravar("saude_bpm_minuto", bpm, "dispositivo_id,minuto"),
         vfc: await gravar("saude_vfc_janelas", vfc, "dispositivo_id,inicio"),
         temp: await gravar("saude_temp_janelas", temp, "dispositivo_id,inicio"),
+        estado: await gravar("saude_estado_eventos", transicoes, "dispositivo_id,ts,tipo"),
         registros: await gravar("saude_registros", registros, "dispositivo_id,id_local"),
         ecgs: await gravar("saude_ecgs", ecgs, "dispositivo_id,id_local"),
       };

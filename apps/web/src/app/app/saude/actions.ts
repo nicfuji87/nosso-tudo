@@ -140,3 +140,33 @@ export async function excluirEvento(id: string): Promise<Resultado> {
   revalidatePath("/app/saude");
   return { ok: true };
 }
+
+/**
+ * Confirma um treino detectado em 1 ou 2 partes (ex.: musculação 06:00–06:30 + natação 06:30–07:00).
+ * Cada parte vira um evento próprio; o painel calcula os números de cada intervalo.
+ */
+const parteSchema = z.object({ inicio: quando, fim: quando, modalidade: z.string().trim().min(1).max(40) });
+const confirmarSchema = z.object({
+  partes: z.array(parteSchema).min(1).max(3),
+  esforco: z.number().int().min(0).max(10).nullable().optional(),
+});
+
+export async function confirmarTreino(raw: unknown): Promise<Resultado> {
+  const p = confirmarSchema.safeParse(raw);
+  if (!p.success) return { error: p.error.issues[0]?.message ?? "Treino inválido." };
+  for (const parte of p.data.partes) {
+    if (new Date(parte.fim) <= new Date(parte.inicio)) return { error: "Cada parte precisa terminar depois de começar." };
+  }
+  const ctx = await resolveWorkspaceId();
+  if ("error" in ctx) return { error: ctx.error };
+  const supabase = createClient();
+  const { error } = await supabase.from("saude_eventos").insert(
+    p.data.partes.map((parte) => ({
+      workspace_id: ctx.workspaceId, tipo: "treino", inicio: parte.inicio, fim: parte.fim, origem: "detectado", algoritmo: "treino-v1",
+      detalhes: { modalidade: parte.modalidade, ...(p.data.esforco != null ? { esforco: p.data.esforco } : {}) },
+    })),
+  );
+  if (error) return { error: "Não foi possível salvar o treino." };
+  revalidatePath("/app/saude");
+  return { ok: true };
+}

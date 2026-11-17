@@ -71,6 +71,22 @@ object EstadoSaude {
     /** Durante o ECG o batimento contínuo pode sair inválido: não entra no cálculo. */
     @Volatile var pausado = false
 
+    // Histerese do "no pulso": só vira transição depois de 60 s estável (relógio frouxo não gera ruído).
+    private var pulsoEstavel: Boolean? = null
+    private var pulsoCandidato: Boolean? = null
+    private var pulsoDesde = 0L
+
+    private fun observarPulso(estado: Boolean, ts: Long) {
+        if (estado != pulsoCandidato) { pulsoCandidato = estado; pulsoDesde = ts }
+        if (estado != pulsoEstavel && ts - pulsoDesde >= 60_000L) {
+            val anterior = pulsoEstavel
+            pulsoEstavel = estado
+            if (anterior != null) {
+                app?.let { runCatching { Sync.enfileirarTransicao(it, pulsoDesde, if (estado) "no_pulso" else "fora_do_pulso", Bateria.nivel(it)) } }
+            }
+        }
+    }
+
     /** Horário estimado do último batimento (soma dos IBIs). 0 = sem cadeia. */
     private var relogioBatimento = 0L
     private const val LACUNA_MS = 5_000L      // > 5 s sem batimento: a cadeia recomeça
@@ -115,9 +131,10 @@ object EstadoSaude {
             val ts = dp.timestamp
             val hr = runCatching { dp.getValue(ValueKey.HeartRateSet.HEART_RATE) }.getOrNull() ?: 0
             val st = runCatching { dp.getValue(ValueKey.HeartRateSet.HEART_RATE_STATUS) }.getOrNull() ?: -1
-            if (st == -3) noPulso = false // SDK: relógio fora do pulso
+            if (st == -3) { noPulso = false; observarPulso(false, ts) } // SDK: relógio fora do pulso
             if (hr in 30..220 && st >= 0) {
                 noPulso = true
+                observarPulso(true, ts)
                 ultimaLeituraMs = ts
                 if (!pausado) registrarBpm(hr, ts)
             }
