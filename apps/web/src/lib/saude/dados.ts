@@ -179,6 +179,10 @@ export function diaLocal(iso: string, tz: string): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
 }
 
+/** Instante em ms de um ISO; e se dois intervalos se sobrepõem. (No topo: usados em várias seções.) */
+const ms = (x: string) => new Date(x).getTime();
+const sobrepoe = (a1: string, a2: string, b1: string, b2: string) => ms(a1) < ms(b2) && ms(b1) < ms(a2);
+
 export function horaLocal(iso: string, tz: string): string {
   return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: tz });
 }
@@ -396,8 +400,6 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
   // Cada treino confirmado mostra os números do SEU intervalo (saude_resumo_intervalos).
   type TreinoRow = { inicio: string; fim: string; minutos: number; fc_media: number; fc_max: number; z_leve: number; z_moderado: number; z_intenso: number; z_maximo: number; carga: number };
   const treinosEv = eventosTodos.filter((e) => e.tipo === "treino");
-  const ms = (x: string) => new Date(x).getTime();
-  const sobrepoe = (a1: string, a2: string, b1: string, b2: string) => ms(a1) < ms(b2) && ms(b1) < ms(a2);
   const historicoModalidades = treinosEv
     .filter((e) => !e.descartado && typeof e.detalhes?.modalidade === "string" && e.detalhes.modalidade !== "Outro")
     .map((e) => ({ inicio: e.inicio, modalidade: e.detalhes.modalidade as string }));
