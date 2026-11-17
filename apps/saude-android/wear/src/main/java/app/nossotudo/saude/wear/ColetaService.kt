@@ -61,6 +61,19 @@ class ColetaService : Service() {
     /** Rastreador de temperatura da pele, ligado só à noite no modo automático. */
     private var temperatura: HealthTracker? = null
 
+    /** Carregador conectado / desconectado, com o nível de bateria no momento. */
+    private val energia = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            val tipo = when (i.action) {
+                Intent.ACTION_POWER_CONNECTED -> "carregando"
+                Intent.ACTION_POWER_DISCONNECTED -> "desconectado"
+                else -> return
+            }
+            runCatching { Sync.enfileirarTransicao(c, System.currentTimeMillis(), tipo, Bateria.nivel(c)) }
+        }
+    }
+    private var energiaRegistrada = false
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -91,6 +104,13 @@ class ColetaService : Service() {
             },
         )
         main.postDelayed(medirBateria, 1_000)
+        if (!energiaRegistrada) {
+            val filtro = IntentFilter().apply { addAction(Intent.ACTION_POWER_CONNECTED); addAction(Intent.ACTION_POWER_DISCONNECTED) }
+            if (Build.VERSION.SDK_INT >= 33) registerReceiver(energia, filtro, Context.RECEIVER_NOT_EXPORTED) else registerReceiver(energia, filtro)
+            energiaRegistrada = true
+            // serviço (re)iniciado já no carregador: registra o estado atual para a linha do tempo
+            if (Bateria.carregando(this)) runCatching { Sync.enfileirarTransicao(this, System.currentTimeMillis(), "carregando", Bateria.nivel(this)) }
+        }
         if (modo == MODO_FUNDO) main.postDelayed(enviar, 2 * 60_000L)
         return START_STICKY
     }
@@ -202,6 +222,7 @@ class ColetaService : Service() {
     override fun onDestroy() {
         EstadoSaude.fecharMinuto()
         desligarTemperatura()
+        if (energiaRegistrada) { runCatching { unregisterReceiver(energia) }; energiaRegistrada = false }
         main.removeCallbacksAndMessages(null)
         for ((tracker, gravador) in ativos) {
             runCatching { tracker.unsetEventListener() }

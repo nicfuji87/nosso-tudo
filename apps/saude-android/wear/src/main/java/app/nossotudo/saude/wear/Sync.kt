@@ -58,7 +58,7 @@ object Sync {
 
     fun status(ctx: Context): Status {
         val p = prefs(ctx)
-        val pend = listOf("bpm", "vfc", "temp", "registros", "ecgs").sumOf { n -> fila(ctx, n).takeIf { it.exists() }?.useLines { it.count() } ?: 0 }
+        val pend = listOf("bpm", "vfc", "temp", "transicoes", "registros", "ecgs").sumOf { n -> fila(ctx, n).takeIf { it.exists() }?.useLines { it.count() } ?: 0 }
         return Status(p.getBoolean("vinculado", false), p.getString("nome", null), p.getLong("ultimo_envio", 0), pend, p.getString("erro", null))
     }
 
@@ -82,6 +82,13 @@ object Sync {
         val o = JSONObject().put("inicio", inicioMs).put("pele", pele.toDouble()).put("n", n)
         ambiente?.let { o.put("ambiente", it.toDouble()) }
         enfileirar(ctx, "temp", o)
+    }
+
+    /** Mudança de estado do relógio no horário exato: carregando, desconectado, no_pulso, fora_do_pulso. */
+    fun enfileirarTransicao(ctx: Context, ts: Long, tipo: String, bateria: Int?) {
+        val o = JSONObject().put("ts", ts).put("tipo", tipo)
+        bateria?.let { o.put("bateria", it) }
+        enfileirar(ctx, "transicoes", o)
     }
 
     fun enfileirarRegistro(ctx: Context, idLocal: String, ts: Long, tipo: String, valor: String) {
@@ -225,9 +232,10 @@ object Sync {
         val bpm = ler(ctx, "bpm", POR_ENVIO_BPM)
         val vfc = ler(ctx, "vfc", POR_ENVIO_VFC)
         val temp = ler(ctx, "temp", POR_ENVIO_TEMP)
+        val trans = ler(ctx, "transicoes", 300)
         val reg = ler(ctx, "registros", POR_ENVIO_REG)
         val ecgItem = ler(ctx, "ecgs", 1)
-        val vazio = bpm.isEmpty() && vfc.isEmpty() && temp.isEmpty() && reg.isEmpty() && ecgItem.isEmpty()
+        val vazio = bpm.isEmpty() && vfc.isEmpty() && temp.isEmpty() && trans.isEmpty() && reg.isEmpty() && ecgItem.isEmpty()
         // Sem dados novos, ainda manda o estado do relógio a cada ~25 min (o painel sabe se está no pulso/carregando).
         if (vazio && System.currentTimeMillis() - prefs(ctx).getLong("ultimo_estado", 0) < 25 * 60_000L) return true
 
@@ -240,7 +248,7 @@ object Sync {
             }
         }
         val corpo = JSONObject().put("acao", "enviar").put("segredo", segredo(ctx))
-            .put("bpm", JSONArray(bpm)).put("vfc", JSONArray(vfc)).put("temp", JSONArray(temp)).put("registros", JSONArray(reg)).put("ecgs", ecgs)
+            .put("bpm", JSONArray(bpm)).put("vfc", JSONArray(vfc)).put("temp", JSONArray(temp)).put("transicoes", JSONArray(trans)).put("registros", JSONArray(reg)).put("ecgs", ecgs)
             .put("estado", estado(ctx))
 
         val (http, r) = runCatching { post(corpo) }.getOrElse { e ->
@@ -258,6 +266,7 @@ object Sync {
         descartar(ctx, "bpm", bpm.size)
         descartar(ctx, "vfc", vfc.size)
         descartar(ctx, "temp", temp.size)
+        descartar(ctx, "transicoes", trans.size)
         descartar(ctx, "registros", reg.size)
         descartar(ctx, "ecgs", ecgItem.size)
         runCatching { AvisoRadar.processar(ctx, r.optJSONObject("radar")) }
@@ -269,7 +278,7 @@ object Sync {
     /** Estado do relógio enviado junto com cada lote. */
     private fun estado(ctx: Context): JSONObject {
         val b = ctx.applicationContext.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        val o = JSONObject().put("versao", BuildConfig.VERSION_NAME)
+        val o = JSONObject().put("versao", BuildConfig.VERSION_NAME).put("ts", System.currentTimeMillis())
         b?.let {
             val nivel = it.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
             val escala = it.getIntExtra(BatteryManager.EXTRA_SCALE, 100)
