@@ -15,6 +15,9 @@ import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
  *            transicoes = [{ ts, tipo: carregando|desconectado|no_pulso|fora_do_pulso, bateria }] (v0.6+)
  *            samsung = [{ uid, tipo: sono|spo2|temp_pele|exercicio|energia, inicio, fim?, dados }] (app do celular)
  *            um `enviar` só com `estado` funciona como batida de vida.
+ *   hoje     { segredo } → resumo do dia para o app do celular (radar, noite, Samsung, treinos a confirmar)
+ *   evento   { segredo, tipo, inicio, nota?, detalhes? } → diário (sintoma, remédio, álcool…)
+ *   treino   { segredo, inicio, fim, modalidade?, descartar? } → confirma ou descarta um treino detectado
  *
  * Escrita com service_role; isolamento por workspace vem do dispositivo.
  */
@@ -117,7 +120,7 @@ Deno.serve(async (req) => {
   // dispositivo vinculado e ativo
   const { data: disp } = await admin
     .from("saude_dispositivos")
-    .select("id, workspace_id, nome")
+    .select("id, workspace_id, profile_id, nome")
     .eq("segredo_hash", hash)
     .is("revogado_em", null)
     .maybeSingle();
@@ -125,6 +128,90 @@ Deno.serve(async (req) => {
   // ------------------------------------------------------------ status
   if (acao === "status") {
     return json(disp ? { vinculado: true, nome: disp.nome } : { vinculado: false });
+  }
+
+  // ------------------------------------------------------------ hoje (app do celular)
+  if (acao === "hoje") {
+    if (!disp) return json({ erro: "nao_vinculado" }, 403);
+    const ws = disp.workspace_id;
+    const desde = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
+    const [radarR, noitesR, samsungR, treinosR, eventosR] = await Promise.all([
+      admin.rpc("saude_radar", { p_workspace_id: ws, p_tz: TZ }),
+      admin.rpc("saude_noites", { p_workspace_id: ws, p_dias: 3, p_tz: TZ }),
+      admin.from("saude_samsung").select("tipo, inicio, fim, dados").eq("workspace_id", ws).gte("inicio", desde(3))
+        .order("inicio", { ascending: false }).limit(200),
+      admin.rpc("saude_treinos_detectados", { p_workspace_id: ws, p_dias: 3, p_limiar: 100 }),
+      admin.from("saude_eventos").select("inicio, fim").eq("workspace_id", ws).eq("tipo", "treino").gte("inicio", desde(4)),
+    ]);
+    type Linha = Record<string, unknown>;
+    const radar = ((radarR.data ?? []) as Linha[])[0] ?? null;
+    const noites = ((noitesR.data ?? []) as Linha[]).filter((n) => n.fc_repouso != null || n.sono_inicio != null);
+    const sam = (samsungR.data ?? []) as { tipo: string; inicio: string; fim: string | null; dados: Linha }[];
+    const sono = sam.find((r) => r.tipo === "sono" && r.fim && (Number(r.dados.duracao_min) || 0) >= 180) ?? null;
+    const spo = sono ? sam.filter((r) => r.tipo === "spo2" && r.inicio >= sono.inicio && r.inicio <= (sono.fim ?? sono.inicio)) : [];
+    const energia = sam.find((r) => r.tipo === "energia") ?? null;
+    const ms = (x: unknown) => new Date(String(x)).getTime();
+    const sobrepoe = (a1: unknown, a2: unknown, b1: unknown, b2: unknown) => ms(a1) < ms(b2) && ms(b1) < ms(a2);
+    const eventos = (eventosR.data ?? []) as { inicio: string; fim: string | null }[];
+    const modalidade = (t: string) =>
+      /SWIMMING/.test(t) ? "Natação"
+        : /WEIGHT|BENCH|SQUAT|DEADLIFT|LUNGE|LEG_|LAT_|SHOULDER|ARM_|RAISES|CIRCUIT|PULL_UPS|PUSH_UPS|CRUNCH|PLANK/.test(t) ? "Musculação" : null;
+    const sugeridos = ((treinosR.data ?? []) as Linha[])
+      .filter((t) => !eventos.some((e) => sobrepoe(e.inicio, e.fim ?? e.inicio, t.inicio, t.fim)))
+      .map((t) => {
+        // atividades que o Samsung Health registrou dentro do bloco (ex.: musculação + natação)
+        const partes = sam.filter((r) => r.tipo === "exercicio" && r.fim && sobrepoe(r.inicio, r.fim, t.inicio, t.fim))
+          .sort((x, y) => ms(x.inicio) - ms(y.inicio))
+          .map((r) => ({ inicio: r.inicio, fim: r.fim, tipo_samsung: r.dados.tipo_samsung ?? null, modalidade: modalidade(String(r.dados.tipo_samsung ?? "")) }));
+        return {
+          inicio: t.inicio, fim: t.fim, minutos: t.minutos, fc_media: Math.round(Number(t.fc_media)), fc_max: t.fc_max,
+          palpite: partes.find((x) => x.modalidade)?.modalidade ?? null,
+          partes,
+        };
+      });
+    const media = (v: number[]) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : null);
+    return json({
+      ok: true,
+      radar,
+      noite: noites.at(-1) ?? null,
+      sono: sono ? { inicio: sono.inicio, fim: sono.fim, ...sono.dados, estagios: undefined } : null,
+      spo2: spo.length ? { media: media(spo.map((r) => Number(r.dados.media)).filter(Number.isFinite)), min: Math.min(...spo.map((r) => Number(r.dados.min) || 100)) } : null,
+      energia: energia ? { dia: String(energia.inicio).slice(0, 10), score: energia.dados.score } : null,
+      treinos: sugeridos,
+      agora: new Date().toISOString(),
+    });
+  }
+
+  // ------------------------------------------------------------ evento (diário pelo celular)
+  if (acao === "evento") {
+    if (!disp) return json({ erro: "nao_vinculado" }, 403);
+    const tipos = new Set(["sintoma", "malestar", "medicamento", "alcool", "cafeina", "doenca", "estresse", "sono", "nota"]);
+    const inicio = iso(corpo.inicio) ?? new Date().toISOString();
+    if (!tipos.has(String(corpo.tipo))) return json({ erro: "tipo_invalido" }, 400);
+    const detalhes = corpo.detalhes && typeof corpo.detalhes === "object" && JSON.stringify(corpo.detalhes).length < 2000 ? corpo.detalhes : {};
+    const { error } = await admin.from("saude_eventos").insert({
+      workspace_id: disp.workspace_id, profile_id: disp.profile_id, tipo: String(corpo.tipo), inicio,
+      nota: typeof corpo.nota === "string" && corpo.nota.trim() ? corpo.nota.trim().slice(0, 500) : null,
+      detalhes, origem: "manual",
+    });
+    return error ? json({ erro: "falha_gravar" }, 500) : json({ ok: true });
+  }
+
+  // ------------------------------------------------------------ treino (confirmar / descartar pelo celular)
+  if (acao === "treino") {
+    if (!disp) return json({ erro: "nao_vinculado" }, 403);
+    const inicio = iso(corpo.inicio), fim = iso(corpo.fim);
+    if (!inicio || !fim || fim <= inicio) return json({ erro: "intervalo_invalido" }, 400);
+    const descartar = corpo.descartar === true;
+    const mod = typeof corpo.modalidade === "string" ? corpo.modalidade.trim().slice(0, 40) : "";
+    if (!descartar && !mod) return json({ erro: "modalidade_obrigatoria" }, 400);
+    const esf = num(corpo.esforco);
+    const { error } = await admin.from("saude_eventos").insert({
+      workspace_id: disp.workspace_id, profile_id: disp.profile_id, tipo: "treino", inicio, fim,
+      origem: "detectado", algoritmo: "treino-v1", descartado: descartar,
+      detalhes: descartar ? {} : { modalidade: mod, ...(esf !== null && esf >= 0 && esf <= 10 ? { esforco: Math.round(esf) } : {}) },
+    });
+    return error ? json({ erro: "falha_gravar" }, 500) : json({ ok: true });
   }
 
   // ------------------------------------------------------------ enviar
