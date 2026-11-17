@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,6 +26,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
@@ -65,7 +67,7 @@ class MainActivity : ComponentActivity() {
         if (Conexao.vinculado(this)) { SamsungSync.agendar(this); SamsungSync.agora(this) }
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = Verde, onPrimary = Color(0xFF0E2A14), background = Fundo)) {
-                Tela(this)
+                Raiz(this)
             }
         }
     }
@@ -91,7 +93,34 @@ private fun Ponto(ok: Boolean) {
 }
 
 @Composable
-private fun Tela(activity: Activity) {
+private fun Raiz(activity: Activity) {
+    val ctx = LocalContext.current
+    // conectado → abre em "Hoje"; ainda configurando → abre em "Ajustes"
+    var aba by remember { mutableStateOf(if (Conexao.vinculado(ctx)) 0 else 1) }
+    androidx.compose.material3.Scaffold(
+        containerColor = Fundo,
+        modifier = Modifier.safeDrawingPadding(),
+        bottomBar = {
+            androidx.compose.material3.NavigationBar(containerColor = CartaoCor) {
+                listOf("Hoje" to "◎", "Ajustes" to "⚙").forEachIndexed { i, (rotulo, simbolo) ->
+                    NavigationBarItem(
+                        selected = aba == i, onClick = { aba = i },
+                        icon = { Text(simbolo, fontSize = 18.sp) }, label = { Text(rotulo) },
+                        colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
+                            selectedTextColor = Verde, selectedIconColor = Color(0xFF0E2A14), indicatorColor = Verde,
+                            unselectedTextColor = TextoSec, unselectedIconColor = TextoSec,
+                        ),
+                    )
+                }
+            }
+        },
+    ) { margem ->
+        Box(Modifier.padding(margem)) { if (aba == 0) TelaHoje() else TelaAjustes(activity) }
+    }
+}
+
+@Composable
+private fun TelaAjustes(activity: Activity) {
     val ctx = LocalContext.current
     val escopo = rememberCoroutineScope()
     var vinculado by remember { mutableStateOf(Conexao.vinculado(ctx)) }
@@ -125,7 +154,7 @@ private fun Tela(activity: Activity) {
     }
 
     Column(
-        Modifier.fillMaxSize().background(Fundo).safeDrawingPadding().verticalScroll(rememberScrollState()).padding(20.dp),
+        Modifier.fillMaxSize().background(Fundo).verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Column {
