@@ -10,3 +10,6 @@ captures/
 wear/libs/**
 # Dados biométricos puxados do relógio nunca vão para o repositório
 dados/
+# SDK de dados do Samsung Health (celular): licença não permite redistribuir
+mobile/libs/**
+mobile/build/

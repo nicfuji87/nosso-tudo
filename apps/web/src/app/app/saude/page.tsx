@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import {
   Activity, BatteryCharging, BatteryMedium, Flame, HeartPulse, Moon, Sparkles, Watch, AlertTriangle, CheckCircle2, Info, Gauge,
-  ArrowDownRight, ArrowUpRight, Hand, Zap, BedDouble, Stethoscope,
+  ArrowDownRight, ArrowUpRight, Hand, Zap, BedDouble, Stethoscope, Smartphone,
 } from "lucide-react";
 import { getWorkspaceContext } from "@/lib/auth";
 import {
@@ -13,6 +13,7 @@ import { ListaRelogios } from "@/components/saude/lista-relogios";
 import { TreinosSaude } from "@/components/saude/treinos-saude";
 import { DiarioSaude } from "@/components/saude/diario-saude";
 import { RadarSaude } from "@/components/saude/radar-saude";
+import { SamsungSaude } from "@/components/saude/samsung-saude";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Saúde · Nosso Tudo" };
@@ -318,6 +319,12 @@ export default async function SaudePage() {
       {/* Radar de Saúde */}
       <RadarSaude radar={p.radar} hoje={diaLocal(new Date().toISOString(), TZ)} desvioFc={p.desvioFc} desvioVfc={p.desvioVfc}
         desvioTemp={p.desvioTemp} placar={p.placar} />
+
+      {/* Samsung Health (celular) */}
+      <Cartao titulo="Samsung Health" subtitulo="pelo app Saúde NT do celular · sono com estágios, SpO₂, temperatura, treinos e Energy Score"
+        acao={<Smartphone className="size-5 text-muted-foreground" />}>
+        <SamsungSaude s={p.samsung} />
+      </Cartao>
 
       {/* Batimento 24 h */}
       <Cartao titulo="Batimento · últimas 24 h" subtitulo="média por minuto · treinos em laranja · carregando em âmbar · fora do pulso em cinza">
