@@ -12,7 +12,7 @@ import { createClient } from "@/lib/supabase/server";
  *   noites-v3 · treino-v1 · radar-v1 (SQL) · padrao-v1 e insights-v2 (aqui)
  */
 
-export const ALGORITMOS = { noites: "noites-v3", treino: "treino-v1", padrao: "padrao-v1", radar: "radar-v1", insights: "insights-v2" } as const;
+export const ALGORITMOS = { noites: "noites-v5", treino: "treino-v1", padrao: "padrao-v1", radar: "radar-v1", insights: "insights-v2" } as const;
 export const NOITES_BASE = 28; // linha de base pessoal completa
 export const NOITES_MIN_COMPARAR = 7; // antes disso não há "seu normal" para comparar
 
@@ -36,8 +36,8 @@ export interface EcgResumo { id: string; ts: string; duracaoS: number; hz: numbe
 
 export interface Noite {
   noite: string; minutos: number; fcRepouso: number | null; vfc: number | null; janelas: number; temp: number | null; janelasTemp: number;
-  /** sono ESTIMADO pelo batimento (noites-v4) */
-  sonoInicio: string | null; sonoFim: string | null;
+  /** sono do Samsung Health quando houver; senão, estimado pelo batimento (noites-v5) */
+  sonoInicio: string | null; sonoFim: string | null; fonteSono: "samsung" | "batimento" | null;
 }
 
 /** Trecho da linha do tempo do relógio (explica as lacunas do batimento). */
@@ -305,13 +305,13 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
   // ---- noites e linha de base
   type NoiteRow = {
     noite: string; minutos: number; fc_repouso: number | null; vfc_noturna: number | null; janelas: number; temp_pele: number | null; janelas_temp: number;
-    sono_inicio: string | null; sono_fim: string | null;
+    sono_inicio: string | null; sono_fim: string | null; fonte_sono: "samsung" | "batimento" | null;
   };
   const noites: Noite[] = ((noitesR.data ?? []) as NoiteRow[]).map((n) => ({
     noite: n.noite, minutos: n.minutos, fcRepouso: n.fc_repouso != null ? Math.round(n.fc_repouso * 10) / 10 : null,
     vfc: n.vfc_noturna != null ? Math.round(n.vfc_noturna) : null, janelas: n.janelas,
     temp: n.temp_pele != null ? Math.round(n.temp_pele * 100) / 100 : null, janelasTemp: n.janelas_temp,
-    sonoInicio: n.sono_inicio, sonoFim: n.sono_fim,
+    sonoInicio: n.sono_inicio, sonoFim: n.sono_fim, fonteSono: n.fonte_sono,
   }));
   const noitesValidas = noites.filter((n) => n.fcRepouso != null);
   const ultimaNoite = noitesValidas.at(-1) ?? null;
@@ -603,8 +603,8 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
     const h = (ms(noiteHoje.sonoFim) - ms(noiteHoje.sonoInicio)) / 3600_000;
     if (h < 6) {
       insights.push({
-        id: "sono-curto", tom: "neutro", titulo: `Noite curta: ~${Math.floor(h)} h ${Math.round((h % 1) * 60)} min de sono estimado`,
-        texto: `Pelo batimento, você adormeceu por volta de ${horaLocal(noiteHoje.sonoInicio, tz)} e levantou ${horaLocal(noiteHoje.sonoFim, tz)}. Noites curtas mexem no repouso e na VFC do dia seguinte.`,
+        id: "sono-curto", tom: "neutro", titulo: `Noite curta: ~${Math.floor(h)} h ${Math.round((h % 1) * 60)} min de sono${noiteHoje.fonteSono === "samsung" ? "" : " estimado"}`,
+        texto: `${noiteHoje.fonteSono === "samsung" ? "Pelo Samsung Health" : "Pelo batimento"}, você adormeceu por volta de ${horaLocal(noiteHoje.sonoInicio, tz)} e levantou ${horaLocal(noiteHoje.sonoFim, tz)}. Noites curtas mexem no repouso e na VFC do dia seguinte.`,
       });
     }
   }
