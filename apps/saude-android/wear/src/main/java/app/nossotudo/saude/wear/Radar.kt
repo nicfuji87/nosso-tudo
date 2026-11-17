@@ -66,6 +66,9 @@ object AvisoRadar {
 
     fun processar(ctx: Context, radar: JSONObject?) {
         radar ?: return
+        // guarda o nível da noite para o atalho do mostrador
+        ctx.applicationContext.getSharedPreferences("sync", Context.MODE_PRIVATE).edit()
+            .putString("radar_nivel", radar.optString("nivel")).putString("radar_noite", radar.optString("noite")).apply()
         val noite = radar.optString("noite")
         if (radar.optString("nivel") != "estresse" || noite.isEmpty()) return
         val hora = LocalTime.now().hour

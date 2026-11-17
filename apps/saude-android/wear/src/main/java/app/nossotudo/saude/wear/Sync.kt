@@ -270,6 +270,7 @@ object Sync {
         descartar(ctx, "registros", reg.size)
         descartar(ctx, "ecgs", ecgItem.size)
         runCatching { AvisoRadar.processar(ctx, r.optJSONObject("radar")) }
+        SaudeTile.atualizar(ctx)
         val agora = System.currentTimeMillis()
         prefs(ctx).edit().putLong("ultimo_envio", agora).putLong("ultimo_estado", agora).remove("erro").apply()
         return true

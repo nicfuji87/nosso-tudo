@@ -14,8 +14,8 @@ android {
         applicationId = "app.nossotudo.saude.wear"
         minSdk = 30          // Wear OS 3+
         targetSdk = 36       // Wear OS 6 (One UI 8 Watch)
-        versionCode = 6
-        versionName = "0.6"
+        versionCode = 7
+        versionName = "0.7"
         // Endpoint público da Edge Function (a URL do projeto não é segredo; o relógio não leva chave nenhuma).
         buildConfigField("String", "SAUDE_URL", "\"https://ecwcqooogsvsrddwjavh.supabase.co/functions/v1/saude-relogio\"")
     }
@@ -56,4 +56,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
     // Envio ao Nosso Tudo em segundo plano, só com rede, sobrevivendo ao fechamento do app
     implementation("androidx.work:work-runtime-ktx:2.10.1")
+    // Atalho no mostrador (Tile)
+    implementation("androidx.wear.tiles:tiles:1.4.1")
+    implementation("androidx.wear.protolayout:protolayout:1.2.1")
+    implementation("androidx.wear.protolayout:protolayout-material:1.2.1")
+    implementation("com.google.guava:guava:33.3.1-android")
 }

@@ -19,6 +19,10 @@ import app.nossotudo.saude.wear.ui.TelaHabitos
 import app.nossotudo.saude.wear.ui.TelaHub
 import app.nossotudo.saude.wear.ui.TelaLaboratorio
 import app.nossotudo.saude.wear.ui.TelaMalEstar
+import app.nossotudo.saude.wear.ui.TelaOrtostatico
+import android.content.Intent
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import app.nossotudo.saude.wear.ui.TelaProntidao
 import app.nossotudo.saude.wear.ui.TelaRegistros
 import app.nossotudo.saude.wear.ui.TelaRespiracao
@@ -45,16 +49,30 @@ class MainActivity : ComponentActivity() {
         if (Sync.status(this).vinculado) { Automatico.garantir(this); Sync.enviarAgora(this) }
         val faltando = permissoes.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (faltando.isNotEmpty()) requestPermissions(faltando.toTypedArray(), 1)
-        setContent { App() }
+        rotaPedida.value = intent?.getStringExtra(SaudeTile.EXTRA_ROTA)
+        setContent { App(rotaPedida) }
+    }
+
+    /** Rota pedida pelo atalho do mostrador (Tile). */
+    private val rotaPedida = mutableStateOf<String?>(null)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        rotaPedida.value = intent.getStringExtra(SaudeTile.EXTRA_ROTA)
     }
 }
 
 @Composable
-private fun App() {
+private fun App(rotaPedida: androidx.compose.runtime.MutableState<String?>) {
     MaterialTheme {
         val nav = rememberSwipeDismissableNavController()
         val ir: (String) -> Unit = { nav.navigate(it) }
         val voltar: () -> Unit = { nav.popBackStack() }
+        LaunchedEffect(rotaPedida.value) {
+            val r = rotaPedida.value ?: return@LaunchedEffect
+            if (r != Rota.HUB) nav.navigate(r) { launchSingleTop = true }
+            rotaPedida.value = null
+        }
         SwipeDismissableNavHost(navController = nav, startDestination = Rota.HUB) {
             composable(Rota.HUB) { TelaHub(ir) }
             composable(Rota.CORACAO) { TelaCoracao() }
@@ -69,6 +87,7 @@ private fun App() {
             composable(Rota.LABORATORIO) { TelaLaboratorio(ir) }
             composable(Rota.CONECTAR) { TelaConectar() }
             composable(Rota.MALESTAR) { TelaMalEstar(ir) }
+            composable(Rota.ORTOSTATICO) { TelaOrtostatico() }
         }
     }
 }

@@ -200,6 +200,18 @@ function NovoEvento({ tipo, aoFechar }: { tipo: TipoEvento | null; aoFechar: () 
   );
 }
 
+/** Teste em pé (relógio): {"d","p","m1","m3","s"} → "Teste em pé: deitado 58 → 3 min 78 (+20 bpm)". */
+function tituloOrtostatico(valor: string) {
+  try {
+    const o = JSON.parse(valor) as { d?: number; p?: number; m3?: number; s?: boolean };
+    const delta = o.d != null && o.m3 != null ? o.m3 - o.d : null;
+    return `Teste em pé: deitado ${o.d ?? "—"} → 3 min ${o.m3 ?? "—"}` +
+      (delta != null ? ` (${delta >= 0 ? "+" : ""}${delta} bpm)` : "") + (o.p != null ? ` · pico ${o.p}` : "") + (o.s ? " · com sintomas" : "");
+  } catch {
+    return "Teste em pé";
+  }
+}
+
 type Item =
   | { k: "evento"; ts: string; e: EventoDiario }
   | { k: "registro"; ts: string; r: RegistroSaude };
@@ -210,6 +222,7 @@ const ICONE_REGISTRO: Record<string, { icone: typeof Pill; cor: string; titulo: 
   respiracao: { icone: Wind, cor: "#1FA9B0", titulo: () => "Respiração guiada" },
   ecg: { icone: Activity, cor: "#E5536A", titulo: (r) => `ECG · ${r.valor}` },
   malestar: { icone: AlertTriangle, cor: "#D6336C", titulo: (r) => `Mal-estar (relógio)${r.valor ? ` · ${ROTULO_SITUACAO[r.valor] ?? r.valor}` : ""}` },
+  ortostatico: { icone: Activity, cor: "#6E7FE0", titulo: (r) => tituloOrtostatico(r.valor) },
 };
 
 export function DiarioSaude({ eventos, registros, malEstares }: { eventos: EventoDiario[]; registros: RegistroSaude[]; malEstares: MalEstar[] }) {

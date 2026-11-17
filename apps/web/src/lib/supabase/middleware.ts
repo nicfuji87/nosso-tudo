@@ -2,7 +2,7 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 /** Rotas que exigem sessão autenticada. */
-const PROTECTED_PREFIXES = ["/app", "/onboarding", "/ml"];
+const PROTECTED_PREFIXES = ["/app", "/onboarding", "/ml", "/relatorio"];
 /**
  * Exceções públicas dentro de prefixos protegidos (casamento exato). As páginas
  * da Casa Prática são exigidas pela revisão de app do Pinterest e precisam abrir sem login.
