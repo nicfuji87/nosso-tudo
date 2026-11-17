@@ -27,7 +27,7 @@ import com.google.common.util.concurrent.ListenableFuture
 class SaudeTile : TileService() {
 
     companion object {
-        private const val VERSAO = "1"
+        private const val VERSAO = "2"
         const val EXTRA_ROTA = "rota"
 
         /** Pede ao sistema para redesenhar o Tile (após cada envio ou mudança de estado). */
@@ -49,7 +49,15 @@ class SaudeTile : TileService() {
     }
 
     override fun onTileResourcesRequest(req: RequestBuilders.ResourcesRequest): ListenableFuture<ResourceBuilders.Resources> =
-        Futures.immediateFuture(ResourceBuilders.Resources.Builder().setVersion(VERSAO).build())
+        Futures.immediateFuture(
+            ResourceBuilders.Resources.Builder().setVersion(VERSAO)
+                .addIdToImageMapping(
+                    "logo",
+                    ResourceBuilders.ImageResource.Builder().setAndroidResourceByResId(
+                        ResourceBuilders.AndroidImageResourceByResId.Builder().setResourceId(R.drawable.logo_nt_selo).build(),
+                    ).build(),
+                ).build(),
+        )
 
     private fun abrir(ctx: Context, id: String, rota: String) = ModifiersBuilders.Clickable.Builder()
         .setId(id)
@@ -87,7 +95,10 @@ class SaudeTile : TileService() {
             .setTypography(Typography.TYPOGRAPHY_CAPTION1)
             .setColor(argb(0xFFB4B9B4.toInt()))
             .build()
+        val dp24 = androidx.wear.protolayout.DimensionBuilders.dp(22f)
+        val selo = LayoutElementBuilders.Image.Builder().setResourceId("logo").setWidth(dp24).setHeight(dp24).build()
         val conteudo = LayoutElementBuilders.Column.Builder()
+            .addContent(selo)
             .addContent(numero)
             .addContent(legenda)
             .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(androidx.wear.protolayout.DimensionBuilders.dp(4f)).build())

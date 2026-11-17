@@ -152,15 +152,12 @@ fun TelaConectar() {
     }
 }
 
-/** Símbolo do Nosso Tudo (cruz de blocos). */
+/** Logo do Nosso Tudo (selo claro, legível no fundo preto). */
 @Composable
 private fun Logo(e: Escala) {
-    Canvas(Modifier.width(e.d(18)).height(e.d(18))) {
-        val c = size.minDimension / 3f
-        val r = androidx.compose.ui.geometry.CornerRadius(c * 0.3f)
-        val tons = listOf(Color(0xFF8FDE95), Color(0xFF5FAF6A), Color(0xFF8FA993), Color(0xFF3D7A4A), Color(0xFFB9E6BD))
-        listOf(1 to 0, 0 to 1, 1 to 1, 2 to 1, 1 to 2).forEachIndexed { i, (x, y) ->
-            drawRoundRect(tons[i], androidx.compose.ui.geometry.Offset(x * c + 1, y * c + 1), androidx.compose.ui.geometry.Size(c - 2, c - 2), r)
-        }
-    }
+    androidx.compose.foundation.Image(
+        painter = androidx.compose.ui.res.painterResource(app.nossotudo.saude.wear.R.drawable.logo_nt_selo),
+        contentDescription = "Nosso Tudo",
+        modifier = Modifier.width(e.d(30)).height(e.d(30)),
+    )
 }

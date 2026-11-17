@@ -59,7 +59,9 @@ object SamsungSync {
         if (concedidas.isEmpty()) return Resultado(0, emptyMap(), "sem permissão do Samsung Health")
 
         val p = prefs(ctx)
-        val dias = if (p.getLong("ultima_sync", 0) == 0L) 30L else 4L
+        // 30 dias até a 1ª leitura completa sem erro; depois, 4 dias (cobre correções do Samsung Health)
+        val dias = if (!p.getBoolean("historico_ok", false)) 30L else 4L
+        val erros = mutableListOf<String>()
         val ate = LocalDateTime.now().plusHours(1)
         val de = ate.minusDays(dias)
         val filtro = LocalTimeFilter.of(de, ate)
@@ -70,15 +72,22 @@ object SamsungSync {
             return store.readData(req).dataList
         }
 
-        if (DataTypes.SLEEP in concedidas) runCatching { ler(DataTypes.SLEEP) }.getOrDefault(emptyList()).forEach { itens += sono(it) }
-        if (DataTypes.BLOOD_OXYGEN in concedidas) runCatching { ler(DataTypes.BLOOD_OXYGEN) }.getOrDefault(emptyList()).forEach { itens += spo2(it) }
-        if (DataTypes.SKIN_TEMPERATURE in concedidas) runCatching { ler(DataTypes.SKIN_TEMPERATURE) }.getOrDefault(emptyList()).forEach { itens += pele(it) }
-        if (DataTypes.EXERCISE in concedidas) runCatching { ler(DataTypes.EXERCISE) }.getOrDefault(emptyList()).forEach { itens += exercicios(it) }
-        if (DataTypes.ENERGY_SCORE in concedidas) runCatching {
+        /** Lê um tipo; se falhar, guarda o erro (não engole em silêncio) e segue com os outros. */
+        suspend fun tentar(nome: String, bloco: suspend () -> List<JSONObject>) {
+            runCatching { bloco() }.onSuccess { itens += it }.onFailure {
+                erros += "$nome: ${it.javaClass.simpleName}${it.message?.let { m -> " ${m.take(80)}" } ?: ""}"
+                android.util.Log.w("SaudeNT", "falha ao ler $nome", it)
+            }
+        }
+        if (DataTypes.SLEEP in concedidas) tentar("sono") { ler(DataTypes.SLEEP).map { sono(it) } }
+        if (DataTypes.BLOOD_OXYGEN in concedidas) tentar("spo2") { ler(DataTypes.BLOOD_OXYGEN).map { spo2(it) } }
+        if (DataTypes.SKIN_TEMPERATURE in concedidas) tentar("pele") { ler(DataTypes.SKIN_TEMPERATURE).map { pele(it) } }
+        if (DataTypes.EXERCISE in concedidas) tentar("treinos") { ler(DataTypes.EXERCISE).flatMap { exercicios(it) } }
+        if (DataTypes.ENERGY_SCORE in concedidas) tentar("energia") {
             val req = DataTypes.ENERGY_SCORE.readDataRequestBuilder
                 .setLocalDateFilter(LocalDateFilter.of(LocalDate.now().minusDays(dias), LocalDate.now().plusDays(1))).build()
-            store.readData(req).dataList
-        }.getOrDefault(emptyList()).forEach { itens += energia(it) }
+            store.readData(req).dataList.map { energia(it) }
+        }
 
         // envia em lotes de 200
         var total = 0
@@ -92,8 +101,9 @@ object SamsungSync {
             if (http !in 200..299 || !r.optBoolean("ok")) return Resultado(total, contar(itens), r.optString("erro", "HTTP $http"))
             total += lote.size
         }
-        p.edit().putLong("ultima_sync", System.currentTimeMillis()).putInt("ultimo_total", total).apply()
-        return Resultado(total, contar(itens), null)
+        p.edit().putLong("ultima_sync", System.currentTimeMillis()).putInt("ultimo_total", total)
+            .apply { if (erros.isEmpty()) putBoolean("historico_ok", true) }.apply()
+        return Resultado(total, contar(itens), erros.takeIf { it.isNotEmpty() }?.joinToString("; "))
     }
 
     fun ultimaSync(ctx: Context) = prefs(ctx).getLong("ultima_sync", 0)

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { getWorkspaceContext } from "@/lib/auth";
@@ -64,6 +65,10 @@ export default async function RelatorioSaudePage({ searchParams }: { searchParam
       </div>
 
       <header className="space-y-1">
+        <div className="mb-3 flex items-center gap-2.5">
+          <Image src="/assets/logo/icone_nt.png" alt="Nosso Tudo" width={36} height={36} priority />
+          <span className="text-body font-semibold tracking-tight">Nosso Tudo · Saúde</span>
+        </div>
         <p className="text-overline uppercase text-muted-foreground">Relatório de saúde · últimos {dias} dias</p>
         <h1 className="text-h2 font-semibold tracking-tight">{profile.nome}</h1>
         <p className="text-body-sm text-muted-foreground">

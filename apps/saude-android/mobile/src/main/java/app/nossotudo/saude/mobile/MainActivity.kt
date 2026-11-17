@@ -61,7 +61,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        if (Conexao.vinculado(this)) SamsungSync.agendar(this)
+        // ao abrir: garante o agendamento e já sincroniza (sem precisar tocar no botão)
+        if (Conexao.vinculado(this)) { SamsungSync.agendar(this); SamsungSync.agora(this) }
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = Verde, onPrimary = Color(0xFF0E2A14), background = Fundo)) {
                 Tela(this)
@@ -128,6 +129,12 @@ private fun Tela(activity: Activity) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Column {
+            androidx.compose.foundation.Image(
+                painter = androidx.compose.ui.res.painterResource(R.drawable.logo_nt_selo),
+                contentDescription = "Nosso Tudo",
+                modifier = Modifier.size(56.dp),
+            )
+            Spacer(Modifier.height(12.dp))
             Text("Saúde NT", color = Verde, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Text("Samsung Health → Nosso Tudo", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
             Text(

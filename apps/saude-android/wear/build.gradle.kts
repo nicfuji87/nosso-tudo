@@ -1,4 +1,4 @@
-plugins {
+﻿plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -14,9 +14,9 @@ android {
         applicationId = "app.nossotudo.saude.wear"
         minSdk = 30          // Wear OS 3+
         targetSdk = 36       // Wear OS 6 (One UI 8 Watch)
-        versionCode = 7
-        versionName = "0.7"
-        // Endpoint público da Edge Function (a URL do projeto não é segredo; o relógio não leva chave nenhuma).
+        versionCode = 8
+        versionName = "0.8"
+        // Endpoint pÃºblico da Edge Function (a URL do projeto nÃ£o Ã© segredo; o relÃ³gio nÃ£o leva chave nenhuma).
         buildConfigField("String", "SAUDE_URL", "\"https://ecwcqooogsvsrddwjavh.supabase.co/functions/v1/saude-relogio\"")
     }
 
@@ -31,10 +31,10 @@ android {
 
     buildFeatures { compose = true; buildConfig = true }
 
-    // Sem o .aar da Samsung, compila contra um stub só para validar o código (APK não funcional).
+    // Sem o .aar da Samsung, compila contra um stub sÃ³ para validar o cÃ³digo (APK nÃ£o funcional).
     if (!temSdkSamsung) {
         sourceSets["main"].java.srcDir("stub/java")
-        logger.warn("⚠ wear/libs/ sem o Samsung Health Sensor SDK: compilando com STUB — o APK NÃO funciona no relógio.")
+        logger.warn("âš  wear/libs/ sem o Samsung Health Sensor SDK: compilando com STUB â€” o APK NÃƒO funciona no relÃ³gio.")
     }
 }
 
@@ -54,7 +54,7 @@ dependencies {
     implementation("androidx.wear.compose:compose-foundation:1.5.6")
     implementation("androidx.wear.compose:compose-navigation:1.5.6")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
-    // Envio ao Nosso Tudo em segundo plano, só com rede, sobrevivendo ao fechamento do app
+    // Envio ao Nosso Tudo em segundo plano, sÃ³ com rede, sobrevivendo ao fechamento do app
     implementation("androidx.work:work-runtime-ktx:2.10.1")
     // Atalho no mostrador (Tile)
     implementation("androidx.wear.tiles:tiles:1.4.1")

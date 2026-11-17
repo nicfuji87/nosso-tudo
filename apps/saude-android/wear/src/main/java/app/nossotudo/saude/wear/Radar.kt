@@ -96,7 +96,7 @@ object AvisoRadar {
             .setContentTitle("Radar de Saúde")
             .setContentText(texto)
             .setStyle(Notification.BigTextStyle().bigText(texto))
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_stat_nt)
             .setAutoCancel(true)
             .setContentIntent(PendingIntent.getActivity(app, 0, Intent(app, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
             .addAction(resposta("Estou bem", "bem", 71))

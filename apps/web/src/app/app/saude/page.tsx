@@ -261,7 +261,7 @@ export default async function SaudePage() {
   const normalVfc = p.desvioVfc?.normal ?? null;
   const normalTemp = p.desvioTemp?.normal ?? null;
   const ultimaComSono = [...p.noites].reverse().find((n) => n.sonoInicio && n.sonoFim);
-  const sonoUltima = ultimaComSono ? { inicio: ultimaComSono.sonoInicio!, fim: ultimaComSono.sonoFim! } : null;
+  const sonoUltima = ultimaComSono ? { inicio: ultimaComSono.sonoInicio!, fim: ultimaComSono.sonoFim!, fonte: ultimaComSono.fonteSono } : null;
   const varCarga = p.carga7dAnterior > 0 ? Math.round((p.carga7d / p.carga7dAnterior - 1) * 100) : null;
 
   return (
@@ -349,10 +349,11 @@ export default async function SaudePage() {
 
       {/* Noites + qualidade */}
       <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
-        <Cartao titulo="Noites" subtitulo={`sono estimado pelo batimento · repouso = menor média de 30 min · VFC e pele = mediana dentro do sono · ${ALGORITMOS.noites}`}
+        <Cartao titulo="Noites" subtitulo={`sono do Samsung Health (ou estimado pelo batimento) · repouso = menor média de 30 min · VFC e pele = mediana dentro do sono · ${ALGORITMOS.noites}`}
           acao={sonoUltima ? (
             <span className="tabular inline-flex items-center gap-1.5 rounded-full bg-[#6E7FE0]/10 px-3 py-1 text-caption font-medium text-[#5566C8]">
               <BedDouble className="size-3.5" /> {horaLocal(sonoUltima.inicio, TZ)}–{horaLocal(sonoUltima.fim, TZ)} · {duracao(minutosEntre(sonoUltima.inicio, sonoUltima.fim))}
+              <span className="font-normal opacity-80">· {sonoUltima.fonte === "samsung" ? "Samsung Health" : "estimado"}</span>
             </span>
           ) : undefined}>
           {p.noites.some((n) => n.fcRepouso != null || n.vfc != null || n.temp != null) ? (

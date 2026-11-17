@@ -256,7 +256,7 @@ class ColetaService : Service() {
         return Notification.Builder(this, CANAL)
             .setContentTitle("Saúde NT")
             .setContentText(texto)
-            .setSmallIcon(android.R.drawable.ic_menu_compass)
+            .setSmallIcon(R.drawable.ic_stat_nt)
             .setOngoing(true)
             .setContentIntent(abrir)
             .build()
