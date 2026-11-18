@@ -135,8 +135,28 @@ export async function excluirEvento(id: string): Promise<Resultado> {
   const ctx = await resolveWorkspaceId();
   if ("error" in ctx) return { error: ctx.error };
   const supabase = createClient();
-  const { error } = await supabase.from("saude_eventos").delete().eq("id", id).eq("workspace_id", ctx.workspaceId);
+  // treino que veio do Samsung Health: marca como descartado (apagar faria ele voltar na próxima sincronização)
+  const { data: ev } = await supabase.from("saude_eventos").select("origem").eq("id", id).eq("workspace_id", ctx.workspaceId).maybeSingle();
+  const { error } = ev?.origem === "samsung"
+    ? await supabase.from("saude_eventos").update({ descartado: true }).eq("id", id).eq("workspace_id", ctx.workspaceId)
+    : await supabase.from("saude_eventos").delete().eq("id", id).eq("workspace_id", ctx.workspaceId);
   if (error) return { error: "Não foi possível excluir." };
+  revalidatePath("/app/saude");
+  return { ok: true };
+}
+
+/** Troca a modalidade de um treino já registrado (ex.: o Samsung Health disse "Aeróbica" e foi jiu-jitsu, não judô). */
+export async function alterarModalidade(id: string, modalidade: string): Promise<Resultado> {
+  const ok = z.object({ id: z.string().uuid(), modalidade: z.string().trim().min(1).max(40) }).safeParse({ id, modalidade });
+  if (!ok.success) return { error: "Dados inválidos." };
+  const ctx = await resolveWorkspaceId();
+  if ("error" in ctx) return { error: ctx.error };
+  const supabase = createClient();
+  const { data: ev } = await supabase.from("saude_eventos").select("detalhes").eq("id", id).eq("workspace_id", ctx.workspaceId).maybeSingle();
+  if (!ev) return { error: "Treino não encontrado." };
+  const detalhes = { ...((ev.detalhes as Record<string, unknown>) ?? {}), modalidade: ok.data.modalidade };
+  const { error } = await supabase.from("saude_eventos").update({ detalhes }).eq("id", id).eq("workspace_id", ctx.workspaceId);
+  if (error) return { error: "Não foi possível salvar." };
   revalidatePath("/app/saude");
   return { ok: true };
 }

@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Check, X, Info, Sparkles, Scissors, Clock } from "lucide-react";
+import { Check, X, Info, Sparkles, Scissors, Clock, Smartphone, TrendingDown } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Treino } from "@/lib/saude/dados";
-import { confirmarTreino, descartarTreino, excluirEvento } from "@/app/app/saude/actions";
+import { alterarModalidade, confirmarTreino, descartarTreino, excluirEvento } from "@/app/app/saude/actions";
 import { BAIXA_CONFIANCA, ESFORCO, MODALIDADES, iconeModalidade, motivoBaixaConfianca } from "./modalidades";
 
 const TZ = "America/Sao_Paulo";
@@ -190,6 +190,7 @@ function Sugestao({ t }: { t: Treino }) {
 
 function Confirmado({ t }: { t: Treino }) {
   const [pendente, iniciar] = useTransition();
+  const [trocar, setTrocar] = useState(false);
   const Icone = iconeModalidade(t.modalidade);
   return (
     <li className="group flex gap-3 py-3">
@@ -199,15 +200,36 @@ function Confirmado({ t }: { t: Treino }) {
       <div className="min-w-0 flex-1 space-y-2">
         <div className="flex flex-wrap items-baseline justify-between gap-x-3">
           <p className="text-body-sm font-semibold">
-            {t.modalidade ?? "Treino"} <span className="font-normal text-muted-foreground">· {quando(t.inicio)}, {hora(t.inicio)}–{hora(t.fim)}</span>
+            <button type="button" className="underline-offset-4 hover:underline" title="Trocar a modalidade" onClick={() => setTrocar((v) => !v)}>
+              {t.modalidade ?? "Treino"}
+            </button>{" "}
+            <span className="font-normal text-muted-foreground">· {quando(t.inicio)}, {hora(t.inicio)}–{hora(t.fim)}</span>
+            {t.origem === "samsung" && (
+              <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-secondary px-1.5 py-0.5 align-middle text-[0.625rem] font-medium text-muted-foreground">
+                <Smartphone className="size-3" /> Samsung Health
+              </span>
+            )}
           </p>
           <p className="tabular text-caption text-muted-foreground">
             {t.minutos} min{t.fcMedia ? ` · média ${t.fcMedia} · pico ${t.fcMax}` : " · sem batimento medido"}
             {t.esforco != null && ` · esforço ${t.esforco}/10`}
             {t.carga != null && ` · carga ${t.carga}`}
+            {t.calorias != null && ` · ${t.calorias} kcal`}
           </p>
         </div>
+        {trocar && t.eventoId && (
+          <Chips valor={t.modalidade} onChange={(m) => iniciar(async () => {
+            const r = await alterarModalidade(t.eventoId!, m);
+            if (r.error) toast.error(r.error); else { toast.success(`Agora é ${m}.`); setTrocar(false); }
+          })} />
+        )}
         <BarraZonas t={t} />
+        {t.recuperacao && (
+          <p className="tabular flex items-center gap-1.5 text-caption text-muted-foreground">
+            <TrendingDown className="size-3.5 text-[#E5536A]" />
+            Recuperação: de {t.recuperacao.fcFim} bpm caiu {t.recuperacao.queda1} em ~1 min{t.recuperacao.queda2 != null && ` e ${t.recuperacao.queda2} em ~2 min`}
+          </p>
+        )}
         {t.modalidade && BAIXA_CONFIANCA.has(t.modalidade) && t.zonas && (
           <p className="text-caption text-muted-foreground">FC de baixa confiança nesta modalidade.</p>
         )}

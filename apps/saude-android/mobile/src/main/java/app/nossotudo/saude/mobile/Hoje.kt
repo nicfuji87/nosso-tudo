@@ -195,6 +195,43 @@ private fun CartaoTreino(t: JSONObject, aoSalvar: () -> Unit) {
     }
 }
 
+/** Nota do dia: repouso, VFC, sono, carga e radar — e a que horas deitar hoje. Não é diagnóstico. */
+@Composable
+private fun CartaoProntidao(p: JSONObject) {
+    val score = p.d("score")?.roundToInt()
+    val (cor, titulo) = when (p.optString("nivel")) {
+        "alto" -> Verde to "Pode puxar hoje"
+        "moderado" -> Ambar to "Treino moderado"
+        "baixo" -> Coracao to "Dia de pegar leve"
+        else -> TextoSec to "Sem noite medida"
+    }
+    val sono = p.optJSONObject("sono")
+    Bloco {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(10.dp).clip(CircleShape).background(cor)); Spacer(Modifier.width(8.dp))
+            Text("Prontidão" + if (p.optBoolean("calibrando")) " · aprendendo o seu normal" else "", color = TextoSec, fontSize = 12.sp)
+        }
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(score?.toString() ?: "—", color = cor, fontSize = 40.sp, fontWeight = FontWeight.Bold)
+            Text("  $titulo", color = Texto, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 7.dp))
+        }
+        p.optJSONArray("fatores")?.let { f ->
+            for (i in 0 until f.length()) {
+                val x = f.getJSONObject(i)
+                val ef = x.optInt("efeito")
+                Text("${if (ef < 0) "−${-ef}" else "ok"} · ${x.optString("texto")}", color = if (ef <= -10) Ambar else TextoSec, fontSize = 12.sp)
+            }
+        }
+        sono?.optString("deitar")?.takeIf { it.isNotEmpty() && it != "null" }?.let { deitar ->
+            Text(
+                "🌙 Para acordar ${sono.optString("acordar")} com 7h30 de sono, deite às $deitar" +
+                    (sono.d("regularidade_min")?.let { r -> if (r > 45) " · seus horários variam ±${r.roundToInt()} min" else "" } ?: ""),
+                color = Sono, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+    }
+}
+
 private val DIARIO = listOf(
     "malestar" to "Mal-estar", "sintoma" to "Sintoma", "medicamento" to "Remédio", "alcool" to "Álcool",
     "cafeina" to "Cafeína", "doenca" to "Fiquei doente", "estresse" to "Estresse", "nota" to "Nota",
@@ -241,6 +278,9 @@ fun TelaHoje() {
         erro?.let { Text("Não deu para carregar: $it", color = Ambar, fontSize = 13.sp) }
         aviso?.let { Text(it, color = Verde, fontSize = 13.sp) }
         val d = dados ?: run { if (erro == null) Text("Carregando…", color = TextoSec); return@Column }
+
+        // ---- Prontidão (prontidao-v1) + hora de dormir
+        d.optJSONObject("prontidao")?.let { p -> CartaoProntidao(p) }
 
         // ---- Radar
         val radar = d.optJSONObject("radar")
@@ -307,6 +347,19 @@ fun TelaHoje() {
             Metrica(Modifier.weight(1f), "SpO₂", Color(0xFF45E3EA), sp?.d("media")?.roundToInt()?.toString() ?: "—", "%", sp?.d("min")?.let { "mínimo ${it.roundToInt()}%" })
             val pele = noite?.d("temp_pele")
             Metrica(Modifier.weight(1f), "Pele", Laranja, pele?.let { String.format(Locale("pt", "BR"), "%.1f", it) } ?: "—", "°C", "média no sono")
+        }
+        val passos = d.optJSONObject("passos")
+        val corpo = d.optJSONObject("corpo")?.optJSONObject("dados")
+        if (passos != null || corpo != null) Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Metrica(
+                Modifier.weight(1f), "Passos", Verde, passos?.d("hoje")?.let { String.format(Locale("pt", "BR"), "%,d", it.toLong()) } ?: "—", "",
+                passos?.d("media7")?.let { "média 7 dias ${String.format(Locale("pt", "BR"), "%,d", it.toLong())}" },
+            )
+            Metrica(
+                Modifier.weight(1f), "Corpo", Color(0xFF7FB7D6), corpo?.d("gordura_pct")?.let { String.format(Locale("pt", "BR"), "%.1f", it) } ?: "—", "% gord.",
+                corpo?.let { c -> listOfNotNull(c.d("peso")?.let { String.format(Locale("pt", "BR"), "%.1f kg", it) }, c.d("musculo_esq_kg")?.let { String.format(Locale("pt", "BR"), "músc. %.1f", it) }).joinToString(" · ").ifEmpty { null } }
+                    ?: "meça no relógio (Composição corporal)",
+            )
         }
 
         // ---- Treinos a confirmar

@@ -103,6 +103,18 @@ class SaudeTile : TileService() {
             .addContent(legenda)
             .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(androidx.wear.protolayout.DimensionBuilders.dp(4f)).build())
             .addContent(Text.Builder(ctx, radar).setTypography(Typography.TYPOGRAPHY_CAPTION2).setColor(argb(corRadar)).build())
+            .apply {
+                // prontidão de hoje (nota 0–100) e hora de dormir sugerida
+                val hoje = java.time.LocalDate.now().toString()
+                val score = p.getInt("pront_score", -1)
+                if (p.getString("pront_dia", null) == hoje && score >= 0) {
+                    val cor = when (p.getString("pront_nivel", null)) {
+                        "alto" -> 0xFF8FDE95.toInt(); "moderado" -> 0xFFF2C14B.toInt(); else -> 0xFFFF8E9B.toInt()
+                    }
+                    val deitar = p.getString("pront_deitar", null)?.let { " · deitar $it" } ?: ""
+                    addContent(Text.Builder(ctx, "Prontidão $score$deitar").setTypography(Typography.TYPOGRAPHY_CAPTION2).setColor(argb(cor)).build())
+                }
+            }
             .build()
 
         val cores = ChipColors(argb(0xFF2A1215.toInt()), argb(0xFFFF8E9B.toInt()))

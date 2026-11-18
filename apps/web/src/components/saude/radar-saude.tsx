@@ -1,11 +1,11 @@
-import { Radar as IconeRadar, HeartPulse, Activity, Thermometer } from "lucide-react";
+import { Radar as IconeRadar, HeartPulse, Activity, Thermometer, Droplets } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Desvio, NivelRadar, PlacarRadar, RadarNoite } from "@/lib/saude/dados";
 
 const NIVEL: Record<NivelRadar | "sem", { rotulo: string; descricao: string; classe: string; ponto: string }> = {
-  estresse: { rotulo: "Corpo sob estresse", descricao: "2 ou mais sinais fora do normal por 2 noites, ou os 3 juntos.", classe: "bg-warning/12 text-warning border-warning/30", ponto: "bg-warning" },
+  estresse: { rotulo: "Corpo sob estresse", descricao: "2 ou mais sinais fora do normal por 2 noites, ou 3 juntos.", classe: "bg-warning/12 text-warning border-warning/30", ponto: "bg-warning" },
   observar: { rotulo: "Observar", descricao: "Algum sinal fora do normal esta noite. Uma noite isolada costuma dizer pouco.", classe: "bg-info/10 text-info border-info/25", ponto: "bg-info" },
-  normal: { rotulo: "Dentro do seu normal", descricao: "Repouso, VFC e pele dentro da sua faixa.", classe: "bg-success/10 text-success border-success/25", ponto: "bg-success" },
+  normal: { rotulo: "Dentro do seu normal", descricao: "Repouso, VFC, pele e SpO₂ dentro da sua faixa.", classe: "bg-success/10 text-success border-success/25", ponto: "bg-success" },
   calibrando: { rotulo: "Conhecendo o seu normal", descricao: "O radar começa a comparar com 7 noites medidas e se firma em 28.", classe: "bg-secondary text-muted-foreground border-border", ponto: "bg-muted-foreground" },
   sem: { rotulo: "Sem noite medida hoje", descricao: "Durma com o relógio: com 3 h ou mais de leitura entre 22h e 8h, o radar avalia a noite.", classe: "bg-secondary text-muted-foreground border-border", ponto: "bg-muted-foreground" },
 };
@@ -50,7 +50,7 @@ export function RadarSaude({ radar, hoje, desvioFc, desvioVfc, desvioTemp, placa
           <h2 className="flex items-center gap-2 text-body font-semibold tracking-tight">
             <IconeRadar className="size-5 text-[#8B6CE0]" /> Radar de Saúde
           </h2>
-          <p className="text-caption text-muted-foreground">sua noite comparada com o seu normal · radar-v1 · não é diagnóstico</p>
+          <p className="text-caption text-muted-foreground">sua noite comparada com o seu normal · radar-v2 · não é diagnóstico</p>
         </div>
         <span className={cn("inline-flex items-center gap-2 rounded-full border px-3 py-1 text-caption font-semibold", nivel.classe)}>
           <span className={cn("size-2 rounded-full", nivel.ponto)} /> {nivel.rotulo}
@@ -58,10 +58,13 @@ export function RadarSaude({ radar, hoje, desvioFc, desvioVfc, desvioTemp, placa
       </div>
       <p className="relative mt-2 text-body-sm text-muted-foreground">{nivel.descricao}</p>
 
-      <div className="relative mt-4 grid grid-cols-3 gap-2 sm:gap-3">
+      <div className="relative mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
         <Sinal icone={HeartPulse} cor="#E5536A" nome="Repouso" unidade="bpm" valor={atual?.fc ?? null} normal={atual?.fcNormal ?? null} delta={desvioFc} fora={!!atual?.fcFora} />
         <Sinal icone={Activity} cor="#8B6CE0" nome="VFC" unidade="ms" valor={atual?.vfc ?? null} normal={atual?.vfcNormal ?? null} delta={desvioVfc} fora={!!atual?.vfcFora} pct />
         <Sinal icone={Thermometer} cor="#F08A3C" nome="Pele" unidade="°C" valor={atual?.temp ?? null} normal={atual?.tempNormal ?? null} delta={desvioTemp} fora={!!atual?.tempFora} casas={1} />
+        <Sinal icone={Droplets} cor="#1FA9B0" nome="SpO₂" unidade="%" valor={atual?.spo2 ?? null} normal={atual?.spo2Normal ?? null}
+          delta={atual?.spo2 != null && atual.spo2Normal != null ? { valor: atual.spo2, normal: atual.spo2Normal, delta: atual.spo2 - atual.spo2Normal, deltaPct: 0, noites: atual.base } : null}
+          fora={!!atual?.spo2Fora} />
       </div>
 
       {ultimas.length > 0 && (
@@ -71,7 +74,7 @@ export function RadarSaude({ radar, hoje, desvioFc, desvioVfc, desvioTemp, placa
             aria-label={ultimas.map((r) => `noite ${diaCurto(r.noite)}: ${NIVEL[r.nivel].rotulo}`).join("; ")}>
             {ultimas.map((r) => (
               <div key={r.noite} className="flex min-w-[2rem] flex-col items-center gap-1" title={`${r.noite.split("-").reverse().join("/")}: ${NIVEL[r.nivel].rotulo}${r.doente ? " · marcado doente" : ""}`}>
-                {([["fcFora", "fc"], ["vfcFora", "vfc"], ["tempFora", "temp"]] as const).map(([k, v]) => (
+                {([["fcFora", "fc"], ["vfcFora", "vfc"], ["tempFora", "temp"], ["spo2Fora", "spo2"]] as const).map(([k, v]) => (
                   <span key={k} className={cn("size-2.5 rounded-full", r[v] == null ? "bg-secondary" : r[k] ? "bg-warning" : "bg-success/60")} />
                 ))}
                 <span className={cn("mt-0.5 h-1 w-5 rounded-full", NIVEL[r.nivel].ponto, r.nivel === "normal" && "opacity-40")} />
@@ -79,7 +82,7 @@ export function RadarSaude({ radar, hoje, desvioFc, desvioVfc, desvioTemp, placa
               </div>
             ))}
           </div>
-          <p className="mt-1 text-[0.6875rem] text-muted-foreground">bolinhas: repouso · VFC · pele (laranja = fora do normal, cinza = sem dado)</p>
+          <p className="mt-1 text-[0.6875rem] text-muted-foreground">bolinhas: repouso · VFC · pele · SpO₂ (laranja = fora do normal, cinza = sem dado)</p>
         </div>
       )}
 

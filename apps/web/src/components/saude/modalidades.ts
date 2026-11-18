@@ -1,4 +1,4 @@
-import { Activity, Dumbbell, Grab, Swords, Waves } from "lucide-react";
+import { Activity, Dumbbell, Footprints, Grab, Swords, Waves } from "lucide-react";
 
 /** Modalidades que você pratica (a ordem é a dos botões). */
 export const MODALIDADES = [
@@ -6,6 +6,7 @@ export const MODALIDADES = [
   { nome: "Natação", icone: Waves },
   { nome: "Judô", icone: Swords },
   { nome: "Jiu-jitsu", icone: Grab },
+  { nome: "Caminhada", icone: Footprints },
   { nome: "Outro", icone: Activity },
 ] as const;
 

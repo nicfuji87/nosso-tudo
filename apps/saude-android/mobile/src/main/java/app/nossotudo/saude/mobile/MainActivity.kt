@@ -201,7 +201,7 @@ private fun TelaAjustes(activity: Activity) {
                     color = Color.White,
                 )
             }
-            Text("Só leitura: sono, SpO₂, temperatura da pele, treinos e Energy Score.", color = TextoSec, fontSize = 13.sp)
+            Text("Só leitura: sono, SpO₂, temperatura da pele, treinos, Energy Score, passos, composição corporal, ritmo irregular e apneia do sono.", color = TextoSec, fontSize = 13.sp)
             OutlinedButton(onClick = {
                 escopo.launch {
                     runCatching { SamsungSync.pedirPermissoes(activity).size }.onSuccess { concedidas = it }.onFailure { tratar(it) }
@@ -209,12 +209,31 @@ private fun TelaAjustes(activity: Activity) {
             }) { Text(if ((concedidas ?: 0) > 0) "Revisar permissões" else "Permitir") }
         }
 
-        Cartao("3 · Sincronizar") {
+        Cartao("3 · Rodar sozinho em segundo plano") {
+            var livre by remember { mutableStateOf(SamsungSync.semRestricaoBateria(ctx)) }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Ponto(livre)
+                Text(if (livre) "Liberado: sincroniza a cada 2 h mesmo com o app fechado" else "A One UI pode pausar o app e a sincronização para", color = Color.White)
+            }
+            if (!livre) OutlinedButton(onClick = {
+                runCatching {
+                    activity.startActivity(
+                        android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                            .setData(android.net.Uri.parse("package:${ctx.packageName}")),
+                    )
+                }
+                if (android.os.Build.VERSION.SDK_INT >= 33) activity.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
+            }) { Text("Liberar") }
+            LaunchedEffect(Unit) { while (true) { delay(2_000); livre = SamsungSync.semRestricaoBateria(ctx) } }
+        }
+
+        Cartao("4 · Sincronizar") {
             Text(
                 if (ultima > 0) "Última sincronização: ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(ultima))}"
-                else "Ainda não sincronizou. Depois da primeira vez, roda sozinho a cada 3 horas.",
+                else "Ainda não sincronizou. Depois da primeira vez, roda sozinho a cada 2 horas.",
                 color = TextoSec, fontSize = 14.sp,
             )
+            SamsungSync.ultimoErro(ctx)?.let { Text("Último problema: $it", color = Color(0xFFF2C14B), fontSize = 12.sp) }
             Button(
                 onClick = {
                     escopo.launch {

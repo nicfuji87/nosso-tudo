@@ -9,10 +9,13 @@ import { createClient } from "@/lib/supabase/server";
  * O PostgREST corta em 1000 linhas — por isso `paginar`.
  *
  * Algoritmos versionados (a interpretação de dados antigos não muda em silêncio):
- *   noites-v3 · treino-v1 · radar-v1 (SQL) · padrao-v1 e insights-v2 (aqui)
+ *   noites-v6 · treino-v1 · samsung-v1 · radar-v2 · prontidao-v1 · recuperacao-v1 (SQL) · padrao-v1 e insights-v3 (aqui)
  */
 
-export const ALGORITMOS = { noites: "noites-v5", treino: "treino-v1", padrao: "padrao-v1", radar: "radar-v1", insights: "insights-v2" } as const;
+export const ALGORITMOS = {
+  noites: "noites-v6", treino: "treino-v1", samsung: "samsung-v1", padrao: "padrao-v1", radar: "radar-v2", insights: "insights-v3",
+  prontidao: "prontidao-v1", recuperacao: "recuperacao-v1",
+} as const;
 export const NOITES_BASE = 28; // linha de base pessoal completa
 export const NOITES_MIN_COMPARAR = 7; // antes disso não há "seu normal" para comparar
 
@@ -28,6 +31,8 @@ export interface Dispositivo {
   noPulso: boolean | null;
   ultimaLeituraEm: string | null;
   estadoEm: string | null;
+  /** app do celular: última sincronização boa, último erro, se a One UI pode pausar o app */
+  diagnostico: { versao: string | null; erro: string | null; ultimaSync: string | null; otimizacaoBateria: boolean | null; recebidoEm: string | null } | null;
 }
 
 export interface PontoBpm { minuto: string; bpm: number; min: number; max: number }
@@ -38,6 +43,8 @@ export interface Noite {
   noite: string; minutos: number; fcRepouso: number | null; vfc: number | null; janelas: number; temp: number | null; janelasTemp: number;
   /** sono do Samsung Health quando houver; senão, estimado pelo batimento (noites-v5) */
   sonoInicio: string | null; sonoFim: string | null; fonteSono: "samsung" | "batimento" | null;
+  /** SpO₂ da noite (Samsung Health) */
+  spo2: number | null; spo2Min: number | null;
 }
 
 /** Trecho da linha do tempo do relógio (explica as lacunas do batimento). */
@@ -59,8 +66,18 @@ export interface ExercicioSamsung {
   inicio: string; fim: string; tipo: string; modalidade: string | null; auto: boolean | null;
   fcMedia: number | null; fcMax: number | null; calorias: number | null;
 }
+export interface ComposicaoCorporal {
+  ts: string; peso: number | null; gorduraPct: number | null; musculoKg: number | null; aguaKg: number | null; imc: number | null; tmb: number | null;
+}
 export interface Samsung {
   sono: SonoSamsung | null; // última noite
+  passos: { hoje: number | null; media7: number | null; dias: { dia: string; total: number }[] } | null;
+  corpo: (ComposicaoCorporal & { anterior: ComposicaoCorporal | null }) | null;
+  /** avisos de ritmo cardíaco irregular (Samsung Health Monitor) no último ano */
+  ritmoIrregular: { total: number; ultimo: string | null };
+  /** resultado de apneia do sono (Samsung Health Monitor) */
+  apneia: { sinal: "DETECTED" | "NOT_DETECTED" | "UNDEFINED" | string; ts: string } | null;
+  vo2max: { valor: number; ts: string } | null;
   spo2: { media: number | null; min: number | null } | null; // durante a última noite
   pele: number | null;
   energia: { dia: string; score: number } | null;
@@ -85,7 +102,18 @@ export interface RadarNoite {
   fc: number | null; fcNormal: number | null; fcFora: boolean;
   vfc: number | null; vfcNormal: number | null; vfcFora: boolean;
   temp: number | null; tempNormal: number | null; tempFora: boolean;
+  spo2: number | null; spo2Normal: number | null; spo2Fora: boolean;
   sinais: number; base: number; doente: boolean; nivel: NivelRadar;
+}
+
+/** Nota do dia (prontidao-v1, função SQL saude_prontidao). Não é diagnóstico. */
+export interface Prontidao {
+  score: number | null;
+  nivel: "alto" | "moderado" | "baixo" | null;
+  calibrando: boolean;
+  fatores: { sinal: string; texto: string; efeito: number }[];
+  carga: { aguda: number; cronicaSemana: number | null; razao: number | null };
+  sono: { horas: number | null; fonte: string | null; acordar: string | null; deitar: string | null; regularidadeMin: number | null; noites: number };
 }
 /** Placar do radar contra os dias em que você marcou "fiquei doente". */
 export interface PlacarRadar { episodios: number; avisadosAntes: number; avisos: number; avisosSemNada: number }
@@ -106,6 +134,11 @@ export interface Treino {
   esforco: number | null;
   /** padrao-v1: modalidade provável pelo seu histórico (mesmo dia da semana e horário parecido). */
   palpite: string | null;
+  /** de onde veio: Samsung Health (samsung-v1), detectado e confirmado, ou lançado à mão */
+  origem: string | null;
+  /** recuperacao-v1: queda do batimento ~1 e ~2 min depois do fim (aprox., médias por minuto) */
+  recuperacao: { fcFim: number; queda1: number; queda2: number | null } | null;
+  calorias: number | null;
 }
 
 export interface EventoDiario {
@@ -172,6 +205,9 @@ export interface PainelSaude {
   linhaDoTempo: TrechoRelogio[]; // últimas 24 h
   bateria: Bateria;
   samsung: Samsung;
+  prontidao: Prontidao | null;
+  /** tendência da recuperação pós-treino (queda em ~1 min), mais antigo primeiro */
+  recuperacoes: { ts: string; modalidade: string | null; queda1: number }[];
 }
 
 /** Data local (YYYY-MM-DD) no fuso do workspace. */
@@ -248,10 +284,10 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
   const desde24h = new Date(agora - 24 * 3600_000).toISOString();
   const desde60d = new Date(agora - 60 * 86_400_000).toISOString();
 
-  const [disp, bpm, vfc24, regs, ecgs, noitesR, treinosR, eventosR, radarR, estadosR, samsungR] = await Promise.all([
+  const [disp, bpm, vfc24, regs, ecgs, noitesR, treinosR, eventosR, radarR, estadosR, samsungR, raroR, prontR] = await Promise.all([
     supabase
       .from("saude_dispositivos")
-      .select("id, nome, modelo, criado_em, ultimo_envio_em, versao_app, bateria_pct, carregando, no_pulso, ultima_leitura_em, estado_em")
+      .select("id, nome, modelo, criado_em, ultimo_envio_em, versao_app, bateria_pct, carregando, no_pulso, ultima_leitura_em, estado_em, diagnostico")
       .eq("workspace_id", workspaceId)
       .is("revogado_em", null)
       .order("criado_em", { ascending: true }),
@@ -291,6 +327,16 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
       .gte("inicio", new Date(agora - 15 * 86_400_000).toISOString())
       .order("inicio", { ascending: false })
       .limit(500),
+    // medições raras: composição corporal, ritmo irregular, apneia (último ano)
+    supabase
+      .from("saude_samsung")
+      .select("tipo, inicio, fim, dados")
+      .eq("workspace_id", workspaceId)
+      .in("tipo", ["corpo", "ritmo_irregular", "apneia"])
+      .gte("inicio", new Date(agora - 365 * 86_400_000).toISOString())
+      .order("inicio", { ascending: false })
+      .limit(200),
+    supabase.rpc("saude_prontidao", { p_workspace_id: workspaceId, p_tz: tz }),
   ]);
 
   // ---- dispositivos
@@ -298,6 +344,14 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
     id: d.id, nome: d.nome, modelo: d.modelo, criadoEm: d.criado_em, ultimoEnvioEm: d.ultimo_envio_em,
     versao: d.versao_app, bateria: d.bateria_pct, carregando: d.carregando, noPulso: d.no_pulso,
     ultimaLeituraEm: d.ultima_leitura_em, estadoEm: d.estado_em,
+    diagnostico: d.diagnostico && typeof d.diagnostico === "object" ? (() => {
+      const g = d.diagnostico as Record<string, unknown>;
+      const t = (k: string) => (typeof g[k] === "string" ? (g[k] as string) : null);
+      return {
+        versao: t("versao"), erro: t("erro"), ultimaSync: t("ultima_sync"), recebidoEm: t("recebido_em"),
+        otimizacaoBateria: typeof g.otimizacao_bateria === "boolean" ? g.otimizacao_bateria : null,
+      };
+    })() : null,
   }));
 
   // ---- batimento 24 h
@@ -310,12 +364,14 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
   type NoiteRow = {
     noite: string; minutos: number; fc_repouso: number | null; vfc_noturna: number | null; janelas: number; temp_pele: number | null; janelas_temp: number;
     sono_inicio: string | null; sono_fim: string | null; fonte_sono: "samsung" | "batimento" | null;
+    spo2_media: number | null; spo2_min: number | null;
   };
   const noites: Noite[] = ((noitesR.data ?? []) as NoiteRow[]).map((n) => ({
     noite: n.noite, minutos: n.minutos, fcRepouso: n.fc_repouso != null ? Math.round(n.fc_repouso * 10) / 10 : null,
     vfc: n.vfc_noturna != null ? Math.round(n.vfc_noturna) : null, janelas: n.janelas,
     temp: n.temp_pele != null ? Math.round(n.temp_pele * 100) / 100 : null, janelasTemp: n.janelas_temp,
     sonoInicio: n.sono_inicio, sonoFim: n.sono_fim, fonteSono: n.fonte_sono,
+    spo2: n.spo2_media, spo2Min: n.spo2_min,
   }));
   const noitesValidas = noites.filter((n) => n.fcRepouso != null);
   const ultimaNoite = noitesValidas.at(-1) ?? null;
@@ -323,10 +379,12 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
   type RadarRow = {
     noite: string; fc: number | null; fc_normal: number | null; fc_fora: boolean; vfc: number | null; vfc_normal: number | null; vfc_fora: boolean;
     temp: number | null; temp_normal: number | null; temp_fora: boolean; sinais: number; base: number; doente: boolean; nivel: NivelRadar;
+    spo2: number | null; spo2_normal: number | null; spo2_fora: boolean | null;
   };
   const radar: RadarNoite[] = ((radarR.data ?? []) as RadarRow[]).map((r) => ({
     noite: r.noite, fc: r.fc, fcNormal: r.fc_normal, fcFora: r.fc_fora, vfc: r.vfc, vfcNormal: r.vfc_normal, vfcFora: r.vfc_fora,
     temp: r.temp, tempNormal: r.temp_normal, tempFora: r.temp_fora, sinais: r.sinais, base: r.base, doente: r.doente, nivel: r.nivel,
+    spo2: r.spo2 ?? null, spo2Normal: r.spo2_normal ?? null, spo2Fora: !!r.spo2_fora,
   }));
   const radarHoje = radar[0]?.noite === hoje ? radar[0] : undefined;
   const desvioFc = desvioDe(radar[0], "fc", "fcNormal");
@@ -354,6 +412,7 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
   // ---- Samsung Health (app do celular)
   type SamsungRow = { tipo: string; inicio: string; fim: string | null; dados: Record<string, unknown> };
   const sRows = (samsungR.data ?? []) as SamsungRow[];
+  const raros = (raroR.data ?? []) as SamsungRow[];
   const nRow = (o: Record<string, unknown>, k: string) => (typeof o[k] === "number" ? (o[k] as number) : null);
   const sonoRow = sRows.find((r) => r.tipo === "sono" && r.fim);
   const sonoSamsung: SonoSamsung | null = sonoRow ? (() => {
@@ -389,7 +448,39 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
       min: Math.min(...spoNoite.map((r) => nRow(r.dados, "min") ?? 100)),
     } : null,
     pele: media(peleNoite.map((r) => nRow(r.dados, "media")).filter((x): x is number => x != null)),
-    energia: energiaRow ? { dia: diaLocal(energiaRow.inicio, tz), score: nRow(energiaRow.dados, "score")! } : null,
+    // o Energy Score é de um DIA (vem como meia-noite UTC): converter para o fuso jogava a data para a véspera
+    energia: energiaRow ? { dia: energiaRow.inicio.slice(0, 10), score: nRow(energiaRow.dados, "score")! } : null,
+    passos: (() => {
+      const dias = sRows.filter((r) => r.tipo === "passos" && nRow(r.dados, "total") != null)
+        .map((r) => ({ dia: typeof r.dados.dia === "string" ? r.dados.dia : diaLocal(r.inicio, tz), total: nRow(r.dados, "total")! }))
+        .sort((a, b) => a.dia.localeCompare(b.dia));
+      if (!dias.length) return null;
+      const anteriores = dias.filter((d) => d.dia < hoje).slice(-7);
+      return {
+        hoje: dias.find((d) => d.dia === hoje)?.total ?? null,
+        media7: anteriores.length ? Math.round(anteriores.reduce((s, d) => s + d.total, 0) / anteriores.length) : null,
+        dias: dias.slice(-14),
+      };
+    })(),
+    corpo: (() => {
+      const lista = raros.filter((r) => r.tipo === "corpo").map((r) => ({
+        ts: r.inicio, peso: nRow(r.dados, "peso"), gorduraPct: nRow(r.dados, "gordura_pct"), musculoKg: nRow(r.dados, "musculo_esq_kg"),
+        aguaKg: nRow(r.dados, "agua_kg"), imc: nRow(r.dados, "imc"), tmb: nRow(r.dados, "tmb"),
+      }));
+      return lista[0] ? { ...lista[0], anterior: lista[1] ?? null } : null;
+    })(),
+    ritmoIrregular: (() => {
+      const l = raros.filter((r) => r.tipo === "ritmo_irregular" && r.dados.status === "DETECTED");
+      return { total: l.length, ultimo: l[0]?.inicio ?? null };
+    })(),
+    apneia: (() => {
+      const a = raros.find((r) => r.tipo === "apneia");
+      return a ? { sinal: String(a.dados.sinal ?? "UNDEFINED"), ts: a.inicio } : null;
+    })(),
+    vo2max: (() => {
+      const x = sRows.find((r) => r.tipo === "exercicio" && nRow(r.dados, "vo2max") != null);
+      return x ? { valor: nRow(x.dados, "vo2max")!, ts: x.inicio } : null;
+    })(),
     exercicios: exerciciosSamsung.slice(0, 8),
     conectado: dispositivos.length > 1 || sRows.length > 0,
   };
@@ -413,6 +504,7 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
       status: "sugerido", modalidade: null, esforco: null,
       palpite: exerciciosSamsung.find((x) => x.modalidade && sobrepoe(x.inicio, x.fim, t.inicio, t.fim))?.modalidade
         ?? palpiteModalidade(t.inicio, historicoModalidades, tz),
+      origem: null, recuperacao: null, calorias: null,
     });
   }
   const confirmados = treinosEv.filter((e) => !e.descartado && agora - ms(e.inicio) < 15 * 86_400_000);
@@ -424,10 +516,22 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
         p_fins: confirmados.map((e) => e.fim ?? e.inicio),
       })).data ?? []) as ResumoRow[])
     : [];
+  // recuperacao-v1: queda do batimento depois do fim. Só vale quando nada começa logo depois
+  // (outro treino em < 10 min) e fora d'água (na natação o sensor erra muito).
+  type RecRow = { idx: number; fc_fim: number | null; fc_1: number | null; fc_2: number | null };
+  const recs = confirmados.length
+    ? (((await supabase.rpc("saude_recuperacao", { p_workspace_id: workspaceId, p_fins: confirmados.map((e) => e.fim ?? e.inicio) })).data ?? []) as RecRow[])
+    : [];
   confirmados.forEach((ev, i) => {
     const r = resumos.find((x) => x.idx === i + 1);
     const fim = ev.fim ?? ev.inicio;
     const medido = r && r.minutos >= 3;
+    const rc = recs.find((x) => x.idx === i + 1);
+    const emSeguida = treinosEv.some((o) => o.id !== ev.id && !o.descartado && ms(o.inicio) >= ms(fim) - 60_000 && ms(o.inicio) - ms(fim) < 10 * 60_000);
+    const recuperacao = rc && rc.fc_fim != null && rc.fc_fim >= 100 && rc.fc_1 != null && rc.fc_1 <= rc.fc_fim && !emSeguida
+      && ev.detalhes?.modalidade !== "Natação"
+      ? { fcFim: Math.round(rc.fc_fim), queda1: Math.round(rc.fc_fim - rc.fc_1), queda2: rc.fc_2 != null ? Math.round(rc.fc_fim - rc.fc_2) : null }
+      : null;
     treinos.push({
       chave: ev.id, eventoId: ev.id, inicio: ev.inicio, fim,
       minutos: Math.round((ms(fim) - ms(ev.inicio)) / 60_000),
@@ -437,6 +541,8 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
       modalidade: (ev.detalhes?.modalidade as string | undefined) ?? null,
       esforco: typeof ev.detalhes?.esforco === "number" ? (ev.detalhes.esforco as number) : null,
       palpite: null,
+      origem: ev.origem, recuperacao,
+      calorias: typeof ev.detalhes?.calorias === "number" ? Math.round(ev.detalhes.calorias as number) : null,
     });
   });
   treinos.sort((a, b) => b.inicio.localeCompare(a.inicio));
@@ -545,6 +651,22 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
   // ---- insights-v1: frases curtas, honestas, sem diagnóstico; nunca suprimem um desvio
   const insights: Insight[] = [];
   const rel = dispositivos[0];
+  // celular parado: sem ele, sono, SpO₂ e treinos do Samsung Health não chegam
+  const celular = dispositivos.find((d) => d.diagnostico || /celular/i.test(d.nome));
+  if (celular) {
+    const horasSem = celular.ultimoEnvioEm ? (agora - ms(celular.ultimoEnvioEm)) / 3600_000 : null;
+    const g = celular.diagnostico;
+    if (horasSem == null || horasSem > 6 || g?.erro) {
+      insights.push({
+        id: "celular", tom: "atencao",
+        titulo: horasSem != null && horasSem > 6 ? `Celular sem sincronizar há ${Math.round(horasSem)} h` : "Celular com problema na sincronização",
+        texto: [
+          g?.erro ? `Último erro: ${g.erro}.` : null,
+          g?.otimizacaoBateria ? "A One UI está pausando o app — no Saúde NT, Ajustes › Rodar sozinho › Liberar." : "Abra o app Saúde NT no celular: ele sincroniza ao abrir.",
+        ].filter(Boolean).join(" "),
+      });
+    }
+  }
   if (rel && rel.noPulso === false) {
     const desde = rel.ultimaLeituraEm ?? ultimo?.minuto ?? null;
     insights.push({
@@ -583,6 +705,7 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
       radarHoje.fcFora && desvioFc ? `repouso +${desvioFc.delta.toFixed(0)} bpm` : null,
       radarHoje.vfcFora && desvioVfc ? `VFC ${desvioVfc.deltaPct.toFixed(0)}%` : null,
       radarHoje.tempFora && desvioTemp ? `pele +${desvioTemp.delta.toFixed(1).replace(".", ",")} °C` : null,
+      radarHoje.spo2Fora && radarHoje.spo2 != null && radarHoje.spo2Normal != null ? `SpO₂ ${Math.round(radarHoje.spo2 - radarHoje.spo2Normal)} pts` : null,
     ].filter(Boolean).join(", ");
     if (radarHoje.nivel === "estresse") {
       insights.push({
@@ -597,7 +720,7 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
         influencias,
       });
     } else {
-      insights.push({ id: "radar-normal", tom: "bom", titulo: "Radar: noite dentro do seu normal", texto: "Repouso, VFC e temperatura da pele dentro da sua faixa." });
+      insights.push({ id: "radar-normal", tom: "bom", titulo: "Radar: noite dentro do seu normal", texto: "Repouso, VFC, temperatura da pele e SpO₂ dentro da sua faixa." });
     }
   }
   const noiteHoje = noites.at(-1);
@@ -632,5 +755,25 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
     treinos, carga7d, carga7dAnterior, eventos, registros, malEstares,
     ecgs: (ecgs.data ?? []).map((e) => ({ id: e.id, ts: e.ts, duracaoS: e.duracao_s, hz: e.hz })),
     qualidade, insights, linhaDoTempo, bateria, samsung,
+    prontidao: (() => {
+      const x = prontR.data as Record<string, unknown> | null;
+      if (!x || typeof x !== "object") return null;
+      const c = (x.carga ?? {}) as Record<string, number | null>;
+      const s = (x.sono ?? {}) as Record<string, string | number | null>;
+      return {
+        score: typeof x.score === "number" ? x.score : null,
+        nivel: (x.nivel as Prontidao["nivel"]) ?? null,
+        calibrando: !!x.calibrando,
+        fatores: Array.isArray(x.fatores) ? (x.fatores as Prontidao["fatores"]) : [],
+        carga: { aguda: Number(c.aguda ?? 0), cronicaSemana: c.cronica_semana ?? null, razao: c.razao ?? null },
+        sono: {
+          horas: typeof s.horas === "number" ? s.horas : null, fonte: (s.fonte as string) ?? null,
+          acordar: (s.acordar as string) ?? null, deitar: (s.deitar as string) ?? null,
+          regularidadeMin: typeof s.regularidade_min === "number" ? s.regularidade_min : null, noites: Number(s.noites ?? 0),
+        },
+      };
+    })(),
+    recuperacoes: treinos.filter((t) => t.recuperacao).map((t) => ({ ts: t.inicio, modalidade: t.modalidade, queda1: t.recuperacao!.queda1 }))
+      .sort((a, b) => a.ts.localeCompare(b.ts)),
   };
 }

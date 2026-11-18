@@ -14,6 +14,7 @@ import { TreinosSaude } from "@/components/saude/treinos-saude";
 import { DiarioSaude } from "@/components/saude/diario-saude";
 import { RadarSaude } from "@/components/saude/radar-saude";
 import { SamsungSaude } from "@/components/saude/samsung-saude";
+import { ProntidaoSaude } from "@/components/saude/prontidao-saude";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Saúde · Nosso Tudo" };
@@ -59,6 +60,8 @@ function EstadoRelogio({ p }: { p: PainelSaude }) {
     : d.noPulso === false ? { txt: "Fora do pulso", cor: "bg-muted-foreground" }
     : { txt: "Medindo", cor: "bg-success" };
   const Bateria = d.carregando ? BatteryCharging : BatteryMedium;
+  const celular = p.dispositivos.find((x) => x.diagnostico || /celular/i.test(x.nome));
+  const celularOk = !!celular?.ultimoEnvioEm && Date.now() - new Date(celular.ultimoEnvioEm).getTime() < 6 * 3600_000 && !celular.diagnostico?.erro;
   return (
     <div className="flex flex-wrap items-center gap-2 text-caption">
       <span className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-card px-3 py-1.5">
@@ -76,6 +79,14 @@ function EstadoRelogio({ p }: { p: PainelSaude }) {
       <span className={cn("inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-card px-3 py-1.5", !recente && "text-muted-foreground")}>
         {ultimoEnvio ? `Sincronizado ${ha(ultimoEnvio)}` : "Aguardando o primeiro envio"}
       </span>
+      {celular && (
+        <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5",
+          celularOk ? "border-border/70 bg-card" : "border-warning/40 bg-warning/10 text-warning")}
+          title={celular.diagnostico?.erro ?? undefined}>
+          <Smartphone className="size-3.5" /> Celular {celular.ultimoEnvioEm ? ha(celular.ultimoEnvioEm) : "sem envio"}
+          {celular.diagnostico?.erro ? " · com erro" : ""}
+        </span>
+      )}
     </div>
   );
 }
@@ -316,12 +327,15 @@ export default async function SaudePage() {
         </div>
       </div>
 
+      {/* Prontidão do dia */}
+      <ProntidaoSaude p={p.prontidao} recuperacoes={p.recuperacoes} />
+
       {/* Radar de Saúde */}
       <RadarSaude radar={p.radar} hoje={diaLocal(new Date().toISOString(), TZ)} desvioFc={p.desvioFc} desvioVfc={p.desvioVfc}
         desvioTemp={p.desvioTemp} placar={p.placar} />
 
       {/* Samsung Health (celular) */}
-      <Cartao titulo="Samsung Health" subtitulo="pelo app Saúde NT do celular · sono com estágios, SpO₂, temperatura, treinos e Energy Score"
+      <Cartao titulo="Samsung Health" subtitulo="pelo app Saúde NT do celular · sono, SpO₂, temperatura, Energy Score, passos, composição corporal e Health Monitor"
         acao={<Smartphone className="size-5 text-muted-foreground" />}>
         <SamsungSaude s={p.samsung} />
       </Cartao>
@@ -342,7 +356,7 @@ export default async function SaudePage() {
       </Cartao>
 
       {/* Treinos */}
-      <Cartao titulo="Treinos" subtitulo={`detectados pelo batimento (${ALGORITMOS.treino}) · modalidade sugerida pelo seu padrão (${ALGORITMOS.padrao}) · treinou sem o relógio? lance em Diário › Treino`}
+      <Cartao titulo="Treinos" subtitulo={`gravados no Samsung Health entram sozinhos (${ALGORITMOS.samsung}) · os demais são detectados pelo batimento (${ALGORITMOS.treino}) para confirmar · treinou sem o relógio? Diário › Treino`}
         acao={<Flame className="size-5 text-[#F08A3C]" />}>
         <TreinosSaude treinos={p.treinos} />
       </Cartao>

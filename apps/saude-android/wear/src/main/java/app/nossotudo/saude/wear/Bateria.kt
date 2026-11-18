@@ -17,4 +17,21 @@ object Bateria {
     }
 
     fun carregando(ctx: Context): Boolean = (status(ctx)?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0
+
+    // Leituras do último ~1 h (uma por minuto, pelo ColetaService). Transições como "tirei do pulso" são
+    // confirmadas com atraso (histerese) e datadas para trás: a bateria tem que ser a DAQUELE instante,
+    // não a de agora — senão aparecia "fora do pulso 88%" e, 1 min depois, "carregando 76%".
+    private val historico = ArrayDeque<Pair<Long, Int>>()
+
+    @Synchronized
+    fun registrar(ts: Long, nivel: Int) {
+        historico.addLast(ts to nivel)
+        while (historico.size > 90) historico.removeFirst()
+    }
+
+    /** Nível no instante [ts] (leitura mais próxima até 3 min antes ou depois); senão, o atual. */
+    @Synchronized
+    fun nivelEm(ctx: Context, ts: Long): Int? =
+        historico.minByOrNull { kotlin.math.abs(it.first - ts) }?.takeIf { kotlin.math.abs(it.first - ts) <= 180_000L }?.second
+            ?: nivel(ctx)
 }

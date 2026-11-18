@@ -82,7 +82,7 @@ object EstadoSaude {
             val anterior = pulsoEstavel
             pulsoEstavel = estado
             if (anterior != null) {
-                app?.let { runCatching { Sync.enfileirarTransicao(it, pulsoDesde, if (estado) "no_pulso" else "fora_do_pulso", Bateria.nivel(it)) } }
+                app?.let { runCatching { Sync.enfileirarTransicao(it, pulsoDesde, if (estado) "no_pulso" else "fora_do_pulso", Bateria.nivelEm(it, pulsoDesde)) } }
             }
         }
     }

@@ -1,4 +1,4 @@
-import { BatteryCharging, Droplets, Moon, Smartphone, Thermometer } from "lucide-react";
+import { Activity, BatteryCharging, Droplets, Footprints, HeartPulse, Moon, Scale, Smartphone, Thermometer, Wind } from "lucide-react";
 import type { Samsung } from "@/lib/saude/dados";
 
 const TZ = "America/Sao_Paulo";
@@ -91,6 +91,57 @@ export function SamsungSaude({ s }: { s: Samsung }) {
           </div>
         </div>
       )}
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded-xl border border-border/70 p-3">
+          <p className="flex items-center gap-1.5 text-caption text-muted-foreground"><Footprints className="size-3.5 text-[#3F9B52]" /> Passos hoje</p>
+          <p className="tabular text-h3 font-semibold">{s.passos?.hoje != null ? s.passos.hoje.toLocaleString("pt-BR") : "—"}</p>
+          <p className="text-caption text-muted-foreground">{s.passos?.media7 != null ? `média 7 dias ${s.passos.media7.toLocaleString("pt-BR")}` : "libere Passos no app"}</p>
+          {s.passos && s.passos.dias.length > 1 && (
+            <div className="mt-2 flex h-6 items-end gap-0.5" role="img" aria-label="Passos dos últimos 14 dias">
+              {s.passos.dias.map((d) => (
+                <div key={d.dia} className="flex-1 rounded-sm bg-[#3F9B52]/60" title={`${d.dia.split("-").reverse().slice(0, 2).join("/")}: ${d.total.toLocaleString("pt-BR")}`}
+                  style={{ height: `${Math.max(6, (d.total / Math.max(...s.passos!.dias.map((x) => x.total), 1)) * 100)}%` }} />
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="rounded-xl border border-border/70 p-3">
+          <p className="flex items-center gap-1.5 text-caption text-muted-foreground"><Scale className="size-3.5 text-[#5B8DB8]" /> Composição corporal</p>
+          <p className="tabular text-h3 font-semibold">{s.corpo?.gorduraPct != null ? `${s.corpo.gorduraPct.toFixed(1).replace(".", ",")}%` : "—"}</p>
+          <p className="text-caption text-muted-foreground">
+            {s.corpo
+              ? [s.corpo.peso != null && `${s.corpo.peso.toFixed(1).replace(".", ",")} kg`, s.corpo.musculoKg != null && `músculo ${s.corpo.musculoKg.toFixed(1).replace(".", ",")} kg`,
+                  new Date(s.corpo.ts).toLocaleDateString("pt-BR", { day: "numeric", month: "short", timeZone: TZ })].filter(Boolean).join(" · ")
+              : "gordura · meça no relógio: Samsung Health › Composição corporal"}
+          </p>
+          {s.corpo?.anterior?.gorduraPct != null && s.corpo.gorduraPct != null && (
+            <p className="tabular text-caption text-muted-foreground">
+              {s.corpo.gorduraPct - s.corpo.anterior.gorduraPct >= 0 ? "+" : "−"}{Math.abs(s.corpo.gorduraPct - s.corpo.anterior.gorduraPct).toFixed(1).replace(".", ",")} pts vs. medição anterior
+            </p>
+          )}
+        </div>
+        <div className="rounded-xl border border-border/70 p-3">
+          <p className="flex items-center gap-1.5 text-caption text-muted-foreground"><Wind className="size-3.5 text-[#6E7FE0]" /> Apneia do sono</p>
+          <p className="text-body font-semibold">
+            {s.apneia ? (s.apneia.sinal === "DETECTED" ? "Sinais detectados" : s.apneia.sinal === "NOT_DETECTED" ? "Sem sinais" : "Inconclusivo") : "—"}
+          </p>
+          <p className="text-caption text-muted-foreground">
+            {s.apneia ? `Samsung Health Monitor · ${new Date(s.apneia.ts).toLocaleDateString("pt-BR", { day: "numeric", month: "short", year: "numeric", timeZone: TZ })}${s.apneia.sinal === "DETECTED" ? " · leve ao médico" : ""}`
+              : "ative no Samsung Health Monitor (2 noites ≥ 4 h)"}
+          </p>
+        </div>
+        <div className="rounded-xl border border-border/70 p-3">
+          <p className="flex items-center gap-1.5 text-caption text-muted-foreground"><HeartPulse className="size-3.5 text-[#E5536A]" /> Ritmo irregular</p>
+          <p className="tabular text-body font-semibold">{s.ritmoIrregular.total ? `${s.ritmoIrregular.total} aviso${s.ritmoIrregular.total > 1 ? "s" : ""}` : "Nenhum aviso"}</p>
+          <p className="text-caption text-muted-foreground">
+            {s.ritmoIrregular.ultimo ? `último ${new Date(s.ritmoIrregular.ultimo).toLocaleDateString("pt-BR", { day: "numeric", month: "short", timeZone: TZ })} · leve ao médico` : "no último ano · Health Monitor"}
+          </p>
+          {s.vo2max && (
+            <p className="mt-1 flex items-center gap-1 text-caption text-muted-foreground"><Activity className="size-3" /> VO₂máx {s.vo2max.valor.toFixed(1).replace(".", ",")}</p>
+          )}
+        </div>
+      </div>
 
       {s.exercicios.length > 0 && (
         <div>
