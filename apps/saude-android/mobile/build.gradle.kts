@@ -15,8 +15,8 @@ android {
         applicationId = "app.nossotudo.saude.mobile"
         minSdk = 29
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.5"
+        versionCode = 6
+        versionName = "0.5.1"
         buildConfigField("String", "SAUDE_URL", "\"https://ecwcqooogsvsrddwjavh.supabase.co/functions/v1/saude-relogio\"")
     }
 

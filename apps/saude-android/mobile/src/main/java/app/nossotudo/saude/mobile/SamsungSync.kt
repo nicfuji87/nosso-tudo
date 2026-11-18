@@ -130,7 +130,7 @@ object SamsungSync {
             val hoje = LocalDate.now()
             val req = DataType.StepsType.TOTAL.requestBuilder
                 .setLocalTimeFilterWithGroup(
-                    LocalTimeFilter.of(hoje.minusDays(dias).atStartOfDay(), hoje.plusDays(1).atStartOfDay()),
+                    LocalTimeFilter.of(hoje.minusDays(30).atStartOfDay(), hoje.plusDays(1).atStartOfDay()), // sempre 30 dias: 1 linha por dia, é leve
                     LocalTimeGroup.of(LocalTimeGroupUnit.DAILY, 1),
                 ).build()
             store.aggregateData(req).dataList.mapNotNull { a ->

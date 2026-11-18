@@ -229,7 +229,7 @@ private fun TelaAjustes(activity: Activity) {
 
         Cartao("4 · Sincronizar") {
             Text(
-                if (ultima > 0) "Última sincronização: ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(ultima))}"
+                if (ultima > 0) "Última sincronização: ${java.text.SimpleDateFormat("dd/MM 'às' HH:mm", java.util.Locale.forLanguageTag("pt-BR")).format(Date(ultima))}"
                 else "Ainda não sincronizou. Depois da primeira vez, roda sozinho a cada 2 horas.",
                 color = TextoSec, fontSize = 14.sp,
             )
