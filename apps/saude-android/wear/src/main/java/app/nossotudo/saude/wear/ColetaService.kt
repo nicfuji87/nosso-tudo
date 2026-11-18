@@ -178,6 +178,7 @@ class ColetaService : Service() {
             val carregando = (st?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0
             val temp = st?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0)?.div(10f)
             bateria?.linha(System.currentTimeMillis(), nivel, carregando, temp, ativos.sumOf { it.second.amostras.get() })
+            nivel?.let { Bateria.registrar(System.currentTimeMillis(), it.toInt()) }
             if (modo == MODO_FUNDO) ajustarTemperatura()
             atualizarResumo()
             main.postDelayed(this, 60_000)

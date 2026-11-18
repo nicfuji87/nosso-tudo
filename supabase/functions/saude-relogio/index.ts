@@ -13,9 +13,12 @@ import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
  *            e devolve `radar` da noite de hoje (nível + sinais), para o relógio avisar de manhã.
  *            estado = { versao, bateria, carregando, no_pulso, ultima_leitura, ts? } — opcional (v0.4+);
  *            transicoes = [{ ts, tipo: carregando|desconectado|no_pulso|fora_do_pulso, bateria }] (v0.6+)
- *            samsung = [{ uid, tipo: sono|spo2|temp_pele|exercicio|energia, inicio, fim?, dados }] (app do celular)
+ *            samsung = [{ uid, tipo: sono|spo2|temp_pele|exercicio|energia|passos|corpo|ritmo_irregular|apneia, inicio, fim?, dados }]
+ *            (app do celular; treinos viram treinos do diário sozinhos — saude_importar_treinos)
+ *            diag = { versao, ultima_sync, erro?, tipos? } — diagnóstico do app do celular (v0.5+)
+ *            resposta: radar da noite + prontidao (nota do dia) para o Tile do relógio
  *            um `enviar` só com `estado` funciona como batida de vida.
- *   hoje     { segredo } → resumo do dia para o app do celular (radar, noite, Samsung, treinos a confirmar)
+ *   hoje     { segredo } → resumo do dia para o app do celular (prontidão, radar, noite, Samsung, treinos a confirmar)
  *   evento   { segredo, tipo, inicio, nota?, detalhes? } → diário (sintoma, remédio, álcool…)
  *   treino   { segredo, inicio, fim, modalidade?, descartar? } → confirma ou descarta um treino detectado
  *
@@ -50,13 +53,13 @@ const iso = (ms: unknown) => {
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 const LIMITES = { bpm: 3000, vfc: 600, temp: 600, transicoes: 500, registros: 500, ecgs: 3, samsung: 500 };
-const TIPOS_SAMSUNG = new Set(["sono", "spo2", "temp_pele", "exercicio", "energia"]);
+const TIPOS_SAMSUNG = new Set(["sono", "spo2", "temp_pele", "exercicio", "energia", "passos", "corpo", "ritmo_irregular", "apneia"]);
 const TIPOS_ESTADO = new Set(["carregando", "desconectado", "no_pulso", "fora_do_pulso"]);
 const TZ = "America/Sao_Paulo";
 const hojeLocal = () => new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const sinal = (v: number, casas = 0) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(casas).replace(".", ",")}`;
 
-/** Radar da noite de hoje (função SQL saude_radar, radar-v1). Só volta se houver noite de hoje. */
+/** Radar da noite de hoje (função SQL saude_radar, radar-v2). Só volta se houver noite de hoje. */
 async function radarDeHoje(admin: SupabaseClient, workspaceId: string) {
   const { data, error } = await admin.rpc("saude_radar", { p_workspace_id: workspaceId, p_tz: TZ });
   if (error || !Array.isArray(data) || !data.length) return null;
@@ -66,7 +69,26 @@ async function radarDeHoje(admin: SupabaseClient, workspaceId: string) {
   if (r.fc_fora && typeof r.fc === "number" && typeof r.fc_normal === "number") partes.push(`repouso ${sinal(r.fc - r.fc_normal)} bpm`);
   if (r.vfc_fora && typeof r.vfc === "number" && typeof r.vfc_normal === "number") partes.push(`VFC ${sinal((r.vfc / r.vfc_normal - 1) * 100)}%`);
   if (r.temp_fora && typeof r.temp === "number" && typeof r.temp_normal === "number") partes.push(`pele ${sinal(r.temp - r.temp_normal, 1)} °C`);
+  if (r.spo2_fora && typeof r.spo2 === "number" && typeof r.spo2_normal === "number") partes.push(`SpO₂ ${sinal(r.spo2 - r.spo2_normal)} pts`);
   return { noite: r.noite, nivel: r.nivel, sinais: r.sinais, resumo: partes.join(", ") };
+}
+/** Nota do dia (função SQL saude_prontidao, prontidao-v1): para o Tile do relógio e a tela Hoje do celular. */
+async function prontidao(admin: SupabaseClient, workspaceId: string) {
+  const { data, error } = await admin.rpc("saude_prontidao", { p_workspace_id: workspaceId, p_tz: TZ });
+  return error ? null : (data as Record<string, unknown> | null);
+}
+
+/** Diagnóstico do app do celular: versão, última sincronização boa, último erro. */
+function lerDiag(d: unknown): Record<string, unknown> | null {
+  if (!d || typeof d !== "object") return null;
+  const o = d as Record<string, unknown>;
+  const txt = (v: unknown, n: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, n) : null);
+  const tipos = o.tipos && typeof o.tipos === "object" && JSON.stringify(o.tipos).length < 500 ? o.tipos : null;
+  return {
+    versao: txt(o.versao, 20), erro: txt(o.erro, 300), ultima_sync: iso(o.ultima_sync), tipos,
+    otimizacao_bateria: typeof o.otimizacao_bateria === "boolean" ? o.otimizacao_bateria : null,
+    recebido_em: new Date().toISOString(),
+  };
 }
 const TIPOS = new Set(["checkin", "habito", "respiracao", "ecg", "malestar", "ortostatico"]);
 
@@ -135,13 +157,16 @@ Deno.serve(async (req) => {
     if (!disp) return json({ erro: "nao_vinculado" }, 403);
     const ws = disp.workspace_id;
     const desde = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
-    const [radarR, noitesR, samsungR, treinosR, eventosR] = await Promise.all([
+    const [radarR, noitesR, samsungR, treinosR, eventosR, prontR, extrasR] = await Promise.all([
       admin.rpc("saude_radar", { p_workspace_id: ws, p_tz: TZ }),
       admin.rpc("saude_noites", { p_workspace_id: ws, p_dias: 3, p_tz: TZ }),
       admin.from("saude_samsung").select("tipo, inicio, fim, dados").eq("workspace_id", ws).gte("inicio", desde(3))
         .order("inicio", { ascending: false }).limit(200),
       admin.rpc("saude_treinos_detectados", { p_workspace_id: ws, p_dias: 3, p_limiar: 100 }),
       admin.from("saude_eventos").select("inicio, fim").eq("workspace_id", ws).eq("tipo", "treino").gte("inicio", desde(4)),
+      prontidao(admin, ws),
+      admin.from("saude_samsung").select("tipo, inicio, dados").eq("workspace_id", ws).in("tipo", ["corpo", "passos"])
+        .gte("inicio", desde(120)).order("inicio", { ascending: false }).limit(60),
     ]);
     type Linha = Record<string, unknown>;
     const radar = ((radarR.data ?? []) as Linha[])[0] ?? null;
@@ -177,6 +202,13 @@ Deno.serve(async (req) => {
       sono: sono ? { inicio: sono.inicio, fim: sono.fim, ...sono.dados, estagios: undefined } : null,
       spo2: spo.length ? { media: media(spo.map((r) => Number(r.dados.media)).filter(Number.isFinite)), min: Math.min(...spo.map((r) => Number(r.dados.min) || 100)) } : null,
       energia: energia ? { dia: String(energia.inicio).slice(0, 10), score: energia.dados.score } : null,
+      prontidao: prontR,
+      passos: (() => {
+        const p = ((extrasR.data ?? []) as { tipo: string; inicio: string; dados: Linha }[]).filter((r) => r.tipo === "passos");
+        const hojeP = p.find((r) => String(r.inicio).slice(0, 10) === hojeLocal());
+        return p.length ? { hoje: hojeP ? Number(hojeP.dados.total) : null, media7: Math.round(media(p.slice(0, 7).map((r) => Number(r.dados.total) || 0)) ?? 0) } : null;
+      })(),
+      corpo: (((extrasR.data ?? []) as { tipo: string; inicio: string; dados: Linha }[]).find((r) => r.tipo === "corpo") ?? null),
       treinos: sugeridos,
       agora: new Date().toISOString(),
     });
@@ -290,12 +322,23 @@ Deno.serve(async (req) => {
           return samsung.length;
         })(),
       };
+      const diag = lerDiag(corpo.diag);
       await admin
         .from("saude_dispositivos")
-        .update({ ultimo_envio_em: new Date().toISOString(), ...lerEstado(corpo.estado) })
+        .update({
+          ultimo_envio_em: new Date().toISOString(), ...lerEstado(corpo.estado),
+          ...(diag ? { diagnostico: diag, ...(diag.versao ? { versao_app: diag.versao } : {}) } : {}),
+        })
         .eq("id", disp.id);
-      const radar = await radarDeHoje(admin, disp.workspace_id).catch(() => null);
-      return json({ ok: true, ...resultado, radar });
+      // treinos do Samsung Health viram treinos do diário (samsung-v1)
+      const importados = samsung.some((x) => x.tipo === "exercicio")
+        ? await admin.rpc("saude_importar_treinos", { p_workspace_id: disp.workspace_id, p_tz: TZ }).then((r) => (r.data as number) ?? 0, () => 0)
+        : 0;
+      const [radar, pront] = await Promise.all([
+        radarDeHoje(admin, disp.workspace_id).catch(() => null),
+        prontidao(admin, disp.workspace_id).catch(() => null),
+      ]);
+      return json({ ok: true, ...resultado, importados, radar, prontidao: pront });
     } catch (e) {
       console.error("saude-relogio enviar", e);
       return json({ erro: "falha_gravar" }, 500);
