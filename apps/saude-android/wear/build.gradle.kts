@@ -14,8 +14,8 @@ android {
         applicationId = "app.nossotudo.saude.wear"
         minSdk = 30          // Wear OS 3+
         targetSdk = 36       // Wear OS 6 (One UI 8 Watch)
-        versionCode = 9
-        versionName = "0.9"
+        versionCode = 10
+        versionName = "0.9.1"
         // Endpoint pÃºblico da Edge Function (a URL do projeto nÃ£o Ã© segredo; o relÃ³gio nÃ£o leva chave nenhuma).
         buildConfigField("String", "SAUDE_URL", "\"https://ecwcqooogsvsrddwjavh.supabase.co/functions/v1/saude-relogio\"")
     }

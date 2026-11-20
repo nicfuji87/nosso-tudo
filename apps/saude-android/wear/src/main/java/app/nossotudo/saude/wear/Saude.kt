@@ -68,6 +68,8 @@ object EstadoSaude {
         private set
     @Volatile var ultimaLeituraMs: Long = 0
         private set
+    /** Último lote recebido do sensor (válido ou não). Se parar de chegar, o sensor caiu: o serviço religa. */
+    @Volatile var ultimoLoteMs: Long = 0
     /** Durante o ECG o batimento contínuo pode sair inválido: não entra no cálculo. */
     @Volatile var pausado = false
 
@@ -127,6 +129,7 @@ object EstadoSaude {
      */
     @Synchronized
     fun registrarLote(lote: List<DataPoint>) {
+        if (lote.isNotEmpty()) ultimoLoteMs = System.currentTimeMillis()
         for (dp in lote) {
             val ts = dp.timestamp
             val hr = runCatching { dp.getValue(ValueKey.HeartRateSet.HEART_RATE) }.getOrNull() ?: 0
