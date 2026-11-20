@@ -250,6 +250,7 @@ object Sync {
         val corpo = JSONObject().put("acao", "enviar").put("segredo", segredo(ctx))
             .put("bpm", JSONArray(bpm)).put("vfc", JSONArray(vfc)).put("temp", JSONArray(temp)).put("transicoes", JSONArray(trans)).put("registros", JSONArray(reg)).put("ecgs", ecgs)
             .put("estado", estado(ctx))
+            .put("diag", diagnostico())
 
         val (http, r) = runCatching { post(corpo) }.getOrElse { e ->
             prefs(ctx).edit().putString("erro", "sem rede: ${e.javaClass.simpleName}").apply()
@@ -283,6 +284,26 @@ object Sync {
         val agora = System.currentTimeMillis()
         prefs(ctx).edit().putLong("ultimo_envio", agora).putLong("ultimo_estado", agora).remove("erro").apply()
         return true
+    }
+
+    /** Diagnóstico do app do relógio (v0.9.3): o site mostra quando algo não está medindo. */
+    private fun diagnostico(): JSONObject {
+        val agora = System.currentTimeMillis()
+        val minDesde = { t: Long -> if (t > 0) ((agora - t) / 60_000).toInt() else -1 }
+        return JSONObject()
+            .put("versao", BuildConfig.VERSION_NAME)
+            .put("erro", ColetaService.avisosTexto ?: JSONObject.NULL)
+            .put(
+                "tipos",
+                JSONObject()
+                    .put("medindo", ColetaService.rodando)
+                    .put("min_sem_batimento", minDesde(EstadoSaude.ultimoLoteMs))
+                    .put("religadas", ColetaService.religadas)
+                    .put("temp_ligada", ColetaService.tempLigada)
+                    .put("min_sem_temp", minDesde(TemperaturaNoturna.ultimoLoteMs))
+                    .put("temp_janelas", TemperaturaNoturna.janelasEnfileiradas)
+                    .put("temp_religada", ColetaService.tempReiniciada),
+            )
     }
 
     /** Estado do relógio enviado junto com cada lote. */
