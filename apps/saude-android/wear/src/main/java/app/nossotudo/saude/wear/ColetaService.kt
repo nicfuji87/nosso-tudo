@@ -345,15 +345,52 @@ object Automatico {
         }
     }
 
-    /** Liga a medição de fundo se estiver configurada e ainda não estiver rodando. */
-    fun garantir(ctx: Context) {
-        if (!ativo(ctx) || ColetaService.rodando) return
-        Sync.agendar(ctx)
-        runCatching {
+    /**
+     * Liga a medição de fundo se estiver configurada e ainda não estiver rodando. Devolve se conseguiu.
+     * O serviço sobe ANTES de qualquer outra coisa: depois de um reinício o Android só deixa iniciar o serviço em
+     * primeiro plano por alguns segundos após o BOOT_COMPLETED — em 19/11 o relógio, lento no boot, perdeu essa janela.
+     */
+    fun garantir(ctx: Context): Boolean {
+        if (!ativo(ctx) || ColetaService.rodando) return ColetaService.rodando
+        val ok = runCatching {
             ctx.applicationContext.startForegroundService(
                 Intent(ctx.applicationContext, ColetaService::class.java).putExtra(ColetaService.EXTRA_MODO, ColetaService.MODO_FUNDO),
             )
-        }
+        }.isSuccess
+        Sync.agendar(ctx)
+        if (ok) avisoParado(ctx, false)
+        return ok
+    }
+
+    private const val CANAL_PARADO = "parado"
+    private const val NOTIF_PARADO = 41
+
+    /**
+     * Plano B: se o Android não deixou religar sozinho (serviço em primeiro plano bloqueado em segundo plano),
+     * avisa no relógio — tocar abre o app, e abrir o app religa a medição.
+     */
+    fun avisoParado(ctx: Context, mostrar: Boolean) {
+        val nm = ctx.getSystemService(android.app.NotificationManager::class.java) ?: return
+        if (!mostrar) { nm.cancel(NOTIF_PARADO); return }
+        nm.createNotificationChannel(android.app.NotificationChannel(CANAL_PARADO, "Medição parada", android.app.NotificationManager.IMPORTANCE_HIGH))
+        val abrir = android.app.PendingIntent.getActivity(
+            ctx, 41, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), android.app.PendingIntent.FLAG_IMMUTABLE,
+        )
+        nm.notify(
+            NOTIF_PARADO,
+            android.app.Notification.Builder(ctx, CANAL_PARADO)
+                .setSmallIcon(R.drawable.ic_stat_nt)
+                .setContentTitle("Saúde NT parou de medir")
+                .setContentText("Toque para religar a medição do batimento.")
+                .setContentIntent(abrir).setAutoCancel(true)
+                .build(),
+        )
+    }
+
+    /** Chamado pelo envio periódico: se a medição devia estar ligada e não está, tenta religar; se não der, avisa. */
+    fun conferir(ctx: Context) {
+        if (!ativo(ctx) || ColetaService.rodando) return
+        if (!garantir(ctx)) avisoParado(ctx, true)
     }
 }
 
@@ -361,8 +398,10 @@ object Automatico {
 class InicioReceiver : android.content.BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            // primeiro o serviço (a janela para iniciar em primeiro plano depois do boot é curta), depois o resto
+            val ok = Automatico.garantir(ctx)
             EstadoSaude.iniciar(ctx)
-            Automatico.garantir(ctx)
+            if (!ok) Automatico.avisoParado(ctx, true)
         }
     }
 }
