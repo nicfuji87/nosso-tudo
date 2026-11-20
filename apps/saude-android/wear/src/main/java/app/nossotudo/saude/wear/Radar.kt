@@ -26,9 +26,14 @@ object TemperaturaNoturna {
     private var somaAmb = 0.0
     private var nAmb = 0
     private var n = 0
+    /** Último lote do sensor de temperatura (qualquer status): se parar de chegar à noite, o serviço religa. */
+    @Volatile var ultimoLoteMs = 0L
+    /** Janelas de 5 min postas na fila desde o último reinício do app (diagnóstico). */
+    @Volatile var janelasEnfileiradas = 0
 
     @Synchronized
     fun registrarLote(ctx: Context, lote: List<DataPoint>) {
+        if (lote.isNotEmpty()) ultimoLoteMs = System.currentTimeMillis()
         for (dp in lote) {
             val status = runCatching { dp.getValue(ValueKey.SkinTemperatureSet.STATUS) }.getOrNull() ?: -1
             val pele = runCatching { dp.getValue(ValueKey.SkinTemperatureSet.OBJECT_TEMPERATURE) }.getOrNull() ?: continue
@@ -47,6 +52,7 @@ object TemperaturaNoturna {
         if (janela >= 0 && n > 0) {
             runCatching {
                 Sync.enfileirarTemp(ctx, janela * JANELA_MS, (soma / n).toFloat(), if (nAmb > 0) (somaAmb / nAmb).toFloat() else null, n)
+                janelasEnfileiradas++
             }
         }
         janela = -1; soma = 0.0; somaAmb = 0.0; nAmb = 0; n = 0

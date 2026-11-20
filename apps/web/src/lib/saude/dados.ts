@@ -13,7 +13,7 @@ import { createClient } from "@/lib/supabase/server";
  */
 
 export const ALGORITMOS = {
-  noites: "noites-v6", treino: "treino-v1", samsung: "samsung-v1", padrao: "padrao-v1", radar: "radar-v2", insights: "insights-v3",
+  noites: "noites-v7", treino: "treino-v1", samsung: "samsung-v1", padrao: "padrao-v1", radar: "radar-v2", insights: "insights-v3",
   prontidao: "prontidao-v1", recuperacao: "recuperacao-v1",
 } as const;
 export const NOITES_BASE = 28; // linha de base pessoal completa
@@ -32,8 +32,15 @@ export interface Dispositivo {
   ultimaLeituraEm: string | null;
   estadoEm: string | null;
   /** app do celular: última sincronização boa, último erro, se a One UI pode pausar o app */
-  diagnostico: { versao: string | null; erro: string | null; ultimaSync: string | null; otimizacaoBateria: boolean | null; recebidoEm: string | null } | null;
+  diagnostico: {
+    versao: string | null; erro: string | null; ultimaSync: string | null; otimizacaoBateria: boolean | null; recebidoEm: string | null;
+    /** relógio 0.9.3+: medindo, min_sem_batimento, religadas, temp_ligada, min_sem_temp, temp_janelas, temp_religada */
+    tipos: Record<string, number | boolean> | null;
+  } | null;
 }
+
+/** O celular é o aparelho com "Celular" no nome; o relógio (o 1º vinculado) também manda diagnóstico desde a 0.9.3. */
+export const acharCelular = (ds: Dispositivo[]) => ds.find((d) => /celular/i.test(d.nome)) ?? ds.slice(1).find((d) => d.diagnostico) ?? null;
 
 export interface PontoBpm { minuto: string; bpm: number; min: number; max: number }
 export interface RegistroSaude { id: string; ts: string; tipo: string; valor: string }
@@ -45,6 +52,8 @@ export interface Noite {
   sonoInicio: string | null; sonoFim: string | null; fonteSono: "samsung" | "batimento" | null;
   /** SpO₂ da noite (Samsung Health) */
   spo2: number | null; spo2Min: number | null;
+  /** de onde veio a temperatura da pele: do relógio (nossa) ou, na falta, do Samsung Health (noites-v7) */
+  fonteTemp: "relogio" | "samsung" | null;
 }
 
 /** Trecho da linha do tempo do relógio (explica as lacunas do batimento). */
@@ -350,6 +359,7 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
       return {
         versao: t("versao"), erro: t("erro"), ultimaSync: t("ultima_sync"), recebidoEm: t("recebido_em"),
         otimizacaoBateria: typeof g.otimizacao_bateria === "boolean" ? g.otimizacao_bateria : null,
+        tipos: g.tipos && typeof g.tipos === "object" ? (g.tipos as Record<string, number | boolean>) : null,
       };
     })() : null,
   }));
@@ -364,14 +374,14 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
   type NoiteRow = {
     noite: string; minutos: number; fc_repouso: number | null; vfc_noturna: number | null; janelas: number; temp_pele: number | null; janelas_temp: number;
     sono_inicio: string | null; sono_fim: string | null; fonte_sono: "samsung" | "batimento" | null;
-    spo2_media: number | null; spo2_min: number | null;
+    spo2_media: number | null; spo2_min: number | null; fonte_temp: "relogio" | "samsung" | null;
   };
   const noites: Noite[] = ((noitesR.data ?? []) as NoiteRow[]).map((n) => ({
     noite: n.noite, minutos: n.minutos, fcRepouso: n.fc_repouso != null ? Math.round(n.fc_repouso * 10) / 10 : null,
     vfc: n.vfc_noturna != null ? Math.round(n.vfc_noturna) : null, janelas: n.janelas,
     temp: n.temp_pele != null ? Math.round(n.temp_pele * 100) / 100 : null, janelasTemp: n.janelas_temp,
     sonoInicio: n.sono_inicio, sonoFim: n.sono_fim, fonteSono: n.fonte_sono,
-    spo2: n.spo2_media, spo2Min: n.spo2_min,
+    spo2: n.spo2_media, spo2Min: n.spo2_min, fonteTemp: n.fonte_temp ?? null,
   }));
   const noitesValidas = noites.filter((n) => n.fcRepouso != null);
   const ultimaNoite = noitesValidas.at(-1) ?? null;
@@ -652,7 +662,7 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
   const insights: Insight[] = [];
   const rel = dispositivos[0];
   // celular parado: sem ele, sono, SpO₂ e treinos do Samsung Health não chegam
-  const celular = dispositivos.find((d) => d.diagnostico || /celular/i.test(d.nome));
+  const celular = acharCelular(dispositivos);
   if (celular) {
     const horasSem = celular.ultimoEnvioEm ? (agora - ms(celular.ultimoEnvioEm)) / 3600_000 : null;
     const g = celular.diagnostico;

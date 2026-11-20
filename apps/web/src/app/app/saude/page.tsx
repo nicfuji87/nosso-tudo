@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { getWorkspaceContext } from "@/lib/auth";
 import {
-  ALGORITMOS, NOITES_BASE, NOITES_MIN_COMPARAR, diaLocal, getPainelSaude, horaLocal, type Desvio, type Insight, type PainelSaude, type TrechoRelogio,
+  ALGORITMOS, NOITES_BASE, NOITES_MIN_COMPARAR, acharCelular, diaLocal, getPainelSaude, horaLocal, type Desvio, type Insight, type PainelSaude, type TrechoRelogio,
 } from "@/lib/saude/dados";
 import { ConectarRelogio } from "@/components/saude/conectar-relogio";
 import { GraficoBpm, GraficoNoites, MiniBateria } from "@/components/saude/graficos-saude";
@@ -64,7 +64,7 @@ function EstadoRelogio({ p }: { p: PainelSaude }) {
     : d.noPulso === false ? { txt: "Fora do pulso", cor: "bg-muted-foreground" }
     : { txt: "Medindo", cor: "bg-success" };
   const Bateria = d.carregando ? BatteryCharging : BatteryMedium;
-  const celular = p.dispositivos.find((x) => x.diagnostico || /celular/i.test(x.nome));
+  const celular = acharCelular(p.dispositivos);
   const celularOk = !!celular?.ultimoEnvioEm && Date.now() - new Date(celular.ultimoEnvioEm).getTime() < 6 * 3600_000 && !celular.diagnostico?.erro;
   return (
     <div className="flex flex-wrap items-center gap-2 text-caption">
@@ -390,8 +390,25 @@ export default async function SaudePage() {
             <Medidor rotulo="Batimento medido (24 h)" valor={p.qualidade.minutos24h} total={1440}
               sufixo={`${Math.floor(p.qualidade.minutos24h / 60)} h ${p.qualidade.minutos24h % 60} min · ${Math.round(p.qualidade.cobertura24h * 100)}%`} />
             <Medidor rotulo="Janelas de VFC válidas (24 h)" valor={p.qualidade.janelasVfc24h} total={96} sufixo={`${p.qualidade.janelasVfc24h}`} />
-            <Medidor rotulo="Temperatura da pele (última noite)" valor={p.noites.at(-1)?.janelasTemp ?? 0} total={120}
-              sufixo={`${p.noites.at(-1)?.janelasTemp ?? 0} janelas de 5 min`} />
+            <Medidor rotulo="Temperatura da pele (última noite)" valor={p.noites.at(-1)?.fonteTemp === "samsung" ? 120 : p.noites.at(-1)?.janelasTemp ?? 0} total={120}
+              sufixo={p.noites.at(-1)?.fonteTemp === "samsung"
+                ? "o relógio não gravou · usando a do Samsung Health"
+                : `${p.noites.at(-1)?.janelasTemp ?? 0} janelas de 5 min`} />
+            {(() => {
+              const t = p.dispositivos[0]?.diagnostico?.tipos;
+              const erro = p.dispositivos[0]?.diagnostico?.erro;
+              if (!t && !erro) return null;
+              return (
+                <p className="text-caption text-muted-foreground">
+                  <span className="font-medium text-foreground">App do relógio: </span>
+                  {t?.medindo === false ? "medição parada" : "medindo"}
+                  {typeof t?.religadas === "number" && t.religadas > 0 && ` · religou o sensor ${t.religadas}×`}
+                  {t?.temp_ligada === true && " · temperatura ligada"}
+                  {typeof t?.temp_religada === "number" && t.temp_religada > 0 && ` · religou a temperatura ${t.temp_religada}×`}
+                  {erro && <span className="block text-warning">{erro}</span>}
+                </p>
+              );
+            })()}
             <Medidor rotulo="Noites na linha de base" valor={p.noitesBase} total={NOITES_BASE} sufixo={`${p.noitesBase}/${NOITES_BASE}`} />
             {(p.qualidade.semMedir.carregando + p.qualidade.semMedir.foraDoPulso + p.qualidade.semMedir.semExplicacao) > 0 && (
               <div className="text-caption text-muted-foreground">

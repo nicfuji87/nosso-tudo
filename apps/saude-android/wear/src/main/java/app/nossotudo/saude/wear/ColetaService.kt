@@ -43,6 +43,16 @@ class ColetaService : Service() {
         @Volatile var pastaAtual: File? = null
             private set
 
+        /** Diagnóstico enviado ao servidor a cada lote (aparece no site): avisos, religadas, temperatura. */
+        @Volatile var avisosTexto: String? = null
+            private set
+        @Volatile var religadas = 0
+            private set
+        @Volatile var tempLigada = false
+            private set
+        @Volatile var tempReiniciada = 0
+            private set
+
         /** Rastreadores contínuos desejados na Fase 1 (só os que o relógio suportar serão ligados). */
         private val CONTINUOS = listOf(
             "HEART_RATE_CONTINUOUS",
@@ -146,6 +156,7 @@ class ColetaService : Service() {
         reconexoes++
         avisos.removeAll { it.startsWith("religado") }
         avisos += "religado ${reconexoes}x ($motivo)"
+        religadas = reconexoes
         for ((tracker, gravador) in ativos) {
             runCatching { tracker.unsetEventListener() }
             gravador.fechar()
@@ -231,6 +242,18 @@ class ColetaService : Service() {
     private fun ajustarTemperatura() {
         val s = sensores ?: return
         val querer = TemperaturaNoturna.eNoite() && EstadoSaude.noPulso != false
+        // vigia da temperatura (v0.9.3): na noite de 20/11 o rastreador ficou ligado sem entregar nada.
+        // Ligado, no pulso, e 15 min sem lote → desliga; no minuto seguinte liga de novo.
+        if (querer && temperatura != null && EstadoSaude.noPulso == true && !Bateria.carregando(this)) {
+            val desde = maxOf(TemperaturaNoturna.ultimoLoteMs, tempLigadaEm)
+            if (System.currentTimeMillis() - desde > 15 * 60_000L) {
+                tempReiniciada++
+                avisos.removeAll { it.startsWith("temperatura religada") }
+                avisos += "temperatura religada ${tempReiniciada}x"
+                desligarTemperatura()
+                return
+            }
+        }
         if (querer && temperatura == null) {
             val tipo = runCatching { s.suportados().firstOrNull { it.name == "SKIN_TEMPERATURE_CONTINUOUS" } }.getOrNull() ?: return
             runCatching {
@@ -238,23 +261,32 @@ class ColetaService : Service() {
                 t.setEventListener(object : HealthTracker.TrackerEventListener {
                     override fun onDataReceived(lote: List<DataPoint>) = TemperaturaNoturna.registrarLote(applicationContext, lote)
                     override fun onFlushCompleted() {}
-                    override fun onError(erro: HealthTracker.TrackerError) { avisos += "temperatura: $erro" }
+                    override fun onError(erro: HealthTracker.TrackerError) {
+                        avisos += "temperatura: $erro"
+                        main.post { desligarTemperatura() } // tenta de novo no próximo minuto
+                    }
                 })
                 temperatura = t
+                tempLigadaEm = System.currentTimeMillis()
+                tempLigada = true
             }
         } else if (!querer && temperatura != null) {
             desligarTemperatura()
         }
     }
 
+    private var tempLigadaEm = 0L
+
     private fun desligarTemperatura() {
         runCatching { temperatura?.unsetEventListener() }
         temperatura = null
+        tempLigada = false
         TemperaturaNoturna.fechar(applicationContext)
     }
 
     private fun atualizarResumo() {
         val min = (System.currentTimeMillis() - inicioMs) / 60_000
+        avisosTexto = avisos.takeIf { it.isNotEmpty() }?.joinToString("; ")
         resumo = "coletando há $min min\n" + ativos.joinToString("\n") { (_, g) ->
             "• ${g.tipo.substringBefore("_CONTINUOUS").lowercase()}: ${g.amostras.get()}"
         } + avisos.joinToString("") { "\n⚠ $it" }
