@@ -667,6 +667,17 @@ export async function getPainelSaude(workspaceId: string, tz = "America/Sao_Paul
       });
     }
   }
+  // no pulso, fora do carregador, mas sem batimento há > 15 min: o sensor da Samsung parou de entregar dados
+  if (rel && rel.noPulso === true && !rel.carregando && rel.ultimaLeituraEm && agora - ms(rel.ultimaLeituraEm) > 15 * 60_000) {
+    insights.push({
+      id: "sem-medir", tom: "atencao",
+      titulo: `Relógio no pulso, mas sem medir desde ${horaLocal(rel.ultimaLeituraEm, tz)}`,
+      texto: (rel.versao && rel.versao >= "0.9.1"
+        ? "O app tenta religar o sensor sozinho a cada 10 min. "
+        : "Abra o Saúde NT no relógio para religar o sensor (a versão 0.9.1 faz isso sozinha). ") +
+        "Se a economia de energia do relógio estiver ligada, ela pode bloquear a medição contínua.",
+    });
+  }
   if (rel && rel.noPulso === false) {
     const desde = rel.ultimaLeituraEm ?? ultimo?.minuto ?? null;
     insights.push({

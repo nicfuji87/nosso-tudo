@@ -54,8 +54,12 @@ function EstadoRelogio({ p }: { p: PainelSaude }) {
   if (!d) return null;
   const ultimoEnvio = p.dispositivos.map((x) => x.ultimoEnvioEm).filter(Boolean).sort().at(-1) ?? null;
   const recente = ultimoEnvio && Date.now() - new Date(ultimoEnvio).getTime() < 90 * 60_000;
+  // no pulso mas sem leitura há > 15 min: o sensor parou (o relógio 0.9.1 religa sozinho)
+  const semMedir = d.noPulso === true && !d.carregando && d.ultimaLeituraEm != null
+    && Date.now() - new Date(d.ultimaLeituraEm).getTime() > 15 * 60_000;
   const estado =
-    d.noPulso === true ? { txt: "No pulso · medindo", cor: "bg-success" }
+    semMedir ? { txt: `No pulso · sem medir desde ${horaLocal(d.ultimaLeituraEm!, TZ)}`, cor: "bg-warning" }
+    : d.noPulso === true ? { txt: "No pulso · medindo", cor: "bg-success" }
     : d.carregando ? { txt: "No carregador", cor: "bg-warning" }
     : d.noPulso === false ? { txt: "Fora do pulso", cor: "bg-muted-foreground" }
     : { txt: "Medindo", cor: "bg-success" };
@@ -66,7 +70,7 @@ function EstadoRelogio({ p }: { p: PainelSaude }) {
     <div className="flex flex-wrap items-center gap-2 text-caption">
       <span className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-card px-3 py-1.5">
         <span className="relative flex size-2">
-          {d.noPulso && <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-60" />}
+          {d.noPulso && !semMedir && <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-60" />}
           <span className={cn("relative inline-flex size-2 rounded-full", estado.cor)} />
         </span>
         <Watch className="size-3.5" /> {estado.txt}

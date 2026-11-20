@@ -93,16 +93,8 @@ class ColetaService : Service() {
         }
         eventos?.linha(System.currentTimeMillis(), "inicio", "${Build.MODEL} sdk=${Build.VERSION.SDK_INT}")
 
-        val comPpg = intent?.getBooleanExtra(EXTRA_PPG, false) ?: false
-        val s = Sensores(this).also { sensores = it }
-        s.conectar(
-            onOk = { main.post { ligarRastreadores(s, pasta, comPpg) } },
-            onFalha = { e ->
-                eventos?.linha(System.currentTimeMillis(), "falha_conexao", Sensores.descreverErro(e))
-                resumo = "falha: ${Sensores.descreverErro(e)}"
-                main.post { stopSelf() }
-            },
-        )
+        comPpgAtual = intent?.getBooleanExtra(EXTRA_PPG, false) ?: false
+        conectarSensores(pasta)
         main.postDelayed(medirBateria, 1_000)
         if (!energiaRegistrada) {
             val filtro = IntentFilter().apply { addAction(Intent.ACTION_POWER_CONNECTED); addAction(Intent.ACTION_POWER_DISCONNECTED) }
@@ -113,6 +105,56 @@ class ColetaService : Service() {
         }
         if (modo == MODO_FUNDO) main.postDelayed(enviar, 2 * 60_000L)
         return START_STICKY
+    }
+
+    private var comPpgAtual = false
+    private var ultimaReconexao = 0L
+    private var reconexoes = 0
+
+    private fun conectarSensores(pasta: File?) {
+        val s = Sensores(this).also { sensores = it }
+        s.conectar(
+            onOk = { main.post { ligarRastreadores(s, pasta, comPpgAtual) } },
+            onFalha = { e ->
+                eventos?.linha(System.currentTimeMillis(), "falha_conexao", Sensores.descreverErro(e))
+                resumo = "falha: ${Sensores.descreverErro(e)}"
+                // no modo automático não desiste: a vigia tenta de novo em alguns minutos
+                if (modo != MODO_FUNDO) main.post { stopSelf() }
+            },
+            // o serviço de sensores da Samsung caiu (atualização, economia de energia…): religa
+            onFim = { main.postDelayed({ religarSensores("conexão encerrada") }, 30_000L) },
+        )
+    }
+
+    /**
+     * Vigia do sensor (v0.9.1). Em 19/11 o batimento parou às 16:45 com o relógio no pulso: a conexão com o
+     * serviço da Samsung caiu e nada religava — o app seguia mandando só "sinal de vida". Agora, se nenhum lote
+     * chega em 10 min (fora do carregador), desliga e liga de novo os rastreadores (no máximo 1 vez a cada 10 min).
+     */
+    private fun vigiarSensor() {
+        if (modo != MODO_FUNDO) return
+        val agora = System.currentTimeMillis()
+        val ultimo = maxOf(EstadoSaude.ultimoLoteMs, inicioMs, ultimaReconexao)
+        if (agora - ultimo > 10 * 60_000L && !Bateria.carregando(this)) religarSensores("sem dados há ${(agora - ultimo) / 60_000} min")
+    }
+
+    private fun religarSensores(motivo: String) {
+        if (!rodando) return
+        val agora = System.currentTimeMillis()
+        if (agora - ultimaReconexao < 10 * 60_000L) return
+        ultimaReconexao = agora
+        reconexoes++
+        avisos.removeAll { it.startsWith("religado") }
+        avisos += "religado ${reconexoes}x ($motivo)"
+        for ((tracker, gravador) in ativos) {
+            runCatching { tracker.unsetEventListener() }
+            gravador.fechar()
+        }
+        ativos.clear()
+        desligarTemperatura()
+        sensores?.desconectar()
+        sensores = null
+        conectarSensores(pastaAtual)
     }
 
     private fun ligarRastreadores(s: Sensores, pasta: File?, comPpg: Boolean) {
@@ -179,7 +221,7 @@ class ColetaService : Service() {
             val temp = st?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0)?.div(10f)
             bateria?.linha(System.currentTimeMillis(), nivel, carregando, temp, ativos.sumOf { it.second.amostras.get() })
             nivel?.let { Bateria.registrar(System.currentTimeMillis(), it.toInt()) }
-            if (modo == MODO_FUNDO) ajustarTemperatura()
+            if (modo == MODO_FUNDO) { ajustarTemperatura(); vigiarSensor() }
             atualizarResumo()
             main.postDelayed(this, 60_000)
         }

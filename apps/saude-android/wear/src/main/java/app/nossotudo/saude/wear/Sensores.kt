@@ -23,10 +23,10 @@ class Sensores(private val context: Context) {
 
     private var service: HealthTrackingService? = null
 
-    fun conectar(onOk: () -> Unit, onFalha: (HealthTrackerException) -> Unit) {
+    fun conectar(onOk: () -> Unit, onFalha: (HealthTrackerException) -> Unit, onFim: () -> Unit = {}) {
         val listener = object : ConnectionListener {
             override fun onConnectionSuccess() = onOk()
-            override fun onConnectionEnded() {}
+            override fun onConnectionEnded() = onFim()
             override fun onConnectionFailed(e: HealthTrackerException) = onFalha(e)
         }
         service = HealthTrackingService(listener, context).also { it.connectService() }
