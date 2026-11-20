@@ -338,6 +338,8 @@ object Sync {
 
 class EnvioWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
+        // a cada envio confere se a medição contínua está de pé (relógio reiniciado, processo encerrado…)
+        runCatching { Automatico.conferir(applicationContext) }
         Sync.importarHistorico(applicationContext)
         // até 10 lotes por execução (esvazia filas grandes depois de um tempo offline)
         repeat(10) {
