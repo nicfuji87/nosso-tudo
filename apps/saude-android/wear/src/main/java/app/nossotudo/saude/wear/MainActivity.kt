@@ -46,11 +46,32 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         EstadoSaude.iniciar(this)
-        if (Sync.status(this).vinculado) { Automatico.garantir(this); Sync.enviarAgora(this) }
+        if (Sync.status(this).vinculado) {
+            Automatico.religarEmPrimeiroPlano(this) // temperatura bloqueada? religa agora, com o app na tela
+            Automatico.garantir(this); Sync.enviarAgora(this)
+        }
         val faltando = permissoes.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-        if (faltando.isNotEmpty()) requestPermissions(faltando.toTypedArray(), 1)
+        if (faltando.isNotEmpty()) requestPermissions(faltando.toTypedArray(), 1) else pedirSensoresSempre()
+        (getSystemService(android.app.NotificationManager::class.java))?.cancel(42)
         rotaPedida.value = intent?.getStringExtra(SaudeTile.EXTRA_ROTA)
         setContent { App(rotaPedida) }
+    }
+
+    /**
+     * Android 13–15: com só "enquanto em uso", a temperatura da pele dá PERMISSION_ERROR quando a medição é religada
+     * em segundo plano (depois de reiniciar ou atualizar). "Permitir o tempo todo" resolve de vez.
+     */
+    private fun pedirSensoresSempre() {
+        if (Build.VERSION.SDK_INT !in 33..35) return
+        val bg = "android.permission.BODY_SENSORS_BACKGROUND"
+        if (checkSelfPermission("android.permission.BODY_SENSORS") == PackageManager.PERMISSION_GRANTED &&
+            checkSelfPermission(bg) != PackageManager.PERMISSION_GRANTED
+        ) requestPermissions(arrayOf(bg), 2)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1) pedirSensoresSempre()
     }
 
     /** Rota pedida pelo atalho do mostrador (Tile). */
