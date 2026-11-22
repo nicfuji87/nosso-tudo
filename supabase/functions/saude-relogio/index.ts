@@ -20,7 +20,12 @@ import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
  *            um `enviar` só com `estado` funciona como batida de vida.
  *   hoje     { segredo } → resumo do dia para o app do celular (prontidão, radar, noite, Samsung, treinos a confirmar)
  *   evento   { segredo, tipo, inicio, nota?, detalhes? } → diário (sintoma, remédio, álcool…)
- *   treino   { segredo, inicio, fim, modalidade?, descartar? } → confirma ou descarta um treino detectado
+ *   treino   { segredo, inicio, fim, modalidade?, esforco?, descartar?, manual? } → confirma/descarta um treino
+ *            detectado; com manual=true é um treino cronometrado no app do celular (origem "manual")
+ *   treinos  { segredo } → aba Treinos do celular: treinos de 35 dias (zonas pela FC máx. pessoal, carga,
+ *            recuperação cardíaca), semana × semana anterior, minutos OMS, tempo de recuperação, prontidão
+ *   treino_editar { segredo, id, modalidade?, esforco?, descartar? } → troca modalidade/esforço ou exclui
+ *   tendencias { segredo } → aba Saúde do celular: 30 noites, normais do radar, passos, Energy Score, corpo
  *
  * Escrita com service_role; isolamento por workspace vem do dispositivo.
  */
@@ -90,6 +95,79 @@ function lerDiag(d: unknown): Record<string, unknown> | null {
     recebido_em: new Date().toISOString(),
   };
 }
+// ---- treinos (aba Treinos do celular) ---------------------------------------
+type TreinoP = {
+  id: string; inicio: string; fim: string; modalidade?: string; minutos: number; carga?: number; zonas?: number[];
+  medidos?: number; recuperacao?: { fc_fim: number; queda1: number; queda2?: number };
+};
+
+/**
+ * Resumo da aba Treinos (treinos-v2 + recuperacao-tempo-v1).
+ * Tempo de recuperação: os treinos com menos de 2 h entre si formam um bloco (ex.: musculação + natação + judô);
+ * o bloco pede 0,12 h por ponto de carga (máx. 72 h) — +12 h se a prontidão de hoje está baixa, +6 h se moderada.
+ * É estimativa para orientar treino forte × leve, não regra.
+ */
+function resumoTreinos(p: { fcmax?: number; zonas_bpm?: number[]; treinos?: TreinoP[] }, pront: Record<string, unknown> | null) {
+  const H = 3_600_000, D = 24 * H, agora = Date.now();
+  const t = p.treinos ?? [];
+  const ms = (x: string) => new Date(x).getTime();
+  const soma = (v: number[]) => v.reduce((a, b) => a + b, 0);
+  // semana corrente: segunda 00:00 em São Paulo (UTC−3, sem horário de verão)
+  const local = new Date(agora - 3 * H);
+  const dow = (local.getUTCDay() + 6) % 7;
+  const segunda = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() - dow) + 3 * H;
+  const resumir = (de: number, ate: number) => {
+    const l = t.filter((x) => ms(x.inicio) >= de && ms(x.inicio) < ate);
+    const z = [0, 0, 0, 0, 0];
+    l.forEach((x) => (x.zonas ?? []).forEach((v, i) => { z[i] += v; }));
+    const porMod: Record<string, number> = {};
+    l.forEach((x) => { const m = x.modalidade ?? "Outro"; porMod[m] = (porMod[m] ?? 0) + x.minutos; });
+    return {
+      treinos: l.length, minutos: soma(l.map((x) => x.minutos)), carga: soma(l.map((x) => x.carga ?? 0)), zonas: z,
+      por_modalidade: porMod,
+      // OMS: 150–300 min/semana de atividade moderada (1 min vigoroso vale 2): Z2–Z3 moderado, Z4–Z5 vigoroso
+      minutos_oms: z[1] + z[2] + 2 * (z[3] + z[4]),
+    };
+  };
+  const carga28 = soma(t.filter((x) => ms(x.inicio) >= agora - 28 * D).map((x) => x.carga ?? 0));
+
+  // tempo de recuperação a partir do último bloco de treino
+  const ord = [...t].sort((a, b) => ms(a.inicio) - ms(b.inicio));
+  const blocos: TreinoP[][] = [];
+  for (const x of ord) {
+    const ult = blocos.at(-1);
+    if (ult && ms(x.inicio) - ms(ult.at(-1)!.fim) < 2 * H) ult.push(x); else blocos.push([x]);
+  }
+  const bloco = [...blocos].reverse().find((b) => soma(b.map((x) => x.carga ?? 0)) >= 30 && agora - ms(b.at(-1)!.fim) < 4 * D) ?? null;
+  let recuperacao = null;
+  if (bloco) {
+    const carga = soma(bloco.map((x) => x.carga ?? 0));
+    const fim = ms(bloco.at(-1)!.fim);
+    let horas = Math.min(72, carga * 0.12);
+    const nivel = pront && typeof pront.nivel === "string" ? pront.nivel : null;
+    if (nivel === "baixo") horas += 12; else if (nivel === "moderado") horas += 6;
+    const restante = fim + horas * H - agora;
+    recuperacao = {
+      algoritmo: "recuperacao-tempo-v1", carga_bloco: carga, fim: new Date(fim).toISOString(),
+      modalidades: [...new Set(bloco.map((x) => x.modalidade ?? "Treino"))],
+      horas_necessarias: Math.round(horas), horas_restantes: Math.max(0, Math.round(restante / H)),
+      pronto_em: new Date(fim + horas * H).toISOString(),
+    };
+  }
+
+  // recuperação cardíaca: só depois de esforço de verdade (FC no fim ≥ 120)
+  const hrr = ord.filter((x) => x.recuperacao && x.recuperacao.fc_fim >= 120).slice(-12)
+    .map((x) => ({ inicio: x.inicio, modalidade: x.modalidade ?? null, ...x.recuperacao }));
+  const media = (v: number[]) => (v.length ? Math.round(soma(v) / v.length) : null);
+  return {
+    algoritmo: "treinos-v2", fcmax: p.fcmax ?? null, zonas_bpm: p.zonas_bpm ?? [],
+    semana: resumir(segunda, agora + 1), semana_anterior: resumir(segunda - 7 * D, segunda), ultimos7: resumir(agora - 7 * D, agora + 1),
+    carga28, carga_media_semana: Math.round(carga28 / 4),
+    recuperacao, hrr, hrr_media: media(hrr.map((x) => x.queda1 ?? 0)),
+    prontidao: pront, treinos: t.slice(0, 40),
+  };
+}
+
 const TIPOS = new Set(["checkin", "habito", "respiracao", "ecg", "malestar", "ortostatico"]);
 
 /** Estado do relógio (v0.4+). Campos inválidos são ignorados, nunca derrubam o envio. */
@@ -214,6 +292,77 @@ Deno.serve(async (req) => {
     });
   }
 
+  // ------------------------------------------------------------ treinos (aba Treinos do celular)
+  if (acao === "treinos") {
+    if (!disp) return json({ erro: "nao_vinculado" }, 403);
+    const [painelR, prontR] = await Promise.all([
+      admin.rpc("saude_treinos_painel", { p_workspace_id: disp.workspace_id, p_dias: 35, p_tz: TZ }),
+      prontidao(admin, disp.workspace_id),
+    ]);
+    if (painelR.error || !painelR.data) return json({ erro: "falha_painel" }, 500);
+    return json({ ok: true, ...resumoTreinos(painelR.data as Parameters<typeof resumoTreinos>[0], prontR), agora: new Date().toISOString() });
+  }
+
+  // ------------------------------------------------------------ treino_editar (modalidade, esforço, excluir)
+  if (acao === "treino_editar") {
+    if (!disp) return json({ erro: "nao_vinculado" }, 403);
+    const id = String(corpo.id ?? "");
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return json({ erro: "id_invalido" }, 400);
+    const { data: ev } = await admin.from("saude_eventos").select("id, origem, detalhes")
+      .eq("id", id).eq("workspace_id", disp.workspace_id).eq("tipo", "treino").maybeSingle();
+    if (!ev) return json({ erro: "nao_encontrado" }, 404);
+    if (corpo.descartar === true) {
+      // do Samsung Health: marca descartado (apagar faria voltar na próxima sincronização)
+      const { error } = ev.origem === "samsung"
+        ? await admin.from("saude_eventos").update({ descartado: true }).eq("id", id)
+        : await admin.from("saude_eventos").delete().eq("id", id);
+      return error ? json({ erro: "falha_gravar" }, 500) : json({ ok: true });
+    }
+    const detalhes = { ...((ev.detalhes as Record<string, unknown>) ?? {}) };
+    if (typeof corpo.modalidade === "string" && corpo.modalidade.trim()) detalhes.modalidade = corpo.modalidade.trim().slice(0, 40);
+    const esf = num(corpo.esforco);
+    if (esf !== null && esf >= 0 && esf <= 10) detalhes.esforco = Math.round(esf);
+    const { error } = await admin.from("saude_eventos").update({ detalhes }).eq("id", id);
+    return error ? json({ erro: "falha_gravar" }, 500) : json({ ok: true });
+  }
+
+  // ------------------------------------------------------------ tendencias (aba Saúde do celular)
+  if (acao === "tendencias") {
+    if (!disp) return json({ erro: "nao_vinculado" }, 403);
+    const ws = disp.workspace_id;
+    const [noitesR, radarR, samR, prontR] = await Promise.all([
+      admin.rpc("saude_noites", { p_workspace_id: ws, p_dias: 30, p_tz: TZ }),
+      admin.rpc("saude_radar", { p_workspace_id: ws, p_tz: TZ }),
+      admin.from("saude_samsung").select("tipo, inicio, dados").eq("workspace_id", ws)
+        .in("tipo", ["passos", "energia", "corpo", "apneia", "ritmo_irregular"])
+        .gte("inicio", new Date(Date.now() - 400 * 86_400_000).toISOString()).order("inicio", { ascending: true }).limit(1000),
+      prontidao(admin, ws),
+    ]);
+    type L = Record<string, unknown>;
+    const r = ((radarR.data ?? []) as L[])[0] ?? null;
+    const sam = (samR.data ?? []) as { tipo: string; inicio: string; dados: L }[];
+    const de = (tipo: string) => sam.filter((x) => x.tipo === tipo);
+    const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+    const corte30 = Date.now() - 31 * 86_400_000;
+    return json({
+      ok: true,
+      noites: ((noitesR.data ?? []) as L[]).map((x) => ({
+        noite: x.noite, fc: n(x.fc_repouso), vfc: n(x.vfc_noturna), spo2: n(x.spo2_media), spo2_min: n(x.spo2_min),
+        pele: n(x.temp_pele), fonte_temp: x.fonte_temp ?? null,
+        sono_h: x.sono_inicio && x.sono_fim ? Math.round(((new Date(String(x.sono_fim)).getTime() - new Date(String(x.sono_inicio)).getTime()) / 3_600_000) * 10) / 10 : null,
+        fonte_sono: x.fonte_sono ?? null,
+      })),
+      normais: r ? { fc: n(r.fc_normal), vfc: n(r.vfc_normal), pele: n(r.temp_normal), spo2: n(r.spo2_normal), base: n(r.base), nivel: r.nivel } : null,
+      passos: de("passos").filter((x) => new Date(x.inicio).getTime() >= corte30).map((x) => ({ dia: x.dados.dia ?? String(x.inicio).slice(0, 10), total: n(x.dados.total) })),
+      energia: de("energia").filter((x) => new Date(x.inicio).getTime() >= corte30).map((x) => ({ dia: String(x.inicio).slice(0, 10), score: n(x.dados.score) })),
+      corpo: de("corpo").map((x) => ({ ts: x.inicio, peso: n(x.dados.peso), gordura_pct: n(x.dados.gordura_pct), musculo_kg: n(x.dados.musculo_esq_kg) })),
+      apneia: de("apneia").at(-1) ? { ts: de("apneia").at(-1)!.inicio, sinal: de("apneia").at(-1)!.dados.sinal ?? null } : null,
+      ritmo_irregular: de("ritmo_irregular").filter((x) => x.dados.status === "DETECTED").length,
+      prontidao: prontR,
+      agora: new Date().toISOString(),
+    });
+  }
+
   // ------------------------------------------------------------ evento (diário pelo celular)
   if (acao === "evento") {
     if (!disp) return json({ erro: "nao_vinculado" }, 403);
@@ -238,9 +387,10 @@ Deno.serve(async (req) => {
     const mod = typeof corpo.modalidade === "string" ? corpo.modalidade.trim().slice(0, 40) : "";
     if (!descartar && !mod) return json({ erro: "modalidade_obrigatoria" }, 400);
     const esf = num(corpo.esforco);
+    const manual = corpo.manual === true; // cronometrado no app do celular
     const { error } = await admin.from("saude_eventos").insert({
       workspace_id: disp.workspace_id, profile_id: disp.profile_id, tipo: "treino", inicio, fim,
-      origem: "detectado", algoritmo: "treino-v1", descartado: descartar,
+      origem: manual ? "manual" : "detectado", algoritmo: manual ? null : "treino-v1", descartado: descartar,
       detalhes: descartar ? {} : { modalidade: mod, ...(esf !== null && esf >= 0 && esf <= 10 ? { esforco: Math.round(esf) } : {}) },
     });
     return error ? json({ erro: "falha_gravar" }, 500) : json({ ok: true });

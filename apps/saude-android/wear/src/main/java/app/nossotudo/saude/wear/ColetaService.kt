@@ -52,6 +52,12 @@ class ColetaService : Service() {
             private set
         @Volatile var tempReiniciada = 0
             private set
+        /**
+         * A temperatura deu PERMISSION_ERROR: o serviço foi religado em segundo plano (boot/atualização) e o
+         * Android não dá acesso "enquanto em uso" aos sensores. Abrir o app religa o serviço em primeiro plano.
+         */
+        @Volatile var tempSemPermissao = false
+            private set
 
         /** Rastreadores contínuos desejados na Fase 1 (só os que o relógio suportar serão ligados). */
         private val CONTINUOS = listOf(
@@ -88,6 +94,7 @@ class ColetaService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (rodando) return START_STICKY
+        tempSemPermissao = false
         EstadoSaude.iniciar(this)
         // reinício pelo sistema (START_STICKY) chega com intent nulo → volta no modo automático
         modo = intent?.getStringExtra(EXTRA_MODO) ?: MODO_FUNDO
@@ -241,7 +248,8 @@ class ColetaService : Service() {
     /** Liga a temperatura da pele das 22h às 8h (no pulso) e desliga fora disso. Chamado a cada minuto. */
     private fun ajustarTemperatura() {
         val s = sensores ?: return
-        val querer = TemperaturaNoturna.eNoite() && EstadoSaude.noPulso != false
+        // sem permissão não adianta tentar a cada minuto: espera o app ser aberto (que religa o serviço)
+        val querer = TemperaturaNoturna.eNoite() && EstadoSaude.noPulso != false && !tempSemPermissao
         // vigia da temperatura (v0.9.3): na noite de 20/11 o rastreador ficou ligado sem entregar nada.
         // Ligado, no pulso, e 15 min sem lote → desliga; no minuto seguinte liga de novo.
         if (querer && temperatura != null && EstadoSaude.noPulso == true && !Bateria.carregando(this)) {
@@ -263,7 +271,12 @@ class ColetaService : Service() {
                     override fun onFlushCompleted() {}
                     override fun onError(erro: HealthTracker.TrackerError) {
                         avisos += "temperatura: $erro"
-                        main.post { desligarTemperatura() } // tenta de novo no próximo minuto
+                        if (erro.name == "PERMISSION_ERROR") {
+                            tempSemPermissao = true
+                            avisos += "abra o Saúde NT no relógio para liberar a temperatura"
+                            Automatico.avisoTemperatura(applicationContext)
+                        }
+                        main.post { desligarTemperatura() } // tenta de novo no próximo minuto (se tiver permissão)
                     }
                 })
                 temperatura = t
@@ -417,6 +430,39 @@ object Automatico {
                 .setContentIntent(abrir).setAutoCancel(true)
                 .build(),
         )
+    }
+
+    /** Temperatura bloqueada por permissão: avisa uma vez por noite — tocar abre o app, que religa em primeiro plano. */
+    fun avisoTemperatura(ctx: Context) {
+        val p = ctx.getSharedPreferences("sync", Context.MODE_PRIVATE)
+        val hoje = java.time.LocalDate.now().toString()
+        if (p.getString("aviso_temp_dia", null) == hoje) return
+        p.edit().putString("aviso_temp_dia", hoje).apply()
+        val nm = ctx.getSystemService(android.app.NotificationManager::class.java) ?: return
+        nm.createNotificationChannel(android.app.NotificationChannel(CANAL_PARADO, "Medição parada", android.app.NotificationManager.IMPORTANCE_HIGH))
+        val abrir = android.app.PendingIntent.getActivity(
+            ctx, 42, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), android.app.PendingIntent.FLAG_IMMUTABLE,
+        )
+        nm.notify(
+            NOTIF_PARADO + 1,
+            android.app.Notification.Builder(ctx, CANAL_PARADO)
+                .setSmallIcon(R.drawable.ic_stat_nt)
+                .setContentTitle("Temperatura da pele bloqueada")
+                .setContentText("Toque para abrir o Saúde NT e liberar a medição desta noite.")
+                .setContentIntent(abrir).setAutoCancel(true)
+                .build(),
+        )
+    }
+
+    /**
+     * Ao abrir o app: se o serviço está rodando sem acesso aos sensores (subiu em segundo plano), religa agora,
+     * com o app na tela — assim ele ganha o acesso "enquanto em uso" e a temperatura volta.
+     */
+    fun religarEmPrimeiroPlano(ctx: Context) {
+        if (!ColetaService.rodando || !ColetaService.tempSemPermissao || ColetaService.modo != ColetaService.MODO_FUNDO) return
+        val app = ctx.applicationContext
+        app.stopService(Intent(app, ColetaService::class.java))
+        Handler(Looper.getMainLooper()).postDelayed({ garantir(app) }, 1_000)
     }
 
     /** Chamado pelo envio periódico: se a medição devia estar ligada e não está, tenta religar; se não der, avisa. */

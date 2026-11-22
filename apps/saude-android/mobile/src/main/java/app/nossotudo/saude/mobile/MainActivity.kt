@@ -96,13 +96,13 @@ private fun Ponto(ok: Boolean) {
 private fun Raiz(activity: Activity) {
     val ctx = LocalContext.current
     // conectado → abre em "Hoje"; ainda configurando → abre em "Ajustes"
-    var aba by remember { mutableStateOf(if (Conexao.vinculado(ctx)) 0 else 1) }
+    var aba by remember { mutableStateOf(if (Conexao.vinculado(ctx)) 0 else 3) }
     androidx.compose.material3.Scaffold(
         containerColor = Fundo,
         modifier = Modifier.safeDrawingPadding(),
         bottomBar = {
             androidx.compose.material3.NavigationBar(containerColor = CartaoCor) {
-                listOf("Hoje" to "◎", "Ajustes" to "⚙").forEachIndexed { i, (rotulo, simbolo) ->
+                listOf("Hoje" to "◎", "Treinos" to "⚡", "Saúde" to "♥", "Ajustes" to "⚙").forEachIndexed { i, (rotulo, simbolo) ->
                     NavigationBarItem(
                         selected = aba == i, onClick = { aba = i },
                         icon = { Text(simbolo, fontSize = 18.sp) }, label = { Text(rotulo) },
@@ -115,7 +115,14 @@ private fun Raiz(activity: Activity) {
             }
         },
     ) { margem ->
-        Box(Modifier.padding(margem)) { if (aba == 0) TelaHoje() else TelaAjustes(activity) }
+        Box(Modifier.padding(margem)) {
+            when (aba) {
+                0 -> TelaHoje()
+                1 -> TelaTreinos()
+                2 -> TelaSaude()
+                else -> TelaAjustes(activity)
+            }
+        }
     }
 }
 
