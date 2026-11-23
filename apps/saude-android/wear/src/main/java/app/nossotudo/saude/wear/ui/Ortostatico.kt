@@ -5,15 +5,11 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -24,12 +20,15 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.wear.compose.material3.Button
+import androidx.wear.compose.material3.ButtonDefaults
+import androidx.wear.compose.material3.LinearProgressIndicator
+import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.Text
 import app.nossotudo.saude.wear.EstadoSaude
 import app.nossotudo.saude.wear.MonitorCardiaco
@@ -99,60 +98,76 @@ fun TelaOrtostatico() {
         salvo = true
     }
 
-    Redondo { e ->
-        val total = when (fase) { FaseTeste.DEITADO -> DEITADO_S; FaseTeste.EM_PE -> EM_PE_S; else -> 1 }
-        val cor = if (fase == FaseTeste.EM_PE) Cor.Coracao else Cor.Sono
-        Canvas(Modifier.fillMaxSize()) {
-            arcoBorda(e, 226, 10, Color(0xFF16181F), 135f, 270f)
-            if (fase == FaseTeste.DEITADO || fase == FaseTeste.EM_PE) arcoBorda(e, 226, 10, cor, 135f, 270f * segundos / total)
-        }
-        Column(
-            Modifier.fillMaxSize().padding(horizontal = e.d(56)),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Titulo(e, "Teste em pé", Icone.Coracao, Cor.Coracao)
-            Spacer(Modifier.height(e.d(10)))
-            when (fase) {
-                FaseTeste.INICIO -> {
-                    Text("2 min deitado e parado,\ndepois 3 min em pé parado.", color = Cor.Texto, fontSize = e.s(15),
-                        textAlign = TextAlign.Center)
-                    Text("O relógio vibra na hora de levantar.", color = Cor.TextoTerc, fontSize = e.s(12),
-                        textAlign = TextAlign.Center, modifier = Modifier.padding(top = e.d(6)))
-                    Spacer(Modifier.height(e.d(16)))
-                    Pilula(e, "Deitei, começar", { deitado.clear(); emPe.clear(); salvo = false; fase = FaseTeste.DEITADO },
-                        modifier = Modifier.width(e.d(240)))
+    val total = when (fase) { FaseTeste.DEITADO -> DEITADO_S; FaseTeste.EM_PE -> EM_PE_S; else -> 1 }
+    val cor = if (fase == FaseTeste.EM_PE) Cor.Coracao else Cor.Sono
+
+    TelaLista(botaoBorda = when (fase) {
+        FaseTeste.INICIO -> ({ BotaoBorda("Começar") { deitado.clear(); emPe.clear(); salvo = false; fase = FaseTeste.DEITADO } })
+        FaseTeste.DEITADO, FaseTeste.EM_PE -> ({ BotaoBorda("Cancelar", Cor.Elevada, Cor.Texto) { fase = FaseTeste.INICIO } })
+        FaseTeste.RESULTADO -> null
+    }) {
+        item { Cabecalho("Teste em pé", Cor.Coracao) }
+        when (fase) {
+            FaseTeste.INICIO -> {
+                item { Nota("Deite antes de começar: 2 min deitado e parado, depois 3 min em pé parado.", Cor.Texto) }
+                item { Nota("O relógio vibra na hora de levantar.", Cor.TextoTerc) }
+            }
+            FaseTeste.DEITADO, FaseTeste.EM_PE -> {
+                item {
+                    Text(
+                        if (fase == FaseTeste.DEITADO) "Fique deitado e parado" else if (segundos < 4) "Levante agora!" else "Em pé, parado",
+                        color = cor, style = MaterialTheme.typography.titleSmall, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
+                    )
                 }
-                FaseTeste.DEITADO, FaseTeste.EM_PE -> {
-                    Text(if (fase == FaseTeste.DEITADO) "Fique deitado e parado" else "Em pé, parado", color = cor,
-                        fontSize = e.s(16), fontWeight = FontWeight.SemiBold)
-                    Numero(e, bpm?.toString() ?: SEM_VALOR, "bpm", 84)
+                item { ValorGrande(bpm?.toString() ?: SEM_VALOR, "bpm", null) }
+                item {
                     val falta = total - segundos
-                    Text("%d:%02d".format(falta / 60, falta % 60), color = Cor.TextoSec, fontSize = e.s(18))
-                    if (fase == FaseTeste.EM_PE && segundos < 4) {
-                        Text("Levante agora!", color = Cor.Coracao, fontSize = e.s(14), fontWeight = FontWeight.Bold)
+                    Nota("faltam %d:%02d".format(falta / 60, falta % 60), Cor.TextoSec)
+                }
+                item {
+                    LinearProgressIndicator(
+                        progress = { segundos / total.toFloat() },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(6.dp),
+                        colors = androidx.wear.compose.material3.ProgressIndicatorDefaults.colors(indicatorColor = cor, trackColor = Cor.Elevada),
+                    )
+                }
+            }
+            FaseTeste.RESULTADO -> {
+                val delta = if (repouso != null && m3 != null) m3 - repouso else null
+                item {
+                    ValorGrande(delta?.let { "${if (it >= 0) "+" else ""}$it" } ?: SEM_VALOR, "bpm",
+                        if (delta != null) "diferença em pé" else "leitura insuficiente")
+                }
+                item {
+                    Column0 {
+                        LinhaInfo("Deitado", repouso?.let { "$it bpm" } ?: SEM_VALOR)
+                        LinhaInfo("Pico (1º min)", pico?.let { "$it bpm" } ?: SEM_VALOR)
+                        LinhaInfo("Aos 3 min", m3?.let { "$it bpm" } ?: SEM_VALOR)
                     }
                 }
-                FaseTeste.RESULTADO -> {
-                    val delta = if (repouso != null && m3 != null) m3 - repouso else null
-                    Text(delta?.let { "${if (it >= 0) "+" else ""}$it bpm em pé" } ?: "Leitura insuficiente",
-                        color = Cor.Texto, fontSize = e.s(24), fontWeight = FontWeight.Bold)
-                    Text("deitado ${repouso ?: "—"} · pico ${pico ?: "—"} · 3 min ${m3 ?: "—"}",
-                        color = Cor.TextoSec, fontSize = e.s(13), textAlign = TextAlign.Center)
-                    Spacer(Modifier.height(e.d(12)))
-                    if (!salvo) {
-                        Text("Sentiu tontura ou mal-estar?", color = Cor.TextoSec, fontSize = e.s(13))
-                        Spacer(Modifier.height(e.d(8)))
-                        Row(horizontalArrangement = Arrangement.spacedBy(e.d(10))) {
-                            Pilula(e, "Não", { salvar(false) }, fundo = Cor.Chip, cor = Cor.Texto, modifier = Modifier.width(e.d(130)))
-                            Pilula(e, "Sim", { salvar(true) }, fundo = Cor.Ecg, cor = Color.White, modifier = Modifier.width(e.d(130)))
+                if (!salvo) {
+                    item { Nota("Sentiu tontura ou mal-estar?", Cor.Texto) }
+                    item {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Button(
+                                onClick = { salvar(false) }, modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.filledTonalButtonColors(containerColor = Cor.Superficie, contentColor = Cor.Texto),
+                                label = { Text("Não") },
+                            )
+                            Button(
+                                onClick = { salvar(true) }, modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = Cor.Ecg, contentColor = Color.White),
+                                label = { Text("Sim") },
+                            )
                         }
-                    } else {
-                        Text("Salvo no diário ✓", color = Cor.Acao, fontSize = e.s(16), fontWeight = FontWeight.SemiBold)
-                        Text("Aparece no relatório para o médico.", color = Cor.TextoTerc, fontSize = e.s(11))
                     }
+                } else {
+                    item { Nota("Salvo no diário ✓ · aparece no relatório para o médico.", Cor.Acao) }
                 }
             }
         }
     }
 }
+
+@Composable
+private fun Column0(conteudo: @Composable () -> Unit) = androidx.compose.foundation.layout.Column { conteudo() }

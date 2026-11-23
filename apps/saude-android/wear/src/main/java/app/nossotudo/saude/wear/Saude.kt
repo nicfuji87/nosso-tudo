@@ -266,25 +266,6 @@ object EstadoSaude {
         return (hoje / h.average().toFloat() - 1f) * 100f
     }
 
-    data class Prontidao(val pontos: Int?, val diasBase: Int, val texto: String)
-
-    /**
-     * Prontidão = quão acima/abaixo da SUA linha de base está a VFC de hoje (log-RMSSD, z-score).
-     * Só sai número depois de [DIAS_BASE] dias com medição — antes disso, "calibrando".
-     * É um indicador de apoio: não decide sozinho a intensidade do treino.
-     */
-    fun prontidao(): Prontidao {
-        val base = historicoRmssd(60).map { ln(it.second) }
-        val hoje = rmssdHoje()
-        if (base.size < DIAS_BASE || hoje == null) return Prontidao(null, base.size, "Calibrando")
-        val media = base.average()
-        val dp = sqrt(base.sumOf { (it - media) * (it - media) } / base.size).coerceAtLeast(0.05)
-        val z = (ln(hoje) - media) / dp
-        val p = (70 + 15 * z).toInt().coerceIn(0, 100)
-        val txt = when { p >= 80 -> "Treino forte"; p >= 60 -> "Treino moderado"; else -> "Dia leve" }
-        return Prontidao(p, base.size, txt)
-    }
-
     // ---------- persistência por dia ----------
     private fun chave(d: LocalDate) = "dia_$d"
     private fun lerDia(d: LocalDate): JSONObject =
@@ -310,6 +291,11 @@ object EstadoSaude {
 /** Mede batimento + IBI enquanto uma tela está aberta (se a coleta contínua não estiver rodando). */
 class MonitorCardiaco(private val ctx: Context) {
     enum class Estado { PARADO, CONECTANDO, MEDINDO, ERRO }
+
+    companion object {
+        /** Regra (testável): só quem ligou o sensor fecha o minuto, e nunca com a coleta contínua alimentando o estado. */
+        fun deveFecharMinuto(eraDonoDoSensor: Boolean, servicoRodando: Boolean) = eraDonoDoSensor && !servicoRodando
+    }
 
     private val _estado = MutableStateFlow(Estado.PARADO)
     val estado: StateFlow<Estado> = _estado.asStateFlow()
@@ -351,8 +337,13 @@ class MonitorCardiaco(private val ctx: Context) {
         )
     }
 
+    /**
+     * v1.0: só fecha o minuto se ESTE monitor estava medindo. Antes fechava sempre — com a coleta contínua
+     * rodando, sair de uma tela fechava o minuto pela metade; o resto do minuto virava outra linha com o mesmo
+     * horário, que o servidor descartava (upsert sem sobrescrever) → média do minuto com parte das leituras.
+     */
     fun parar() {
-        EstadoSaude.fecharMinuto()
+        if (deveFecharMinuto(eraDonoDoSensor = sensores != null, servicoRodando = ColetaService.rodando)) EstadoSaude.fecharMinuto()
         runCatching { tracker?.unsetEventListener() }
         tracker = null
         sensores?.desconectar()

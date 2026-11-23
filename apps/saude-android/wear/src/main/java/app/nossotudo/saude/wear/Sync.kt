@@ -284,15 +284,8 @@ object Sync {
         descartar(ctx, "ecgs", ecgItem.size)
         descartar(ctx, "lacunas", lacunas.size)
         runCatching { AvisoRadar.processar(ctx, r.optJSONObject("radar")) }
-        // prontidão do dia (prontidao-v1) para o Tile
-        r.optJSONObject("prontidao")?.let { p ->
-            prefs(ctx).edit()
-                .putInt("pront_score", if (p.isNull("score")) -1 else p.optInt("score", -1))
-                .putString("pront_nivel", p.optString("nivel").takeIf { it.isNotEmpty() && it != "null" })
-                .putString("pront_dia", p.optString("dia"))
-                .putString("pront_deitar", p.optJSONObject("sono")?.optString("deitar")?.takeIf { it.isNotEmpty() && it != "null" })
-                .apply()
-        }
+        // prontidão do servidor (a mesma do celular) para as telas e o Tile
+        r.optJSONObject("prontidao")?.let { p -> ProntidaoServidor.salvar(ctx, p) }
         SaudeTile.atualizar(ctx)
         val agora = System.currentTimeMillis()
         prefs(ctx).edit().putLong("ultimo_envio", agora).putLong("ultimo_estado", agora).remove("erro").apply()
