@@ -33,7 +33,7 @@ class MonitorSensorTest {
     @Test fun listenerRegistrado_naoEhRecuperacao_ateOPrimeiroValido() {
         val m = monitor()
         conectarEReceber(m)
-        avancar(5 * min)
+        avancar(8 * min)
         assertTrue(m.avaliar() is Decisao.Religar)                 // parou de chegar lote
         val g = m.iniciarConexao("sem lotes")
         m.inscrito(g)
@@ -69,7 +69,7 @@ class MonitorSensorTest {
     @Test fun soDadosInvalidos_noPulso_religa() {
         val m = monitor()
         val g = conectarEReceber(m)
-        repeat(7) { avancar(min); m.lote(g, validos = 0, foraDoPulso = false) }  // lotes chegam, sem batimento
+        repeat(10) { avancar(min); m.lote(g, validos = 0, foraDoPulso = false) }  // lotes chegam, sem batimento
         val d = m.avaliar()
         assertTrue("lotes inválidos não podem passar por medição normal", d is Decisao.Religar)
         assertEquals(EstadoSensor.STALE, m.estado)
@@ -100,7 +100,7 @@ class MonitorSensorTest {
     @Test fun reconexaoFalha_backoffCrescente_semConcorrencia() {
         val m = monitor()
         conectarEReceber(m)
-        avancar(5 * min)
+        avancar(8 * min)
         var d = m.avaliar(); assertTrue(d is Decisao.Religar)       // 1ª tentativa imediata
         var g = m.iniciarConexao("sem lotes")
         m.falhaConexao(g, permanente = false, descricao = "erro 1")
@@ -129,7 +129,7 @@ class MonitorSensorTest {
     @Test fun conexaoAntigaEncerrando_duranteRecuperacao_eIgnorada() {
         val m = monitor()
         val g0 = conectarEReceber(m)
-        avancar(5 * min)
+        avancar(8 * min)
         m.avaliar()
         val g1 = m.iniciarConexao("sem lotes")                     // ao religar, desconectamos g0
         m.conexaoEncerrada(g0)                                      // callback da desconexão intencional
@@ -202,5 +202,38 @@ class MonitorSensorTest {
         assertEquals("processo encerrado: religa o serviço", VigiaAlarme.Acao.RELIGAR_SERVICO, VigiaAlarme.decidir(false, true))
         assertEquals(VigiaAlarme.Acao.PARAR, VigiaAlarme.decidir(true, false))
         assertEquals(VigiaAlarme.Acao.PARAR, VigiaAlarme.decidir(false, false))
+    }
+
+    /** Tela apagada (medido no Watch6 em 23/11): o SDK entrega lotes a cada ~3 min com leituras contínuas. */
+    @Test fun lotesAtrasados_comLeiturasContinuas_naoSaoLacuna_nemReligam() {
+        val m = monitor()
+        val g = conectarEReceber(m)
+        var ultimaLeitura = t
+        repeat(20) {
+            avancar(3 * min)                                        // chegada do lote
+            m.lote(g, validos = 170, foraDoPulso = false, primeiraAmostraMs = ultimaLeitura + 1_000, ultimaAmostraMs = t - 2_000)
+            ultimaLeitura = t - 2_000
+            assertEquals("lote a cada 3 min não pode disparar religação", Decisao.Nada, m.avaliar())
+        }
+        assertTrue("leituras contínuas: nenhuma lacuna", m.retirarLacunas().isEmpty())
+        assertEquals(0, m.reconexoesTotal)
+    }
+
+    @Test fun lacuna_usaHorarioDaLeitura_naoDaChegada() {
+        val m = monitor()
+        val g = conectarEReceber(m)
+        val ultimaLeitura = t
+        avancar(20 * min)                                           // o lote chega 20 min depois...
+        m.lote(g, 30, false, primeiraAmostraMs = ultimaLeitura + 12 * min, ultimaAmostraMs = t)  // ...mas as leituras voltaram aos 12 min
+        val l = m.retirarLacunas().single()
+        assertEquals(ultimaLeitura, l.inicioMs)
+        assertEquals("fim = primeira leitura válida, não a chegada", ultimaLeitura + 12 * min, l.fimMs)
+    }
+
+    @Test fun silencioReal_aindaReligaDepoisDoLimite() {
+        val m = monitor()
+        conectarEReceber(m)
+        avancar(6 * min); assertEquals(Decisao.Nada, m.avaliar())
+        avancar(2 * min); assertTrue(m.avaliar() is Decisao.Religar)
     }
 }

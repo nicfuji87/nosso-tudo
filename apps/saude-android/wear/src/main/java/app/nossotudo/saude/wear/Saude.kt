@@ -74,7 +74,7 @@ object EstadoSaude {
     @Volatile var ultimoValidoMs: Long = 0
 
     /** Resultado de um lote: quantos batimentos válidos e se o SDK disse "fora do pulso". */
-    data class ResultadoLote(val validos: Int, val foraDoPulso: Boolean)
+    data class ResultadoLote(val validos: Int, val foraDoPulso: Boolean, val primeiraValidaMs: Long = 0L, val ultimaValidaMs: Long = 0L)
     /** Durante o ECG o batimento contínuo pode sair inválido: não entra no cálculo. */
     @Volatile var pausado = false
 
@@ -137,6 +137,8 @@ object EstadoSaude {
         if (lote.isNotEmpty()) ultimoLoteMs = System.currentTimeMillis()
         var validos = 0
         var fora = false
+        var primeira = 0L
+        var ultima = 0L
         for (dp in lote) {
             val ts = dp.timestamp
             val hr = runCatching { dp.getValue(ValueKey.HeartRateSet.HEART_RATE) }.getOrNull() ?: 0
@@ -144,6 +146,8 @@ object EstadoSaude {
             if (st == -3) { noPulso = false; fora = true; observarPulso(false, ts) } // SDK: relógio fora do pulso
             if (hr in 30..220 && st >= 0) {
                 validos++
+                if (primeira == 0L || ts < primeira) primeira = ts
+                if (ts > ultima) ultima = ts
                 noPulso = true
                 observarPulso(true, ts)
                 ultimaLeituraMs = ts
@@ -163,7 +167,7 @@ object EstadoSaude {
             relogioBatimento = t
         }
         if (validos > 0) ultimoValidoMs = System.currentTimeMillis()
-        return ResultadoLote(validos, fora)
+        return ResultadoLote(validos, fora, primeira, ultima)
     }
 
     private fun registrarBpm(hr: Int, ts: Long) {

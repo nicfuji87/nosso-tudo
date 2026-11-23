@@ -285,7 +285,7 @@ class ColetaService : Service() {
                         val r = CallbacksSensor.aoReceberLote(portao, g) { EstadoSaude.registrarLote(lote) } ?: return
                         main.post {
                             // a trava só sai quando o sensor PROVOU que voltou: primeiro batimento válido
-                            if (monitor.lote(g, r.validos, r.foraDoPulso)) {
+                            if (monitor.lote(g, r.validos, r.foraDoPulso, r.primeiraValidaMs, r.ultimaValidaMs)) {
                                 soltarTrava()
                                 monitor.ultimaRecuperacaoMs?.let { eventos?.linha(System.currentTimeMillis(), "recuperado_ms", "$it") }
                                 atualizarResumo()
@@ -328,6 +328,7 @@ class ColetaService : Service() {
             .put("estado", monitor.estado.name)
             .put("min_sem_lote", min(monitor.ultimoLoteMs))
             .put("min_sem_valido", min(monitor.ultimoValidoMs))
+            .put("min_desde_amostra", min(monitor.ultimaAmostraValidaMs))
             .put("min_desde_tentativa", min(monitor.ultimaTentativaMs))
             .put("tentativas_seguidas", monitor.tentativasSeguidas)
             .put("reconexoes", monitor.reconexoesTotal)
@@ -369,7 +370,7 @@ class ColetaService : Service() {
             if (modo == MODO_FUNDO) {
                 ajustarTemperatura()
                 avaliar()
-                if (monitor.ultimoValidoMs > 0) prefsColeta().edit().putLong("ultimo_valido", monitor.ultimoValidoMs).apply()
+                if (monitor.ultimaAmostraValidaMs > 0) prefsColeta().edit().putLong("ultimo_valido", monitor.ultimaAmostraValidaMs).apply()
             }
             atualizarResumo()
             main.postDelayed(this, 60_000)
@@ -444,7 +445,7 @@ class ColetaService : Service() {
         if (!Automatico.ativo(this) || modo != MODO_FUNDO) VigiaAlarme.cancelar(this)
         portao.fechar()
         if (::monitor.isInitialized) {
-            if (monitor.ultimoValidoMs > 0) prefsColeta().edit().putLong("ultimo_valido", monitor.ultimoValidoMs).apply()
+            if (monitor.ultimaAmostraValidaMs > 0) prefsColeta().edit().putLong("ultimo_valido", monitor.ultimaAmostraValidaMs).apply()
             monitor.encerrar()
         }
         soltarTrava()

@@ -29,10 +29,13 @@ data class Lacuna(
 
 class MonitorSensor(
     private val agora: () -> Long,
-    /** sem NENHUM lote por este tempo (fora do carregador) → sensor parado */
-    val semLoteMs: Long = 4 * 60_000L,
+    /**
+     * sem NENHUM lote por este tempo (fora do carregador) → sensor parado. v0.9.9: com a tela apagada o SDK
+     * entrega em lotes a cada ~3 min (medido no Watch6 em 23/11) — 4 min ficava perto demais e religaria à toa.
+     */
+    val semLoteMs: Long = 7 * 60_000L,
     /** chegam lotes, mas sem batimento válido por este tempo, com o relógio no pulso → sensor travado */
-    val semValidoMs: Long = 6 * 60_000L,
+    val semValidoMs: Long = 9 * 60_000L,
     /** conexão pedida e nenhuma resposta (sucesso/falha) neste tempo → nova tentativa */
     val timeoutConexaoMs: Long = 60_000L,
     /** espera entre tentativas seguidas sem sucesso (a 1ª é imediata) */
@@ -45,7 +48,10 @@ class MonitorSensor(
     var estado = EstadoSensor.DISCONNECTED; private set
     var geracao = 0; private set
     var ultimoLoteMs = 0L; private set
-    var ultimoValidoMs = ultimoValidoAnteriorMs; private set
+    /** CHEGADA do último lote com batimento válido (para a vigia: o sensor está entregando?) */
+    var ultimoValidoMs = 0L; private set
+    /** HORÁRIO DA LEITURA do último batimento válido (para as lacunas: lote atrasado não é lacuna) */
+    var ultimaAmostraValidaMs = ultimoValidoAnteriorMs; private set
     var ultimaTentativaMs = 0L; private set
     var inscritoEmMs = 0L; private set
     var tentativasSeguidas = 0; private set
@@ -92,15 +98,18 @@ class MonitorSensor(
      * Chegou um lote. [validos] = batimentos válidos no lote; [foraDoPulso] = o SDK disse "fora do pulso".
      * Devolve true quando é o PRIMEIRO batimento válido depois de uma falha (hora de soltar a trava).
      */
-    fun lote(g: Int, validos: Int, foraDoPulso: Boolean): Boolean {
+    fun lote(g: Int, validos: Int, foraDoPulso: Boolean, primeiraAmostraMs: Long = -1L, ultimaAmostraMs: Long = -1L): Boolean {
         if (g != geracao) return false
         val t = agora()
         ultimoLoteMs = t
         if (foraDoPulso) ultimoForaDoPulsoMs = t
         if (validos <= 0) return false
-        val anterior = ultimoValidoMs
+        // lacuna = intervalo entre LEITURAS válidas (não entre chegadas: com a tela apagada os lotes chegam atrasados)
+        val primeira = if (primeiraAmostraMs > 0) primeiraAmostraMs else t
+        val ultima = if (ultimaAmostraMs > 0) ultimaAmostraMs else t
+        val anterior = ultimaAmostraValidaMs
         val voltou = estado != EstadoSensor.RECEIVING
-        if (anterior > 0 && t - anterior >= lacunaMinMs) {
+        if (anterior > 0 && primeira - anterior >= lacunaMinMs) {
             val causa = causaAtual ?: when {
                 ultimoForaDoPulsoMs >= anterior -> "fora_do_pulso"
                 carregouDesde >= anterior || carregando -> "carregando"
@@ -108,11 +117,12 @@ class MonitorSensor(
             }
             // tempo de recuperação = da última tentativa de religar até o 1º batimento válido (só se houve tentativa)
             val rec = if (reconexoesNaLacuna > 0 && ultimaTentativaMs > anterior) t - ultimaTentativaMs else null
-            lacunas.addLast(Lacuna(anterior, t, causa, reconexoesNaLacuna, rec))
+            lacunas.addLast(Lacuna(anterior, primeira, causa, reconexoesNaLacuna, rec))
             while (lacunas.size > 100) lacunas.removeFirst()
             if (rec != null) ultimaRecuperacaoMs = rec
         }
         ultimoValidoMs = t
+        ultimaAmostraValidaMs = maxOf(ultimaAmostraValidaMs, ultima)
         estado = EstadoSensor.RECEIVING
         causaAtual = null
         reconexoesNaLacuna = 0
