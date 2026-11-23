@@ -25,7 +25,12 @@ import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
  *   treinos  { segredo } → aba Treinos do celular: treinos de 35 dias (zonas pela FC máx. pessoal, carga,
  *            recuperação cardíaca), semana × semana anterior, minutos OMS, tempo de recuperação, prontidão
  *   treino_editar { segredo, id, modalidade?, esforco?, descartar? } → troca modalidade/esforço ou exclui
- *   tendencias { segredo } → aba Saúde do celular: 30 noites, normais do radar, passos, Energy Score, corpo
+ *   tendencias { segredo, dias? } → aba Saúde do celular: noites (sono canônico, qualidade da SpO₂), normais do radar,
+ *            passos, Energy Score, corpo (dias = 7 | 30 | 90)
+ *   sono     { segredo, noite?, dias? } → sessões canônicas (sono-v1) + estágios da noite escolhida (linha do tempo)
+ *   treino_detalhe { segredo, id } → um treino com a curva de FC por minuto, zonas e recuperação
+ *   perfil   { segredo, salvar? } → perfil esportivo (FC máx. manual, metas) e estado dos aparelhos
+ *   hoje (app 1.0+) também devolve: sincronizacao, sono_noite, serie (8 noites), atencao (até 2 itens), semana
  *
  * Escrita com service_role; isolamento por workspace vem do dispositivo.
  */
@@ -107,7 +112,7 @@ type TreinoP = {
  * o bloco pede 0,12 h por ponto de carga (máx. 72 h) — +12 h se a prontidão de hoje está baixa, +6 h se moderada.
  * É estimativa para orientar treino forte × leve, não regra.
  */
-function resumoTreinos(p: { fcmax?: number; zonas_bpm?: number[]; treinos?: TreinoP[] }, pront: Record<string, unknown> | null) {
+function resumoTreinos(p: { fcmax?: number; zonas_bpm?: number[]; treinos?: TreinoP[] }, pront: Record<string, unknown> | null, dias = 35) {
   const H = 3_600_000, D = 24 * H, agora = Date.now();
   const t = p.treinos ?? [];
   const ms = (x: string) => new Date(x).getTime();
@@ -166,13 +171,171 @@ function resumoTreinos(p: { fcmax?: number; zonas_bpm?: number[]; treinos?: Trei
   const hrr = ord.filter((x) => x.recuperacao && x.recuperacao.fc_fim >= limiarHrr).slice(-12)
     .map((x) => ({ inicio: x.inicio, modalidade: x.modalidade ?? null, ...x.recuperacao }));
   const media = (v: number[]) => (v.length ? Math.round(soma(v) / v.length) : null);
+  // carga e minutos por dia (últimos 7 dias, data local) — barras da aba Treinos
+  const porDia = Array.from({ length: 7 }, (_, i) => {
+    const dia = diaLocal(agora - (6 - i) * D);
+    const l = t.filter((x) => diaLocal(x.inicio) === dia);
+    return { dia, carga: soma(l.map((x) => x.carga ?? 0)), minutos: soma(l.map((x) => x.minutos)), treinos: l.length,
+      modalidades: [...new Set(l.map((x) => x.modalidade ?? "Outro"))] };
+  });
+  const desde = medidos.length ? new Date(Math.min(...medidos)).toISOString() : null;
   return {
     algoritmo: "treinos-v2", fcmax: p.fcmax ?? null, zonas_bpm: p.zonas_bpm ?? [],
+    fcmax_fonte: (p as L).fcmax_fonte ?? null, por_dia: porDia, historico_desde: desde,
+    // a semana anterior só serve de comparação se o relógio já media desde o começo dela
+    semana_anterior_completa: medidos.length > 0 && Math.min(...medidos) <= segunda - 7 * D,
     semana: resumir(segunda, agora + 1), semana_anterior: resumir(segunda - 7 * D, segunda), ultimos7: resumir(agora - 7 * D, agora + 1),
     carga28, carga_media_semana: cargaMediaSemana, carga_historico_dias: historicoDias,
     recuperacao, hrr, hrr_limiar: limiarHrr, hrr_media: media(hrr.map((x) => x.queda1 ?? 0)),
-    prontidao: pront, treinos: t.slice(0, 40),
+    prontidao: pront, treinos: t.filter((x) => ms(x.inicio) >= agora - dias * D).slice(0, 150),
   };
+}
+
+// ---- app do celular 1.0: séries, sincronização, sono canônico e pontos de atenção ----------------
+type L = Record<string, unknown>;
+const DIA = 86_400_000;
+const nnum = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+const um = (v: number) => Math.round(v * 10) / 10;
+/** minutos → horas com 2 casas (1 casa arredondava 436 min para "7h18"). */
+const h2 = (min: number) => Math.round((min / 60) * 100) / 100;
+const diaLocal = (d: string | number | Date) =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(d));
+
+/** Grava a prontidão no histórico só quando muda (nota, confiança ou versão do algoritmo). */
+async function registrarProntidao(admin: SupabaseClient, ws: string, p: Record<string, unknown> | null) {
+  if (!p || typeof p.dia !== "string") return;
+  const score = nnum(p.score);
+  const { data } = await admin.from("saude_prontidao_hist").select("score, confianca, algoritmo")
+    .eq("workspace_id", ws).eq("dia", p.dia).order("calculado_em", { ascending: false }).limit(1).maybeSingle();
+  if (data && data.score === score && data.confianca === (p.confianca ?? null) && data.algoritmo === p.algoritmo) return;
+  await admin.from("saude_prontidao_hist").insert({
+    workspace_id: ws, dia: p.dia, algoritmo: String(p.algoritmo ?? ""), score, nivel: p.nivel ?? null,
+    confianca: p.confianca ?? null, entradas: p.entradas ?? {},
+  });
+}
+
+/** Estado de cada aparelho: última sincronização, bateria, erro — para o indicador do topo e os Ajustes. */
+async function sincronizacao(admin: SupabaseClient, ws: string) {
+  const { data } = await admin.from("saude_dispositivos")
+    .select("nome, modelo, versao_app, ultimo_envio_em, bateria_pct, carregando, no_pulso, ultima_leitura_em, diagnostico")
+    .eq("workspace_id", ws).is("revogado_em", null);
+  return ((data ?? []) as L[]).map((d) => {
+    const diag = (d.diagnostico ?? {}) as L;
+    const celular = /SM-S|celular|phone/i.test(`${d.nome ?? ""} ${d.modelo ?? ""}`) || typeof diag.otimizacao_bateria === "boolean";
+    const tipos = (diag.tipos ?? {}) as L;
+    return {
+      tipo: celular ? "celular" : "relogio", nome: d.nome, modelo: d.modelo ?? null, versao: d.versao_app ?? diag.versao ?? null,
+      ultimo_envio: d.ultimo_envio_em ?? null, ultima_sync: (diag.ultima_sync as string | null) ?? d.ultimo_envio_em ?? null,
+      ultima_leitura: d.ultima_leitura_em ?? null, bateria: d.bateria_pct ?? null, carregando: d.carregando ?? null,
+      no_pulso: d.no_pulso ?? null, erro: diag.erro ?? null, medindo: tipos.medindo ?? null,
+      otimizacao_bateria: diag.otimizacao_bateria ?? null,
+    };
+  });
+}
+
+/** Séries por noite (radar + sono canônico) e por dia (passos, Energy Score). Nada vira zero: ausente = null. */
+async function seriesSaude(admin: SupabaseClient, ws: string, dias: number) {
+  const [noitesR, sonoR, samR] = await Promise.all([
+    admin.rpc("saude_noites", { p_workspace_id: ws, p_dias: dias, p_tz: TZ }),
+    admin.rpc("saude_sono", { p_workspace_id: ws, p_dias: dias, p_tz: TZ }),
+    admin.from("saude_samsung").select("tipo, inicio, dados").eq("workspace_id", ws).in("tipo", ["passos", "energia"])
+      .gte("inicio", new Date(Date.now() - (dias + 1) * DIA).toISOString()).order("inicio", { ascending: true }).limit(1000),
+  ]);
+  const sonos = ((sonoR.data ?? []) as L[]);
+  const porNoite = new Map(sonos.map((x) => [String(x.noite), x]));
+  const vistas = new Set<string>();
+  const noites = ((noitesR.data ?? []) as L[]).map((x) => {
+    const sn = porNoite.get(String(x.noite));
+    vistas.add(String(x.noite));
+    const spmin = nnum(x.spo2_min);
+    return {
+      noite: x.noite, fc: nnum(x.fc_repouso), vfc: nnum(x.vfc_noturna), vfc_janelas: nnum(x.janelas),
+      spo2: nnum(x.spo2_media), spo2_min: spmin,
+      // mínima de pulso isolada abaixo de 85% costuma ser artefato (movimento, pulseira frouxa); só vale se repetir
+      spo2_qualidade: spmin == null ? null : spmin < 85 ? "suspeita" : "valida",
+      pele: nnum(x.temp_pele), fonte_temp: x.fonte_temp ?? null,
+      sono_h: sn ? h2(Number(sn.dormido_min)) : null, sono_cama_h: sn ? h2(Number(sn.duracao_min)) : null,
+      sono_qualidade: sn?.qualidade ?? null, sono_estado: sn?.estado ?? null, sono_motivo: sn?.motivo ?? null,
+      sono_estimado_h: !sn && x.sono_inicio && x.sono_fim
+        ? um((new Date(String(x.sono_fim)).getTime() - new Date(String(x.sono_inicio)).getTime()) / 3_600_000) : null,
+    };
+  });
+  // noites só do Samsung Health (sem dado do relógio)
+  for (const sn of sonos) {
+    if (vistas.has(String(sn.noite))) continue;
+    noites.push({
+      noite: sn.noite, fc: null, vfc: null, vfc_janelas: null, spo2: null, spo2_min: null, spo2_qualidade: null, pele: null,
+      fonte_temp: null, sono_h: h2(Number(sn.dormido_min)), sono_cama_h: h2(Number(sn.duracao_min)),
+      sono_qualidade: sn.qualidade ?? null, sono_estado: sn.estado ?? null, sono_motivo: sn.motivo ?? null, sono_estimado_h: null,
+    });
+  }
+  noites.sort((a, b) => String(a.noite).localeCompare(String(b.noite)));
+  const sam = (samR.data ?? []) as { tipo: string; inicio: string; dados: L }[];
+  const porDia = (tipo: string, campo: string) => {
+    const m = new Map<string, number>();
+    sam.filter((x) => x.tipo === tipo).forEach((x) => {
+      const v = nnum(x.dados[campo]);
+      if (v != null) m.set(String(x.dados.dia ?? diaLocal(x.inicio)), v);
+    });
+    return [...m.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([dia, valor]) => ({ dia, valor }));
+  };
+  return { noites, sonos, passos: porDia("passos", "total"), energia: porDia("energia", "score") };
+}
+
+type Atencao = { id: string; titulo: string; evidencia: string; alvo: string; nivel: "atencao" | "info" };
+
+/** Até 2 pontos de atenção, do mais importante ao menos. Só o que tem evidência; sem relação de causa. */
+function pontosAtencao(pront: L | null, radar: L | null, noites: L[], sync: L[]): Atencao[] {
+  const out: Atencao[] = [];
+  const hoje = hojeLocal();
+  const ultima = noites.at(-1);
+  const daNoite = ultima && ultima.noite === hoje ? ultima : null;
+  const sono = (pront?.sono ?? {}) as L;
+  if (sono.estado === "contraditorio" || sono.estado === "parcial" || sono.estado === "aguardando") {
+    out.push({
+      id: "sono-dado", nivel: "info", alvo: "sono",
+      titulo: sono.estado === "contraditorio" ? "Sono de hoje com registro contraditório" : "Sono de hoje ainda incompleto",
+      evidencia: String(sono.motivo ?? "") + " — a prontidão foi calculada sem ele.",
+    });
+  }
+  const fc = nnum(radar?.fc), fcn = nnum(radar?.fc_normal), vfc = nnum(radar?.vfc), vfcn = nnum(radar?.vfc_normal);
+  const pele = nnum(radar?.temp), pelen = nnum(radar?.temp_normal);
+  const base = nnum(radar?.base) ?? 0;
+  if (daNoite && base >= 3) {
+    if (fc != null && fcn != null && fc - fcn >= 3) out.push({
+      id: "fc", nivel: "atencao", alvo: "fc", titulo: "Sua FC de repouso subiu",
+      evidencia: `${Math.round(fc)} bpm, contra a sua referência de ${Math.round(fcn)} bpm.`,
+    });
+    if (vfc != null && vfcn != null && vfc <= vfcn * 0.85) out.push({
+      id: "vfc", nivel: "atencao", alvo: "vfc", titulo: "VFC abaixo do seu normal",
+      evidencia: `${Math.round(vfc)} ms, contra a sua referência de ${Math.round(vfcn)} ms.`,
+    });
+    if (pele != null && pelen != null && pele - pelen >= 0.5) out.push({
+      id: "pele", nivel: "atencao", alvo: "pele", titulo: "Temperatura da pele acima do normal",
+      evidencia: `+${(pele - pelen).toFixed(1).replace(".", ",")} °C na noite, contra a sua referência.`,
+    });
+  }
+  const sonoH = nnum(daNoite?.sono_h);
+  if (sonoH != null && daNoite?.sono_qualidade !== "suspeito" && sonoH < 6) out.push({
+    id: "sono-curto", nivel: "atencao", alvo: "sono", titulo: "Sono abaixo da meta",
+    evidencia: `${Math.floor(sonoH)} h ${String(Math.round((sonoH % 1) * 60)).padStart(2, "0")} min dormidos; a meta é 7 h.`,
+  });
+  const quedas = noites.slice(-14).filter((n) => nnum(n.spo2_min) != null && Number(n.spo2_min) < 88).length;
+  if (quedas >= 3) out.push({
+    id: "spo2", nivel: "atencao", alvo: "spo2", titulo: "Quedas de SpO₂ em várias noites",
+    evidencia: `Mínima abaixo de 88% em ${quedas} das últimas 14 noites. Uma queda isolada no pulso costuma ser ruído; repetidas, valem o teste de apneia do Samsung Health Monitor.`,
+  });
+  const agora = Date.now();
+  for (const d of sync) {
+    const t = d.tipo === "celular" ? d.ultima_sync : d.ultimo_envio;
+    const lim = d.tipo === "celular" ? 6 : 3;
+    if (typeof t === "string" && agora - new Date(t).getTime() > lim * 3_600_000) out.push({
+      id: `sync-${d.tipo}`, nivel: "info", alvo: "sync",
+      titulo: d.tipo === "celular" ? "Samsung Health sem sincronizar" : "Relógio sem enviar dados",
+      evidencia: `Última vez há ${Math.round((agora - new Date(t).getTime()) / 3_600_000)} h.`,
+    });
+  }
+  return out.slice(0, 2);
 }
 
 const TIPOS = new Set(["checkin", "habito", "respiracao", "ecg", "malestar", "ortostatico"]);
@@ -280,8 +443,23 @@ Deno.serve(async (req) => {
         };
       });
     const media = (v: number[]) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : null);
+    const [series, sync, painel14] = await Promise.all([
+      seriesSaude(admin, ws, 8),
+      sincronizacao(admin, ws),
+      admin.rpc("saude_treinos_painel", { p_workspace_id: ws, p_dias: 14, p_tz: TZ }),
+    ]);
+    registrarProntidao(admin, ws, prontR).catch(() => null);
+    const sonoNoite = series.sonos.at(-1) ?? null;
+    const semana = painel14.data ? resumoTreinos(painel14.data as Parameters<typeof resumoTreinos>[0], prontR, 7) : null;
     return json({
       ok: true,
+      versao_api: 12,
+      sincronizacao: sync,
+      sono_noite: sonoNoite ? { ...sonoNoite, e_de_hoje: sonoNoite.noite === hojeLocal() } : null,
+      serie: { noites: series.noites, passos: series.passos, energia: series.energia },
+      normais: radar ? { fc: radar.fc_normal ?? null, vfc: radar.vfc_normal ?? null, pele: radar.temp_normal ?? null, spo2: radar.spo2_normal ?? null, base: radar.base ?? null } : null,
+      atencao: pontosAtencao(prontR, radar, series.noites as L[], sync as L[]),
+      semana: semana ? { ...semana.semana, ultimos7: semana.ultimos7, por_dia: semana.por_dia, zonas_bpm: semana.zonas_bpm } : null,
       radar,
       noite: noites.at(-1) ?? null,
       sono: sono ? { inicio: sono.inicio, fim: sono.fim, ...sono.dados, estagios: undefined } : null,
@@ -302,12 +480,90 @@ Deno.serve(async (req) => {
   // ------------------------------------------------------------ treinos (aba Treinos do celular)
   if (acao === "treinos") {
     if (!disp) return json({ erro: "nao_vinculado" }, 403);
+    const dias = Math.min(120, Math.max(7, Math.round(nnum(corpo.dias) ?? 35)));
     const [painelR, prontR] = await Promise.all([
-      admin.rpc("saude_treinos_painel", { p_workspace_id: disp.workspace_id, p_dias: 35, p_tz: TZ }),
+      admin.rpc("saude_treinos_painel", { p_workspace_id: disp.workspace_id, p_dias: Math.max(35, dias), p_tz: TZ }),
       prontidao(admin, disp.workspace_id),
     ]);
     if (painelR.error || !painelR.data) return json({ erro: "falha_painel" }, 500);
-    return json({ ok: true, ...resumoTreinos(painelR.data as Parameters<typeof resumoTreinos>[0], prontR), agora: new Date().toISOString() });
+    return json({ ok: true, dias, ...resumoTreinos(painelR.data as Parameters<typeof resumoTreinos>[0], prontR, dias), agora: new Date().toISOString() });
+  }
+
+  // ------------------------------------------------------------ treino_detalhe (curva de FC de um treino)
+  if (acao === "treino_detalhe") {
+    if (!disp) return json({ erro: "nao_vinculado" }, 403);
+    const id = String(corpo.id ?? "");
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return json({ erro: "id_invalido" }, 400);
+    const { data: ev } = await admin.from("saude_eventos").select("id, inicio, fim")
+      .eq("id", id).eq("workspace_id", disp.workspace_id).eq("tipo", "treino").maybeSingle();
+    if (!ev || !ev.fim) return json({ erro: "nao_encontrado" }, 404);
+    const ini = new Date(ev.inicio).getTime(), fim = new Date(ev.fim).getTime();
+    const dias = Math.ceil((Date.now() - ini) / DIA) + 1;
+    const [painelR, bpmR] = await Promise.all([
+      admin.rpc("saude_treinos_painel", { p_workspace_id: disp.workspace_id, p_dias: dias, p_tz: TZ }),
+      admin.from("saude_bpm_minuto").select("minuto, bpm_medio, bpm_min, bpm_max, amostras").eq("workspace_id", disp.workspace_id)
+        .gte("minuto", new Date(ini - 3 * 60_000).toISOString()).lte("minuto", new Date(fim + 6 * 60_000).toISOString())
+        .order("minuto", { ascending: true }).limit(1000),
+    ]);
+    const p = (painelR.data ?? {}) as L;
+    const treino = ((p.treinos ?? []) as L[]).find((x) => x.id === id) ?? null;
+    return json({
+      ok: true, treino, fcmax: p.fcmax ?? null, fcmax_fonte: p.fcmax_fonte ?? null, zonas_bpm: p.zonas_bpm ?? [],
+      serie: ((bpmR.data ?? []) as L[]).map((b) => ({ t: b.minuto, bpm: um(Number(b.bpm_medio)), min: b.bpm_min, max: b.bpm_max, n: b.amostras })),
+    });
+  }
+
+  // ------------------------------------------------------------ sono (sessões canônicas + estágios de uma noite)
+  if (acao === "sono") {
+    if (!disp) return json({ erro: "nao_vinculado" }, 403);
+    const dias = Math.min(120, Math.max(7, Math.round(nnum(corpo.dias) ?? 14)));
+    const { data } = await admin.rpc("saude_sono", { p_workspace_id: disp.workspace_id, p_dias: dias, p_tz: TZ });
+    const sessoes = (data ?? []) as L[];
+    const pedida = typeof corpo.noite === "string" ? corpo.noite : null;
+    const sel = (pedida ? sessoes.find((x) => x.noite === pedida) : null) ?? sessoes.at(-1) ?? null;
+    let estagios: unknown[] = [];
+    let spo2: L | null = null;
+    if (sel) {
+      const [estR, spR] = await Promise.all([
+        admin.from("saude_samsung").select("dados").eq("workspace_id", disp.workspace_id).eq("uid", String(sel.uid)).maybeSingle(),
+        admin.from("saude_samsung").select("inicio, dados").eq("workspace_id", disp.workspace_id).eq("tipo", "spo2")
+          .gte("inicio", String(sel.inicio)).lte("inicio", String(sel.fim)),
+      ]);
+      estagios = Array.isArray((estR.data?.dados as L | undefined)?.estagios) ? ((estR.data!.dados as L).estagios as unknown[]) : [];
+      const sp = (spR.data ?? []) as { dados: L }[];
+      if (sp.length) spo2 = {
+        media: um(sp.reduce((a, x) => a + (Number(x.dados.media) || 0), 0) / sp.length),
+        min: Math.min(...sp.map((x) => Number(x.dados.min) || 100)), leituras: sp.reduce((a, x) => a + (Number(x.dados.n) || 0), 0),
+      };
+    }
+    return json({ ok: true, sessoes, noite: sel, estagios, spo2 });
+  }
+
+  // ------------------------------------------------------------ perfil esportivo
+  if (acao === "perfil") {
+    if (!disp) return json({ erro: "nao_vinculado" }, 403);
+    const ws = disp.workspace_id;
+    if (corpo.salvar && typeof corpo.salvar === "object") {
+      const e = corpo.salvar as L;
+      const faixa = (v: unknown, a: number, b: number) => { const x = nnum(v); return x != null && x >= a && x <= b ? x : null; };
+      const linha: L = { workspace_id: ws, atualizado_em: new Date().toISOString() };
+      if ("fcmax_manual" in e) linha.fcmax_manual = faixa(e.fcmax_manual, 120, 230);
+      if ("altura_cm" in e) linha.altura_cm = faixa(e.altura_cm, 100, 250);
+      if ("peso_kg" in e) linha.peso_kg = faixa(e.peso_kg, 30, 250);
+      if ("meta_sono_h" in e) linha.meta_sono_h = faixa(e.meta_sono_h, 5, 10) ?? 7.5;
+      if ("meta_passos" in e) linha.meta_passos = faixa(e.meta_passos, 1000, 40000) ?? 8000;
+      if ("nascimento" in e) linha.nascimento = typeof e.nascimento === "string" && /^\d{4}-\d{2}-\d{2}$/.test(e.nascimento) ? e.nascimento : null;
+      if (Array.isArray(e.modalidades)) linha.modalidades = e.modalidades.filter((x) => typeof x === "string").slice(0, 12).map((x) => String(x).slice(0, 40));
+      const { error } = await admin.from("saude_perfil").upsert(linha, { onConflict: "workspace_id" });
+      if (error) return json({ erro: "falha_gravar" }, 500);
+    }
+    const [perfilR, painelR, sync] = await Promise.all([
+      admin.from("saude_perfil").select("*").eq("workspace_id", ws).maybeSingle(),
+      admin.rpc("saude_treinos_painel", { p_workspace_id: ws, p_dias: 1, p_tz: TZ }),
+      sincronizacao(admin, ws),
+    ]);
+    const p = (painelR.data ?? {}) as L;
+    return json({ ok: true, perfil: perfilR.data ?? null, fcmax: p.fcmax ?? null, fcmax_fonte: p.fcmax_fonte ?? null, zonas_bpm: p.zonas_bpm ?? [], sincronizacao: sync });
   }
 
   // ------------------------------------------------------------ treino_editar (modalidade, esforço, excluir)
@@ -329,6 +585,12 @@ Deno.serve(async (req) => {
     if (typeof corpo.modalidade === "string" && corpo.modalidade.trim()) detalhes.modalidade = corpo.modalidade.trim().slice(0, 40);
     const esf = num(corpo.esforco);
     if (esf !== null && esf >= 0 && esf <= 10) detalhes.esforco = Math.round(esf);
+    if (typeof corpo.nota === "string") { if (corpo.nota.trim()) detalhes.nota = corpo.nota.trim().slice(0, 500); else delete detalhes.nota; }
+    for (const k of ["tecnica_min", "randori_min"]) {
+      if (!(k in corpo)) continue;
+      const v = num(corpo[k]);
+      if (v !== null && v >= 0 && v <= 600) detalhes[k] = Math.round(v); else delete detalhes[k];
+    }
     const { error } = await admin.from("saude_eventos").update({ detalhes }).eq("id", id);
     return error ? json({ erro: "falha_gravar" }, 500) : json({ ok: true });
   }
@@ -337,31 +599,34 @@ Deno.serve(async (req) => {
   if (acao === "tendencias") {
     if (!disp) return json({ erro: "nao_vinculado" }, 403);
     const ws = disp.workspace_id;
-    const [noitesR, radarR, samR, prontR] = await Promise.all([
-      admin.rpc("saude_noites", { p_workspace_id: ws, p_dias: 30, p_tz: TZ }),
+    const dias = Math.min(120, Math.max(7, Math.round(nnum(corpo.dias) ?? 30)));
+    const [series, noitesR, radarR, samR, prontR] = await Promise.all([
+      seriesSaude(admin, ws, dias),
+      admin.rpc("saude_noites", { p_workspace_id: ws, p_dias: 1, p_tz: TZ }),
       admin.rpc("saude_radar", { p_workspace_id: ws, p_tz: TZ }),
       admin.from("saude_samsung").select("tipo, inicio, dados").eq("workspace_id", ws)
         .in("tipo", ["passos", "energia", "corpo", "apneia", "ritmo_irregular"])
         .gte("inicio", new Date(Date.now() - 400 * 86_400_000).toISOString()).order("inicio", { ascending: true }).limit(1000),
       prontidao(admin, ws),
     ]);
-    type L = Record<string, unknown>;
     const r = ((radarR.data ?? []) as L[])[0] ?? null;
     const sam = (samR.data ?? []) as { tipo: string; inicio: string; dados: L }[];
     const de = (tipo: string) => sam.filter((x) => x.tipo === tipo);
     const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
-    const corte30 = Date.now() - 31 * 86_400_000;
+    void noitesR;
+    // radar por noite (sinais fora do normal) para o cartão-resumo da aba Saúde
+    const radarNoites = ((radarR.data ?? []) as L[]).slice(0, dias).map((x) => ({
+      noite: x.noite, nivel: x.nivel, fc_fora: x.fc_fora, vfc_fora: x.vfc_fora, temp_fora: x.temp_fora, spo2_fora: x.spo2_fora,
+    }));
     return json({
       ok: true,
-      noites: ((noitesR.data ?? []) as L[]).map((x) => ({
-        noite: x.noite, fc: n(x.fc_repouso), vfc: n(x.vfc_noturna), spo2: n(x.spo2_media), spo2_min: n(x.spo2_min),
-        pele: n(x.temp_pele), fonte_temp: x.fonte_temp ?? null,
-        sono_h: x.sono_inicio && x.sono_fim ? Math.round(((new Date(String(x.sono_fim)).getTime() - new Date(String(x.sono_inicio)).getTime()) / 3_600_000) * 10) / 10 : null,
-        fonte_sono: x.fonte_sono ?? null,
-      })),
+      dias,
+      noites: series.noites,
+      radar: r,
+      radar_noites: radarNoites,
       normais: r ? { fc: n(r.fc_normal), vfc: n(r.vfc_normal), pele: n(r.temp_normal), spo2: n(r.spo2_normal), base: n(r.base), nivel: r.nivel } : null,
-      passos: de("passos").filter((x) => new Date(x.inicio).getTime() >= corte30).map((x) => ({ dia: x.dados.dia ?? String(x.inicio).slice(0, 10), total: n(x.dados.total) })),
-      energia: de("energia").filter((x) => new Date(x.inicio).getTime() >= corte30).map((x) => ({ dia: String(x.inicio).slice(0, 10), score: n(x.dados.score) })),
+      passos: series.passos.map((x) => ({ dia: x.dia, total: x.valor })),
+      energia: series.energia.map((x) => ({ dia: x.dia, score: x.valor })),
       corpo: de("corpo").map((x) => ({ ts: x.inicio, peso: n(x.dados.peso), gordura_pct: n(x.dados.gordura_pct), musculo_kg: n(x.dados.musculo_esq_kg) })),
       apneia: de("apneia").at(-1) ? { ts: de("apneia").at(-1)!.inicio, sinal: de("apneia").at(-1)!.dados.sinal ?? null } : null,
       ritmo_irregular: de("ritmo_irregular").filter((x) => x.dados.status === "DETECTED").length,

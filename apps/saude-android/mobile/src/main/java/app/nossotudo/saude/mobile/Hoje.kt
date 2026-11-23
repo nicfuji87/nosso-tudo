@@ -1,8 +1,9 @@
 package app.nossotudo.saude.mobile
 
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,114 +12,217 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.Bedtime
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.EditNote
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.FitnessCenter
+import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.TipsAndUpdates
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.Locale
-import kotlin.math.abs
+import java.time.LocalDate
+import java.time.LocalTime
 import kotlin.math.roundToInt
 
-private val Fundo = Color(0xFF0B0E0C)
-private val Cartao = Color(0xFF151A17)
-private val Borda = Color(0xFF232A26)
-private val Texto = Color(0xFFF7F6F2)
-private val TextoSec = Color(0xFFB4B9B4)
-private val Verde = Color(0xFF8FDE95)
-private val Ambar = Color(0xFFF2C14B)
-private val Coracao = Color(0xFFFF6B7D)
-private val Vfc = Color(0xFFB08CFF)
-private val Sono = Color(0xFF8EA2FF)
-private val Laranja = Color(0xFFF08A3C)
-
 private const val PAINEL = "https://nossotudo.com.br/app/saude"
-private val MODALIDADES = listOf("Musculação", "Natação", "Judô", "Jiu-jitsu", "Outro")
 
-private val fmtHora = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
-private fun hora(iso: String?) = iso?.let { runCatching { fmtHora.format(Instant.parse(it.replace("+00:00", "Z"))) }.getOrNull() } ?: "—"
-private fun JSONObject.d(k: String): Double? = if (has(k) && !isNull(k)) optDouble(k).takeIf { !it.isNaN() } else null
-private fun dur(min: Double) = "${(min / 60).toInt()} h ${String.format(Locale.US, "%02d", (min % 60).roundToInt())}"
+/** Mapeia o "alvo" de um ponto de atenção para a página que mostra a evidência. */
+fun abrirAlvo(nav: Nav, alvo: String?) = when (alvo) {
+    "sono" -> nav.abrir(Rota.SonoDetalhe(null))
+    "fc" -> nav.abrir(Rota.MetricaDetalhe(Metrica.FC))
+    "vfc" -> nav.abrir(Rota.MetricaDetalhe(Metrica.VFC))
+    "spo2" -> nav.abrir(Rota.MetricaDetalhe(Metrica.SPO2))
+    "pele" -> nav.abrir(Rota.MetricaDetalhe(Metrica.PELE))
+    "sync" -> nav.abrir(Rota.Sincronizacao)
+    else -> Unit
+}
 
-private fun abrirPainel(ctx: Context) = ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PAINEL)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-
-@Composable
-private fun Bloco(modifier: Modifier = Modifier, conteudo: @Composable () -> Unit) {
-    Column(
-        modifier.clip(RoundedCornerShape(22.dp)).background(Cartao).border(1.dp, Borda, RoundedCornerShape(22.dp)).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) { conteudo() }
+/** Estado geral da sincronização: o pior entre celular e relógio. */
+fun resumoSync(d: JSONObject?): Pair<String?, Estado> {
+    val aparelhos = d?.optJSONArray("sincronizacao").objetos()
+    if (aparelhos.isEmpty()) return null to Estado.NEUTRO
+    val agora = System.currentTimeMillis()
+    var pior = Estado.NEUTRO
+    aparelhos.forEach { a ->
+        val t = instante(if (a.optString("tipo") == "celular") a.txt("ultima_sync") else a.txt("ultimo_envio"))?.toEpochMilli() ?: return@forEach
+        val lim = if (a.optString("tipo") == "celular") 6 else 3
+        if (agora - t > lim * 3_600_000L) pior = Estado.ATENCAO
+        // no relógio o campo traz avisos de rotina ("religada 1x"); só o erro do celular pesa
+        if (a.optString("tipo") == "celular" && a.txt("erro") != null && pior == Estado.NEUTRO) pior = Estado.ATENCAO
+    }
+    return null to pior
 }
 
 @Composable
-private fun Metrica(modifier: Modifier, rotulo: String, cor: Color, valor: String, unidade: String = "", rodape: String? = null, rodapeCor: Color = TextoSec) {
-    Bloco(modifier) {
+fun TelaHoje(nav: Nav, rolagem: ScrollState) {
+    val ctx = LocalContext.current
+    val consulta = rememberConsulta("hoje")
+    val c = consulta.valor
+    val d = c.dados
+    var aviso by remember { mutableStateOf<String?>(null) }
+    val hora = LocalTime.now().hour
+    val saudacao = when (hora) { in 5..11 -> "Bom dia"; in 12..17 -> "Boa tarde"; else -> "Boa noite" }
+    val (_, estadoSync) = resumoSync(d)
+
+    TelaAba(
+        titulo = saudacao, subtitulo = diaLongo(), rolagem = rolagem, carregando = c.carregando && d != null,
+        aoAtualizar = { SamsungSync.agora(ctx); consulta.recarregar() },
+        topo = {
+            StatusSync(
+                if (c.em > 0) "Atualizado às ${horaDe(java.time.Instant.ofEpochMilli(c.em).toString())}" else "Sem dados",
+                estadoSync, c.carregando && d == null,
+            ) { nav.abrir(Rota.Sincronizacao) }
+        },
+    ) {
+        AvisoCache(c)
+        aviso?.let { Etiqueta(it, T.Primaria, Icons.Rounded.CheckCircle) }
+        if (d == null) {
+            if (c.falhou) EstadoVazio(Icons.Rounded.Link, "Não foi possível carregar", "Sem conexão com o Nosso Tudo. Puxe para tentar de novo ou confira a conexão em Ajustes.", "Tentar de novo") { consulta.recarregar() }
+            else CarregandoEsqueleto()
+            return@TelaAba
+        }
+        CartaoProntidaoPrincipal(d, nav)
+        CartaoAtencao(d, nav)
+        TituloSecao("Seus indicadores")
+        GradeIndicadores(d, nav)
+        TreinosAConfirmar(d) { aviso = it; consulta.recarregar() }
+        CartaoProximoTreino(d, nav)
+        CartaoNoite(d)
+        CartaoSemanaResumo(d, nav)
+        DiarioRapido { aviso = it }
+        Row(
+            Modifier.fillMaxWidth().clip(T.FormaPeq).clickable(role = Role.Button) {
+                ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PAINEL)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.heightIn(min = 48.dp).padding(horizontal = T.e2),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Relatório para o médico e histórico completo no site", style = T.Descricao, color = T.TextoSec, modifier = Modifier.weight(1f))
+            Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, tint = T.TextoSec, modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+@Composable
+fun CarregandoEsqueleto() {
+    Column(verticalArrangement = Arrangement.spacedBy(T.e3)) {
+        listOf(220.dp, 110.dp, 140.dp).forEach { h -> Box(Modifier.fillMaxWidth().height(h).clip(T.Forma).background(T.Superficie)) }
+    }
+}
+
+// ---------------------------------------------------------------- prontidão
+
+private fun tituloNivel(nivel: String?) = when (nivel) {
+    "alto" -> "Recuperação dentro do habitual"
+    "moderado" -> "Recuperação um pouco abaixo do habitual"
+    "baixo" -> "Recuperação abaixo do habitual"
+    else -> "Dados insuficientes hoje"
+}
+private fun textoNivel(nivel: String?) = when (nivel) {
+    "alto" -> "Seus indicadores da noite estão no seu padrão pessoal."
+    "moderado" -> "Alguns indicadores ficaram abaixo do seu padrão. Ajuste a intensidade ao que sentir."
+    "baixo" -> "Seus indicadores sugerem priorizar descanso e atividades leves hoje."
+    else -> "Sem repouso e VFC desta noite não dá para calcular a prontidão. Durma com o relógio no pulso."
+}
+fun corNivel(nivel: String?) = when (nivel) { "alto" -> T.Primaria; "moderado" -> T.Atencao; "baixo" -> T.Alerta; else -> T.TextoSec }
+
+@Composable
+private fun CartaoProntidaoPrincipal(d: JSONObject, nav: Nav) {
+    val p = d.optJSONObject("prontidao") ?: JSONObject()
+    val nivel = p.txt("nivel")
+    val score = p.num("score")?.roundToInt()
+    val cor = corNivel(nivel)
+    var aberto by rememberSaveable { mutableStateOf(false) }
+    val normais = d.optJSONObject("normais")
+    val ent = p.optJSONObject("entradas") ?: JSONObject()
+    val sono = p.optJSONObject("sono") ?: JSONObject()
+    val faltando = p.optJSONArray("faltando").textos()
+
+    Cartao(onClick = { aberto = !aberto }, padding = T.e5, descricao = "Prontidão ${score ?: "sem nota"} de 100. ${tituloNivel(nivel)}. Toque para ver como foi calculada.") {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(8.dp).clip(CircleShape).background(cor))
-            Spacer(Modifier.width(6.dp))
-            Text(rotulo, color = TextoSec, fontSize = 12.sp)
+            Text("Minha prontidão", style = T.Rotulo, color = T.TextoSec, modifier = Modifier.weight(1f))
+            Icon(if (aberto) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = T.TextoSec)
         }
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(valor, color = Texto, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
-            if (unidade.isNotEmpty()) Text(" $unidade", color = TextoSec, fontSize = 13.sp, modifier = Modifier.padding(bottom = 4.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AnelProntidao(score, cor)
+            Spacer(Modifier.width(T.e4))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(tituloNivel(nivel), style = T.TituloCartao, color = cor)
+                Text(textoNivel(nivel), style = T.Descricao, color = T.TextoSec)
+                ChipsConfianca(p, faltando)
+            }
         }
-        rodape?.let { Text(it, color = rodapeCor, fontSize = 12.sp) }
-    }
-}
-
-/** Barra de estágios do sono (proporção de cada estágio). */
-@Composable
-private fun BarraSono(est: JSONObject) {
-    val partes = listOf("profundo" to Color(0xFF3D4FB8), "rem" to Vfc, "leve" to Sono, "acordado" to Ambar)
-    val total = partes.sumOf { est.optDouble(it.first, 0.0) }.takeIf { it > 0 } ?: return
-    Row(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp))) {
-        partes.forEach { (k, c) ->
-            val f = (est.optDouble(k, 0.0) / total).toFloat()
-            if (f > 0f) Box(Modifier.weight(f).fillMaxSize().background(c))
+        Divisor()
+        // os três sinais que mais pesam
+        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+            val sonoH = sono.num("horas")
+            val sonoEstado = sono.txt("estado")
+            val (sonoValor, sonoNota, sonoCor) = when (sonoEstado) {
+                "finalizado" -> Triple(sonoH?.let { horasMin(it * 60) } ?: "—", sonoH?.let { if (it < (sono.num("meta") ?: 7.0)) "abaixo da meta" else "na meta" } ?: "", if ((sonoH ?: 0.0) < (sono.num("meta") ?: 7.0)) T.Atencao else T.TextoSec)
+                "contraditorio" -> Triple(sonoH?.let { horasMin(it * 60) } ?: "—", "registro contraditório", T.Atencao)
+                "parcial" -> Triple(sonoH?.let { horasMin(it * 60) } ?: "—", "dados parciais", T.Atencao)
+                "aguardando" -> Triple("…", "aguardando Samsung Health", T.TextoSec)
+                else -> Triple("—", "sem registro", T.TextoSec)
+            }
+            MiniSinal("Sono", sonoValor, sonoNota, sonoCor, Modifier.weight(1f)) { nav.abrir(Rota.SonoDetalhe(null)) }
+            Box(Modifier.width(1.dp).fillMaxHeight().background(T.Borda))
+            val fc = ent.num("fc"); val fcn = ent.num("fc_normal") ?: normais?.num("fc")
+            val vfc = variacao(fc, fcn, Metrica.FC)
+            MiniSinal("FC repouso", fc?.let { "${it.roundToInt()} bpm" } ?: "—", vfc?.texto?.replace(" vs. seu normal", " vs. normal") ?: "sem leitura", vfc?.let { corDoEstado(it.estado) } ?: T.TextoSec, Modifier.weight(1f)) { nav.abrir(Rota.MetricaDetalhe(Metrica.FC)) }
+            Box(Modifier.width(1.dp).fillMaxHeight().background(T.Borda))
+            val hv = ent.num("vfc"); val hvn = ent.num("vfc_normal") ?: normais?.num("vfc")
+            val vh = variacao(hv, hvn, Metrica.VFC)
+            MiniSinal("VFC", hv?.let { "${it.roundToInt()} ms" } ?: "—", vh?.texto?.replace(" vs. seu normal", " vs. normal") ?: "sem leitura", vh?.let { corDoEstado(it.estado) } ?: T.TextoSec, Modifier.weight(1f)) { nav.abrir(Rota.MetricaDetalhe(Metrica.VFC)) }
         }
-    }
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        partes.forEach { (k, c) ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(7.dp).clip(CircleShape).background(c))
-                Text(" ${mapOf("profundo" to "prof.", "rem" to "REM", "leve" to "leve", "acordado" to "acord.")[k]} ${est.optInt(k)}m", color = TextoSec, fontSize = 11.sp)
+        AnimatedVisibility(aberto) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = T.e2)) {
+                Text("Como foi calculada", style = T.Rotulo, color = T.TextoSec)
+                p.optJSONArray("fatores").objetos().forEach { f ->
+                    val ef = f.optInt("efeito")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(f.optString("texto"), style = T.Descricao, color = T.Texto, modifier = Modifier.weight(1f))
+                        Text(if (ef < 0) "−${-ef}" else "0", style = T.Descricao.copy(fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum"), color = if (ef <= -10) T.Atencao else T.TextoSec)
+                    }
+                }
+                if (faltando.isNotEmpty()) TextoSec("Fora do cálculo: ${faltando.joinToString { mapOf("sono" to "sono", "vfc" to "VFC", "repouso" to "FC de repouso")[it] ?: it }}" + (sono.txt("motivo")?.let { " — $it" } ?: ""))
+                TextoSec(
+                    "Índice próprio (${p.optString("algoritmo")}), não é medida clínica. Parte de 100 e desconta desvios do seu padrão: " +
+                        "FC de repouso, VFC e sono dormido (até −25 cada) e carga semanal (só com 3 semanas de histórico).",
+                    estilo = T.Legenda,
+                )
             }
         }
     }
@@ -126,111 +230,219 @@ private fun BarraSono(est: JSONObject) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun Chips(escolha: String?, aoEscolher: (String) -> Unit) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        MODALIDADES.forEach { m ->
-            val sel = escolha == m
-            Text(
-                m, color = if (sel) Color.White else Texto, fontSize = 13.sp,
-                modifier = Modifier.clip(RoundedCornerShape(50)).background(if (sel) Laranja else Borda).clickable { aoEscolher(m) }
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
-            )
+private fun ChipsConfianca(p: JSONObject, faltando: List<String>) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        when (p.txt("confianca")) {
+            "alta" -> Etiqueta("Confiança alta", T.Primaria)
+            "media" -> Etiqueta("Confiança média", T.Atencao)
+            "baixa" -> Etiqueta("Confiança baixa", T.Atencao)
+        }
+        if (p.optBoolean("calibrando")) Etiqueta("Referência provisória", T.TextoSec)
+        if ("sono" in faltando && p.optJSONObject("sono")?.txt("estado") != "ausente") Etiqueta("Sono fora do cálculo", T.Atencao)
+    }
+}
+
+@Composable
+private fun MiniSinal(rotulo: String, valor: String, nota: String, corNota: androidx.compose.ui.graphics.Color, modifier: Modifier, aoTocar: () -> Unit) {
+    Column(
+        modifier.clip(RoundedCornerShape(10.dp)).clickable(role = Role.Button, onClick = aoTocar).padding(horizontal = 6.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(rotulo, style = T.Legenda, color = T.TextoSec)
+        Text(valor, style = T.ValorPeq, color = T.Texto, maxLines = 1)
+        Text(nota, style = T.Legenda, color = corNota, maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+    }
+}
+
+// ---------------------------------------------------------------- atenção
+
+@Composable
+private fun CartaoAtencao(d: JSONObject, nav: Nav) {
+    val itens = d.optJSONArray("atencao").objetos()
+    Cartao {
+        CabecalhoCartao("O que merece sua atenção", Icons.Rounded.TipsAndUpdates, T.Atencao)
+        if (itens.isEmpty()) {
+            TextoSec("Nada fora do seu padrão hoje.")
+        } else itens.forEach { a ->
+            val acao = when (a.optString("alvo")) { "sono" -> "Ver sono"; "sync" -> "Ver sincronização"; "spo2" -> "Ver oxigenação"; else -> "Ver tendência" }
+            CartaoInsight(a.optString("titulo"), a.optString("evidencia"), if (a.optString("nivel") == "info") Estado.NEUTRO else Estado.ATENCAO, acao) { abrirAlvo(nav, a.txt("alvo")) }
         }
     }
 }
 
-private fun ms(iso: String) = Instant.parse(iso.replace("+00:00", "Z")).toEpochMilli()
+// ---------------------------------------------------------------- indicadores
+
+/** Últimos 7 valores de uma série por noite, alinhados por data (lacunas = null). */
+fun ultimos7(noites: List<JSONObject>, campo: String, dias: Int = 7): List<Double?> {
+    val porNoite = noites.associateBy { it.optString("noite") }
+    return (dias - 1 downTo 0).map { porNoite[LocalDate.now().minusDays(it.toLong()).toString()]?.num(campo) }
+}
+fun ultimos7Dia(lista: List<JSONObject>, dias: Int = 7): List<Double?> {
+    val m = lista.associateBy { it.optString("dia") }
+    return (dias - 1 downTo 0).map { m[LocalDate.now().minusDays(it.toLong()).toString()]?.num("valor") }
+}
 
 @Composable
-private fun CartaoTreino(t: JSONObject, aoSalvar: () -> Unit) {
+private fun GradeIndicadores(d: JSONObject, nav: Nav) {
+    val serie = d.optJSONObject("serie") ?: JSONObject()
+    val noites = serie.optJSONArray("noites").objetos()
+    val normais = d.optJSONObject("normais")
+    val hoje = LocalDate.now().toString()
+
+    @Composable
+    fun noite(m: Metrica, campo: String, mod: Modifier, normal: Double?) {
+        val alvo = noites.lastOrNull { it.num(campo) != null }
+        val v = alvo?.num(campo)
+        var q: Pair<String, Estado>? = if (alvo != null && alvo.optString("noite") != hoje) "de ${noiteCurta(alvo.optString("noite"))}" to Estado.NEUTRO else null
+        if (m == Metrica.SPO2 && alvo?.optString("spo2_qualidade") == "suspeita") q = "mínima ${alvo.num("spo2_min")?.roundToInt()}% suspeita" to Estado.ATENCAO
+        if (m == Metrica.SONO && alvo?.optString("sono_qualidade") == "suspeito") q = "registro contraditório" to Estado.ATENCAO
+        if (m == Metrica.SONO && alvo?.optString("sono_estado") == "parcial") q = "dados parciais" to Estado.ATENCAO
+        val varia = if (q == null) variacao(v, if (m == Metrica.SONO) 7.0 else normal, m) else null
+        CartaoMetrica(m, v?.let { valorFmt(it, m) } ?: "—", varia, ultimos7(noites, campo), mod, qualidade = q,
+            rodape = if (v == null) "sem leitura" else null, normal = if (m == Metrica.SONO) 7.0 else normal,
+            onClick = { if (m == Metrica.SONO) nav.abrir(Rota.SonoDetalhe(null)) else nav.abrir(Rota.MetricaDetalhe(m)) })
+    }
+    @Composable
+    fun diaria(m: Metrica, chave: String, mod: Modifier) {
+        val lista = serie.optJSONArray(chave).objetos()
+        val ult = lista.lastOrNull()
+        val v = ult?.num("valor")
+        val media = lista.takeLast(8).dropLast(1).mapNotNull { it.num("valor") }.takeIf { it.size >= 3 }?.average()
+        val q = ult?.takeIf { it.optString("dia") != hoje }?.let { "de ${noiteCurta(it.optString("dia"))}" to Estado.NEUTRO }
+        val rod = media?.let { "média 7 d ${valorFmt(it, m)}" }
+        CartaoMetrica(m, v?.let { valorFmt(it, m) } ?: "—", null, ultimos7Dia(lista), mod, rodape = rod ?: if (v == null) "sem leitura" else null,
+            qualidade = q, onClick = { nav.abrir(Rota.MetricaDetalhe(m)) })
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(T.e3)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(T.e3)) {
+            noite(Metrica.FC, "fc", Modifier.weight(1f), normais?.num("fc"))
+            noite(Metrica.VFC, "vfc", Modifier.weight(1f), normais?.num("vfc"))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(T.e3)) {
+            noite(Metrica.SONO, "sono_h", Modifier.weight(1f), null)
+            noite(Metrica.SPO2, "spo2", Modifier.weight(1f), normais?.num("spo2"))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(T.e3)) {
+            diaria(Metrica.ENERGIA, "energia", Modifier.weight(1f))
+            diaria(Metrica.PASSOS, "passos", Modifier.weight(1f))
+        }
+    }
+}
+
+// ---------------------------------------------------------------- próximo treino, noite e semana
+
+@Composable
+private fun CartaoProximoTreino(d: JSONObject, nav: Nav) {
+    val p = d.optJSONObject("prontidao")
+    val nivel = p?.txt("nivel")
+    val texto = when (nivel) {
+        "baixo" -> "Sua recuperação estimada está abaixo do habitual. Técnica ou atividade leve combinam melhor com hoje."
+        "moderado" -> "Alguns indicadores abaixo do seu padrão. Se treinar, ajuste a intensidade pela sensação."
+        "alto" -> "Seus indicadores estão no seu padrão pessoal."
+        else -> "Sem dados suficientes desta noite para uma sugestão."
+    }
+    Cartao {
+        CabecalhoCartao("Planejando seu próximo treino?", Icons.Rounded.FitnessCenter, T.TextoSec)
+        Text(texto, style = T.Corpo, color = T.Texto)
+        TextoSec("Tontura, visão escurecendo, dor no peito ou falta de ar valem mais que qualquer pontuação: pare e procure avaliação. O app não avalia segurança cardiovascular.", estilo = T.Legenda)
+        LinkAcao("Ver análise de treino") { nav.aba(1) }
+    }
+}
+
+@Composable
+private fun CartaoNoite(d: JSONObject) {
+    val s = d.optJSONObject("prontidao")?.optJSONObject("sono") ?: return
+    val deitar = s.txt("deitar") ?: return
+    val reg = s.num("regularidade_min")?.roundToInt()
+    Cartao {
+        CabecalhoCartao("Hoje à noite", Icons.Rounded.Bedtime, T.Sono)
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(deitar, style = T.Valor, color = T.Texto)
+            Spacer(Modifier.width(T.e2))
+            TextoSec("para acordar ${s.optString("acordar")} com 7h30 na cama", modifier = Modifier.padding(bottom = 3.dp))
+        }
+        if (reg != null) TextoSec(if (reg > 45) "Seus horários de dormir variam ±$reg min — regularidade também conta." else "Horários regulares (±$reg min).", estilo = T.Legenda)
+    }
+}
+
+@Composable
+private fun CartaoSemanaResumo(d: JSONObject, nav: Nav) {
+    val s = d.optJSONObject("semana") ?: return
+    val u = s.optJSONObject("ultimos7") ?: JSONObject()
+    val zonas = u.optJSONArray("zonas").ints()
+    val total = zonas.sum().takeIf { it > 0 }
+    val porDia = s.optJSONArray("por_dia").objetos()
+    Cartao(onClick = { nav.aba(1) }) {
+        CabecalhoCartao("Últimos 7 dias", Icons.Rounded.FitnessCenter, T.TextoSec)
+        Row(horizontalArrangement = Arrangement.spacedBy(T.e4)) {
+            Estatistica(horasMin(u.optDouble("minutos", 0.0)), "de atividade", Modifier.weight(1f))
+            Estatistica("${u.optInt("treinos")}", "treinos", Modifier.weight(1f))
+            Estatistica("${u.optInt("carga")}", "carga (FC)", Modifier.weight(1f))
+        }
+        if (total != null) {
+            BarraZonas(zonas, 8.dp)
+            val leve = (zonas[0] + zonas[1]) * 100 / total
+            val mod = zonas[2] * 100 / total
+            TextoSec("Leve $leve% · moderado $mod% · vigoroso ${100 - leve - mod}%", estilo = T.Legenda)
+        }
+        if (porDia.isNotEmpty()) MiniGrafico(porDia.map { it.num("carga")?.takeIf { v -> v > 0 } }, T.Primaria, barras = true, altura = 36.dp)
+        LinkAcao("Ver semana completa") { nav.aba(1) }
+    }
+}
+
+// ---------------------------------------------------------------- treinos a confirmar (detectados pelo batimento)
+
+@Composable
+private fun TreinosAConfirmar(d: JSONObject, aoSalvar: (String) -> Unit) {
+    val lista = d.optJSONArray("treinos").objetos()
+    if (lista.isEmpty()) return
+    TituloSecao("Treinos a confirmar")
+    lista.forEach { t -> CartaoConfirmar(t, aoSalvar) }
+}
+
+@Composable
+private fun CartaoConfirmar(t: JSONObject, aoSalvar: (String) -> Unit) {
     val ctx = LocalContext.current
     val escopo = rememberCoroutineScope()
-    val partes = t.optJSONArray("partes")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } }.orEmpty()
+    val partes = t.optJSONArray("partes").objetos()
     val podeSeparar = partes.size >= 2
     var separar by remember { mutableStateOf(podeSeparar) }
-    var escolha by remember { mutableStateOf(t.optString("palpite").ifEmpty { null }) }
-    // uma escolha por parte (começa com o que o Samsung Health indicou, quando dá para mapear)
-    val escolhas = remember { mutableStateOf(partes.map { it.optString("modalidade").ifEmpty { null } }) }
+    var escolha by remember { mutableStateOf(t.txt("palpite")) }
+    var escolhas by remember { mutableStateOf(partes.map { it.txt("modalidade") }) }
     var ocupado by remember { mutableStateOf(false) }
-
-    fun corpo(inicio: Long, fim: Long, modalidade: String?, descartar: Boolean) =
-        JSONObject().put("acao", "treino").put("segredo", Conexao.segredo(ctx)).put("inicio", inicio).put("fim", fim)
-            .put("descartar", descartar).apply { modalidade?.let { put("modalidade", it) } }
-
+    fun ms(iso: String) = instante(iso)!!.toEpochMilli()
     fun enviar(descartar: Boolean) = escopo.launch {
         ocupado = true
-        val pedidos = if (separar && !descartar)
-            partes.mapIndexed { i, p -> corpo(ms(p.getString("inicio")), ms(p.getString("fim")), escolhas.value[i], false) }
-        else listOf(corpo(ms(t.getString("inicio")), ms(t.getString("fim")), escolha, descartar))
-        val ok = runCatching { withContext(Dispatchers.IO) { pedidos.all { Conexao.post(it).first in 200..299 } } }.getOrDefault(false)
+        val pedidos = if (separar && !descartar) partes.mapIndexed { i, p -> Triple(ms(p.getString("inicio")), ms(p.getString("fim")), escolhas[i]) }
+        else listOf(Triple(ms(t.getString("inicio")), ms(t.getString("fim")), escolha))
+        val ok = pedidos.all { (a, b, m) -> chamar(ctx, "treino") { put("inicio", a).put("fim", b).put("descartar", descartar); m?.let { put("modalidade", it) } } != null }
         ocupado = false
-        if (ok) aoSalvar()
+        if (ok) aoSalvar(if (descartar) "Descartado" else "Treino salvo")
     }
-    Bloco {
-        Text("Possível treino · ${hora(t.optString("inicio"))}–${hora(t.optString("fim"))}", color = Texto, fontWeight = FontWeight.SemiBold)
-        Text("${t.optInt("minutos")} min · média ${t.optInt("fc_media")} · pico ${t.optInt("fc_max")} bpm", color = TextoSec, fontSize = 13.sp)
-        if (podeSeparar) {
-            Text(
-                if (separar) "✦ o Samsung Health registrou ${partes.size} atividades — escolha cada uma" else "✦ separar como no Samsung Health (${partes.size} atividades)",
-                color = Vfc, fontSize = 12.sp, modifier = Modifier.clickable { separar = !separar },
-            )
-        } else if (t.optString("palpite").isNotEmpty()) {
-            Text("✦ o Samsung Health registrou ${t.optString("palpite").lowercase()} nesse horário", color = Vfc, fontSize = 12.sp)
-        }
-        if (separar) {
-            partes.forEachIndexed { i, p ->
-                Text("${hora(p.optString("inicio"))}–${hora(p.optString("fim"))}", color = Texto, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
-                Chips(escolhas.value[i]) { m -> escolhas.value = escolhas.value.toMutableList().also { it[i] = m } }
+    Cartao {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Atividade detectada · ${noiteCurta(diaLocalDe(t.txt("inicio"))?.toString())}, ${horaDe(t.txt("inicio"))}–${horaDe(t.txt("fim"))}", style = T.Corpo.copy(fontWeight = FontWeight.SemiBold), color = T.Texto)
+                TextoSec("${t.optInt("minutos")} min · FC média ${t.optInt("fc_media")} · pico ${t.optInt("fc_max")} bpm", estilo = T.Legenda)
             }
+        }
+        if (podeSeparar) LinkAcao(if (separar) "Registrar como um treino só" else "Separar como no Samsung Health (${partes.size})") { separar = !separar }
+        if (separar) partes.forEachIndexed { i, p ->
+            TextoSec("${horaDe(p.txt("inicio"))}–${horaDe(p.txt("fim"))}" + (p.txt("modalidade")?.let { " · Samsung: $it" } ?: ""), estilo = T.Legenda)
+            Chips(Modalidade.TODAS, escolhas[i], { Modalidade.cor(it) }) { m -> escolhas = escolhas.toMutableList().also { l -> l[i] = m } }
         } else {
-            Chips(escolha) { escolha = it }
+            if (escolha == null) TextoSec("Escolha a modalidade", cor = T.Atencao, estilo = T.Legenda)
+            Chips(Modalidade.TODAS, escolha, { Modalidade.cor(it) }) { escolha = it }
         }
-        val pronto = if (separar) escolhas.value.all { it != null } else escolha != null
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { enviar(false) }, enabled = pronto && !ocupado, colors = ButtonDefaults.buttonColors(containerColor = Laranja)) {
-                Text(if (separar) "Confirmar as ${partes.size}" else "Confirmar")
-            }
-            TextButton(onClick = { enviar(true) }, enabled = !ocupado) { Text("Não foi treino", color = TextoSec) }
+        val pronto = if (separar) escolhas.all { it != null } else escolha != null
+        Row(horizontalArrangement = Arrangement.spacedBy(T.e2)) {
+            BotaoPrimario(if (separar) "Confirmar ${partes.size}" else "Confirmar", Modifier.weight(1f), habilitado = pronto && !ocupado) { enviar(false) }
+            BotaoSecundario("Não foi treino", Modifier.weight(1f), habilitado = !ocupado) { enviar(true) }
         }
     }
 }
 
-/** Nota do dia: repouso, VFC, sono, carga e radar — e a que horas deitar hoje. Não é diagnóstico. */
-@Composable
-private fun CartaoProntidao(p: JSONObject) {
-    val score = p.d("score")?.roundToInt()
-    val (cor, titulo) = when (p.optString("nivel")) {
-        "alto" -> Verde to "Pode puxar hoje"
-        "moderado" -> Ambar to "Treino moderado"
-        "baixo" -> Coracao to "Dia de pegar leve"
-        else -> TextoSec to "Sem noite medida"
-    }
-    val sono = p.optJSONObject("sono")
-    Bloco {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(10.dp).clip(CircleShape).background(cor)); Spacer(Modifier.width(8.dp))
-            Text("Prontidão" + if (p.optBoolean("calibrando")) " · aprendendo o seu normal" else "", color = TextoSec, fontSize = 12.sp)
-        }
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(score?.toString() ?: "—", color = cor, fontSize = 40.sp, fontWeight = FontWeight.Bold)
-            Text("  $titulo", color = Texto, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 7.dp))
-        }
-        p.optJSONArray("fatores")?.let { f ->
-            for (i in 0 until f.length()) {
-                val x = f.getJSONObject(i)
-                val ef = x.optInt("efeito")
-                Text("${if (ef < 0) "−${-ef}" else "ok"} · ${x.optString("texto")}", color = if (ef <= -10) Ambar else TextoSec, fontSize = 12.sp)
-            }
-        }
-        sono?.optString("deitar")?.takeIf { it.isNotEmpty() && it != "null" }?.let { deitar ->
-            Text(
-                "🌙 Para acordar ${sono.optString("acordar")} com 7h30 de sono, deite às $deitar" +
-                    (sono.d("regularidade_min")?.let { r -> if (r > 45) " · seus horários variam ±${r.roundToInt()} min" else "" } ?: ""),
-                color = Sono, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp),
-            )
-        }
-    }
-}
+// ---------------------------------------------------------------- diário rápido
 
 private val DIARIO = listOf(
     "malestar" to "Mal-estar", "sintoma" to "Sintoma", "medicamento" to "Remédio", "alcool" to "Álcool",
@@ -239,180 +451,40 @@ private val DIARIO = listOf(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun TelaHoje() {
+private fun DiarioRapido(aoSalvar: (String) -> Unit) {
     val ctx = LocalContext.current
     val escopo = rememberCoroutineScope()
-    var dados by remember { mutableStateOf<JSONObject?>(null) }
-    var erro by remember { mutableStateOf<String?>(null) }
-    var carregando by remember { mutableStateOf(false) }
-    var recarregar by remember { mutableIntStateOf(0) }
-    var diario by remember { mutableStateOf<Pair<String, String>?>(null) }
-    var aviso by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(recarregar) {
-        carregando = true; erro = null
-        runCatching {
-            withContext(Dispatchers.IO) { Conexao.post(JSONObject().put("acao", "hoje").put("segredo", Conexao.segredo(ctx))) }
-        }.onSuccess { (http, r) -> if (http in 200..299 && r.optBoolean("ok")) dados = r else erro = r.optString("erro", "HTTP $http") }
-            .onFailure { erro = "sem conexão" }
-        carregando = false
-    }
-
-    Column(
-        Modifier.fillMaxSize().background(Fundo).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            androidx.compose.foundation.Image(painterResource(R.drawable.logo_nt_selo), "Nosso Tudo", Modifier.size(40.dp))
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Hoje", color = Texto, fontSize = 26.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    java.time.LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE, d 'de' MMMM", Locale.forLanguageTag("pt-BR"))),
-                    color = TextoSec, fontSize = 13.sp,
-                )
-            }
-            TextButton(onClick = { recarregar++ }, enabled = !carregando) { Text(if (carregando) "…" else "Atualizar", color = Verde) }
-        }
-
-        erro?.let { Text("Não deu para carregar: $it", color = Ambar, fontSize = 13.sp) }
-        aviso?.let { Text(it, color = Verde, fontSize = 13.sp) }
-        val d = dados ?: run { if (erro == null) Text("Carregando…", color = TextoSec); return@Column }
-
-        // ---- Prontidão (prontidao-v1) + hora de dormir
-        d.optJSONObject("prontidao")?.let { p -> CartaoProntidao(p) }
-
-        // ---- Radar
-        val radar = d.optJSONObject("radar")
-        val nivel = radar?.optString("nivel") ?: "sem"
-        val (corRadar, tituloRadar, textoRadar) = when (nivel) {
-            "estresse" -> Triple(Ambar, "Corpo sob estresse", "Sinais fora do seu normal por mais de uma noite. Um dia mais leve e atenção a sintomas.")
-            "observar" -> Triple(Color(0xFF7FB7D6), "Observar", "Algum sinal saiu do normal esta noite. Uma noite só costuma dizer pouco.")
-            "normal" -> Triple(Verde, "Dentro do seu normal", "Repouso, VFC e pele na sua faixa.")
-            "calibrando" -> Triple(TextoSec, "Conhecendo o seu normal", "O radar compara com você mesmo a partir de 7 noites medidas (${minOf(7, (radar?.optInt("base") ?: 0) + 1)} de 7).")
-            else -> Triple(TextoSec, "Sem noite medida", "Durma com o relógio para o radar avaliar a noite.")
-        }
-        Bloco {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(10.dp).clip(CircleShape).background(corRadar))
-                Spacer(Modifier.width(8.dp))
-                Text("Radar de Saúde", color = TextoSec, fontSize = 12.sp)
-            }
-            Text(tituloRadar, color = corRadar, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-            Text(textoRadar, color = TextoSec, fontSize = 13.sp)
-        }
-
-        // ---- Sono + Energy
-        val sono = d.optJSONObject("sono")
-        val est = sono?.optJSONObject("estagios_min")
-        val dormido = est?.let { it.optDouble("leve", 0.0) + it.optDouble("profundo", 0.0) + it.optDouble("rem", 0.0) }
-        Bloco {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(Sono)); Spacer(Modifier.width(6.dp))
-                Text("Sono", color = TextoSec, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                d.optJSONObject("energia")?.d("score")?.let {
-                    Text("Energy Score ", color = TextoSec, fontSize = 12.sp)
-                    Text("${it.roundToInt()}", color = Verde, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                }
-            }
-            if (sono != null && dormido != null) {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(dur(dormido), color = Texto, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
-                    sono.d("nota")?.let { Text("  nota ${it.roundToInt()}", color = TextoSec, fontSize = 13.sp, modifier = Modifier.padding(bottom = 4.dp)) }
-                }
-                Text("${hora(sono.optString("inicio"))} – ${hora(sono.optString("fim"))}", color = TextoSec, fontSize = 12.sp)
-                BarraSono(est)
-            } else Text("Sem sono do Samsung Health nas últimas noites.", color = TextoSec, fontSize = 13.sp)
-        }
-
-        // ---- Métricas da noite
-        val noite = d.optJSONObject("noite")
-        fun delta(v: Double?, n: Double?, unidade: String, pct: Boolean = false, inverso: Boolean = false): Pair<String?, Color> {
-            if (v == null || n == null || nivel == "calibrando") return null to TextoSec
-            val x = if (pct) (v / n - 1) * 100 else v - n
-            if (abs(x) < (if (pct) 3.0 else 1.0)) return "no seu normal" to TextoSec
-            val ruim = if (inverso) x < 0 else x > 0
-            return "${if (x > 0) "↑" else "↓"} ${abs(x).roundToInt()}${if (pct) "%" else " $unidade"} vs. normal" to (if (ruim) Ambar else Verde)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            val rep = noite?.d("fc_repouso")
-            val (t1, c1) = delta(rep, radar?.d("fc_normal"), "bpm")
-            Metrica(Modifier.weight(1f), "Repouso", Coracao, rep?.roundToInt()?.toString() ?: "—", "bpm", t1 ?: "menor média da noite", c1)
-            val v = noite?.d("vfc_noturna")
-            val (t2, c2) = delta(v, radar?.d("vfc_normal"), "ms", pct = true, inverso = true)
-            Metrica(Modifier.weight(1f), "VFC", Vfc, v?.roundToInt()?.toString() ?: "—", "ms", t2 ?: "RMSSD no sono", c2)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            val sp = d.optJSONObject("spo2")
-            Metrica(Modifier.weight(1f), "SpO₂", Color(0xFF45E3EA), sp?.d("media")?.roundToInt()?.toString() ?: "—", "%", sp?.d("min")?.let { "mínimo ${it.roundToInt()}%" })
-            val pele = noite?.d("temp_pele")
-            Metrica(Modifier.weight(1f), "Pele", Laranja, pele?.let { String.format(Locale("pt", "BR"), "%.1f", it) } ?: "—", "°C", "média no sono")
-        }
-        val passos = d.optJSONObject("passos")
-        val corpo = d.optJSONObject("corpo")?.optJSONObject("dados")
-        if (passos != null || corpo != null) Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Metrica(
-                Modifier.weight(1f), "Passos", Verde, passos?.d("hoje")?.let { String.format(Locale("pt", "BR"), "%,d", it.toLong()) } ?: "—", "",
-                passos?.d("media7")?.let { "média 7 dias ${String.format(Locale("pt", "BR"), "%,d", it.toLong())}" },
-            )
-            Metrica(
-                Modifier.weight(1f), "Corpo", Color(0xFF7FB7D6), corpo?.d("gordura_pct")?.let { String.format(Locale("pt", "BR"), "%.1f", it) } ?: "—", "% gord.",
-                corpo?.let { c -> listOfNotNull(c.d("peso")?.let { String.format(Locale("pt", "BR"), "%.1f kg", it) }, c.d("musculo_esq_kg")?.let { String.format(Locale("pt", "BR"), "músc. %.1f", it) }).joinToString(" · ").ifEmpty { null } }
-                    ?: "meça no relógio (Composição corporal)",
-            )
-        }
-
-        // ---- Treinos a confirmar
-        val treinos = d.optJSONArray("treinos")
-        if (treinos != null && treinos.length() > 0) {
-            Text("Treinos a confirmar", color = Texto, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
-            for (i in 0 until treinos.length()) CartaoTreino(treinos.getJSONObject(i)) { aviso = "Treino salvo ✓"; recarregar++ }
-        }
-
-        // ---- Diário rápido
-        Text("Diário rápido", color = Texto, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    var aberto by remember { mutableStateOf<Pair<String, String>?>(null) }
+    Cartao {
+        CabecalhoCartao("Registrar no diário", Icons.Rounded.EditNote, T.TextoSec)
+        TextoSec("Ajuda a entender desvios depois (ex.: álcool antes de uma noite com VFC baixa).", estilo = T.Legenda)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(T.e2), verticalArrangement = Arrangement.spacedBy(T.e2)) {
             DIARIO.forEach { (tipo, rotulo) ->
-                Text(
-                    rotulo, color = if (tipo == "malestar") Coracao else Texto, fontSize = 14.sp,
-                    modifier = Modifier.clip(RoundedCornerShape(50)).background(Cartao).border(1.dp, Borda, RoundedCornerShape(50))
-                        .clickable { diario = tipo to rotulo }.padding(horizontal = 14.dp, vertical = 9.dp),
-                )
+                Box(
+                    Modifier.heightIn(min = 40.dp).clip(RoundedCornerShape(50)).border(1.dp, T.Borda, RoundedCornerShape(50))
+                        .clickable(role = Role.Button) { aberto = tipo to rotulo }.padding(horizontal = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text(rotulo, style = T.Descricao, color = if (tipo == "malestar") T.Alerta else T.Texto) }
             }
         }
-
-        Button(
-            onClick = { abrirPainel(ctx) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Verde),
-        ) { Text("Ver painel completo", color = Color(0xFF0E2A14), fontWeight = FontWeight.SemiBold) }
-        Text("Gráficos, noites, bateria do relógio e relatório para o médico ficam no site.", color = TextoSec, fontSize = 12.sp)
-        Spacer(Modifier.height(16.dp))
     }
-
-    diario?.let { (tipo, rotulo) ->
+    aberto?.let { (tipo, rotulo) ->
         var nota by remember(tipo) { mutableStateOf("") }
         AlertDialog(
-            onDismissRequest = { diario = null },
-            title = { Text(rotulo) },
-            text = {
-                OutlinedTextField(
-                    nota, { nota = it }, label = { Text(if (tipo == "medicamento") "Qual e quanto" else "Observação (opcional)") },
-                    singleLine = false, modifier = Modifier.fillMaxWidth(),
-                )
-            },
+            onDismissRequest = { aberto = null },
+            containerColor = T.Elevada,
+            title = { Text(rotulo, color = T.Texto) },
+            text = { OutlinedTextField(nota, { nota = it }, label = { Text(if (tipo == "medicamento") "Qual e quanto" else "Observação (opcional)") }, modifier = Modifier.fillMaxWidth()) },
             confirmButton = {
                 TextButton(onClick = {
-                    val n = nota
-                    diario = null
+                    val n = nota; aberto = null
                     escopo.launch {
-                        val corpo = JSONObject().put("acao", "evento").put("segredo", Conexao.segredo(ctx)).put("tipo", tipo)
-                            .put("inicio", System.currentTimeMillis()).apply { if (n.isNotBlank()) put("nota", n) }
-                        val ok = runCatching { withContext(Dispatchers.IO) { Conexao.post(corpo).first in 200..299 } }.getOrDefault(false)
-                        aviso = if (ok) "$rotulo registrado no diário ✓" else "Não deu para salvar agora"
+                        val ok = chamar(ctx, "evento") { put("tipo", tipo).put("inicio", System.currentTimeMillis()); if (n.isNotBlank()) put("nota", n) } != null
+                        aoSalvar(if (ok) "$rotulo registrado" else "Não deu para salvar agora")
                     }
-                }) { Text("Salvar") }
+                }) { Text("Salvar", color = T.Primaria) }
             },
-            dismissButton = { TextButton(onClick = { diario = null }) { Text("Cancelar") } },
+            dismissButton = { TextButton(onClick = { aberto = null }) { Text("Cancelar", color = T.TextoSec) } },
         )
     }
 }
