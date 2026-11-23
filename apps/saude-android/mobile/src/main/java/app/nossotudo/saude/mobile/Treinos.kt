@@ -213,6 +213,11 @@ private fun CartaoRecuperacao(d: JSONObject) {
         }
         val c7 = d.optJSONObject("ultimos7")?.optInt("carga") ?: 0
         val media = d.optInt("carga_media_semana")
+        val dias = d.optInt("carga_historico_dias")
+        if (media == 0 && c7 > 0) Pequeno(
+            "Carga 7 dias $c7. A comparação com a sua média (alerta de sobrecarga) começa com 3 semanas de histórico" +
+                (if (dias < 21) " — faltam ${21 - dias} dias." else "."),
+        )
         if (media > 0) {
             val razao = c7.toDouble() / media
             Pequeno(
@@ -270,7 +275,10 @@ private fun CartaoRecuperacaoCardiaca(d: JSONObject) {
     val lista = d.optJSONArray("hrr").objetos()
     CartaoNT(titulo = "Recuperação cardíaca", cor = Cor.Coracao) {
         if (lista.isEmpty()) {
-            Pequeno("Aparece depois de treinos fortes que terminam sem outro em seguida (ex.: o último do dia). Na natação o sensor não mede bem.")
+            Pequeno(
+                "Aparece depois de treinos fortes (FC no fim ≥ ${d.optInt("hrr_limiar", 135)} bpm). Ao encerrar o treino, " +
+                    "mantenha o relógio firme no pulso e fique parado ou caminhe devagar por 2 min. Na natação o sensor não mede bem.",
+            )
             return@CartaoNT
         }
         val media = d.num("hrr_media")?.roundToInt()
