@@ -58,6 +58,9 @@ class ColetaService : Service() {
          */
         @Volatile var tempSemPermissao = false
             private set
+        /** Serviço em execução (para a vigia por alarme acordar o relógio e conferir o sensor). */
+        @Volatile var instancia: ColetaService? = null
+            private set
 
         /** Rastreadores contínuos desejados na Fase 1 (só os que o relógio suportar serão ligados). */
         private val CONTINUOS = listOf(
@@ -120,7 +123,8 @@ class ColetaService : Service() {
             // serviço (re)iniciado já no carregador: registra o estado atual para a linha do tempo
             if (Bateria.carregando(this)) runCatching { Sync.enfileirarTransicao(this, System.currentTimeMillis(), "carregando", Bateria.nivel(this)) }
         }
-        if (modo == MODO_FUNDO) main.postDelayed(enviar, 2 * 60_000L)
+        if (modo == MODO_FUNDO) { main.postDelayed(enviar, 2 * 60_000L); VigiaAlarme.agendar(this) }
+        instancia = this
         return START_STICKY
     }
 
@@ -138,8 +142,13 @@ class ColetaService : Service() {
                 // no modo automático não desiste: a vigia tenta de novo em alguns minutos
                 if (modo != MODO_FUNDO) main.post { stopSelf() }
             },
-            // o serviço de sensores da Samsung caiu (atualização, economia de energia…): religa
-            onFim = { main.postDelayed({ religarSensores("conexão encerrada") }, 30_000L) },
+            // o serviço de sensores da Samsung caiu (atualização, economia de energia…): religa em seguida.
+            // v0.9.6: segura o processador acordado até religar — com o relógio em repouso profundo o
+            // Handler congela e a religação esperava 30–50 min (lacunas noturnas de 22–23/11)
+            onFim = {
+                segurarAcordado(90_000L)
+                main.postDelayed({ religarSensores("conexão encerrada", urgente = true) }, 5_000L)
+            },
         )
     }
 
@@ -148,17 +157,35 @@ class ColetaService : Service() {
      * serviço da Samsung caiu e nada religava — o app seguia mandando só "sinal de vida". Agora, se nenhum lote
      * chega em 10 min (fora do carregador), desliga e liga de novo os rastreadores (no máximo 1 vez a cada 10 min).
      */
-    private fun vigiarSensor() {
+    private fun vigiarSensor(limiteMin: Int = 10) {
         if (modo != MODO_FUNDO) return
         val agora = System.currentTimeMillis()
         val ultimo = maxOf(EstadoSaude.ultimoLoteMs, inicioMs, ultimaReconexao)
-        if (agora - ultimo > 10 * 60_000L && !Bateria.carregando(this)) religarSensores("sem dados há ${(agora - ultimo) / 60_000} min")
+        if (agora - ultimo > limiteMin * 60_000L && !Bateria.carregando(this)) religarSensores("sem dados há ${(agora - ultimo) / 60_000} min")
     }
 
-    private fun religarSensores(motivo: String) {
+    /** Chamado pelo alarme da vigia (acorda o relógio mesmo em repouso profundo). */
+    fun vigiarPorAlarme() {
+        segurarAcordado(60_000L)
+        main.post { vigiarSensor(limiteMin = 4) }
+    }
+
+    private val travaAcordado by lazy {
+        (getSystemService(Context.POWER_SERVICE) as android.os.PowerManager)
+            .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "saudent:religar").apply { setReferenceCounted(false) }
+    }
+
+    /** Mantém o processador acordado por pouco tempo (só para religar o sensor). */
+    private fun segurarAcordado(ms: Long) = runCatching { travaAcordado.acquire(ms) }
+
+    private fun religarSensores(motivo: String, urgente: Boolean = false) {
         if (!rodando) return
         val agora = System.currentTimeMillis()
-        if (agora - ultimaReconexao < 10 * 60_000L) return
+        // queda de conexão religa em até 1 min; a vigia por falta de dados, no máximo a cada 10 min
+        if (agora - ultimaReconexao < (if (urgente) 60_000L else 10 * 60_000L)) {
+            if (urgente) main.postDelayed({ religarSensores(motivo, urgente = true) }, 60_000L)
+            return
+        }
         ultimaReconexao = agora
         reconexoes++
         avisos.removeAll { it.startsWith("religado") }
@@ -205,6 +232,7 @@ class ColetaService : Service() {
                 })
                 ativos += tracker to gravador
                 eventos?.linha(System.currentTimeMillis(), "ligado", nome)
+                if (nome == "HEART_RATE_CONTINUOUS") runCatching { if (travaAcordado.isHeld) travaAcordado.release() }
             } catch (e: Exception) {
                 eventos?.linha(System.currentTimeMillis(), "falha_ligar", "$nome: ${e.javaClass.simpleName} ${e.message}")
             }
@@ -308,6 +336,9 @@ class ColetaService : Service() {
     }
 
     override fun onDestroy() {
+        instancia = null
+        VigiaAlarme.cancelar(this)
+        runCatching { if (travaAcordado.isHeld) travaAcordado.release() }
         EstadoSaude.fecharMinuto()
         desligarTemperatura()
         if (energiaRegistrada) { runCatching { unregisterReceiver(energia) }; energiaRegistrada = false }
