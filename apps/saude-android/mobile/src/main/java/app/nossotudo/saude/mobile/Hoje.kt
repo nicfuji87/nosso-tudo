@@ -81,7 +81,8 @@ fun resumoSync(d: JSONObject?): Pair<String?, Estado> {
         val t = instante(if (a.optString("tipo") == "celular") a.txt("ultima_sync") else a.txt("ultimo_envio"))?.toEpochMilli() ?: return@forEach
         val lim = if (a.optString("tipo") == "celular") 6 else 3
         if (agora - t > lim * 3_600_000L) pior = Estado.ATENCAO
-        if (a.txt("erro") != null && pior == Estado.NEUTRO) pior = Estado.ATENCAO
+        // no relógio o campo traz avisos de rotina ("religada 1x"); só o erro do celular pesa
+        if (a.optString("tipo") == "celular" && a.txt("erro") != null && pior == Estado.NEUTRO) pior = Estado.ATENCAO
     }
     return null to pior
 }
@@ -421,7 +422,7 @@ private fun CartaoConfirmar(t: JSONObject, aoSalvar: (String) -> Unit) {
     Cartao {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Atividade detectada · ${horaDe(t.txt("inicio"))}–${horaDe(t.txt("fim"))}", style = T.Corpo.copy(fontWeight = FontWeight.SemiBold), color = T.Texto)
+                Text("Atividade detectada · ${noiteCurta(diaLocalDe(t.txt("inicio"))?.toString())}, ${horaDe(t.txt("inicio"))}–${horaDe(t.txt("fim"))}", style = T.Corpo.copy(fontWeight = FontWeight.SemiBold), color = T.Texto)
                 TextoSec("${t.optInt("minutos")} min · FC média ${t.optInt("fc_media")} · pico ${t.optInt("fc_max")} bpm", estilo = T.Legenda)
             }
         }

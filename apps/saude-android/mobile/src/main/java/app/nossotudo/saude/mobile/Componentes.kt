@@ -305,7 +305,7 @@ fun GraficoTendencia(
     pontos: List<Ponto>, cor: Color, formatar: (Double) -> String, modifier: Modifier = Modifier,
     normal: Double? = null, faixa: Pair<Double, Double>? = null, mediaMovel: List<Double?>? = null,
     vaoMinimo: Double = 1.0, barras: Boolean = false, altura: Dp = 170.dp, zeroNaBase: Boolean = barras,
-    aoSelecionar: ((Int?) -> Unit)? = null,
+    aoSelecionar: ((Int?) -> Unit)? = null, formatarEixo: ((Double) -> String)? = null,
 ) {
     val medidor = rememberTextMeasurer()
     var sel by remember(pontos) { mutableStateOf<Int?>(null) }
@@ -357,7 +357,7 @@ fun GraficoTendencia(
             val estiloEixo = TextStyle(fontSize = 10.sp, color = T.TextoTer)
             listOf(lo + (hi - lo) * 0.1, (lo + hi) / 2, hi - (hi - lo) * 0.1).forEach { v ->
                 drawLine(T.Borda, Offset(0f, y(v)), Offset(w, y(v)), 1f)
-                drawText(medidor, formatar(v), Offset(w + 6.dp.toPx(), y(v) - 7.dp.toPx()), estiloEixo)
+                drawText(medidor, (formatarEixo ?: formatar)(v), Offset(w + 6.dp.toPx(), y(v) - 7.dp.toPx()), estiloEixo)
             }
             faixa?.let { (a, b) -> drawRect(cor.copy(alpha = 0.10f), Offset(0f, y(b)), Size(w, y(a) - y(b))) }
             normal?.let { drawLine(T.TextoSec.copy(alpha = 0.7f), Offset(0f, y(it)), Offset(w, y(it)), 1.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f))) }

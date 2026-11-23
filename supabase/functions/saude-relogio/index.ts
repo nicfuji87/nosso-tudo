@@ -196,6 +196,8 @@ type L = Record<string, unknown>;
 const DIA = 86_400_000;
 const nnum = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const um = (v: number) => Math.round(v * 10) / 10;
+/** minutos → horas com 2 casas (1 casa arredondava 436 min para "7h18"). */
+const h2 = (min: number) => Math.round((min / 60) * 100) / 100;
 const diaLocal = (d: string | number | Date) =>
   new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(d));
 
@@ -252,7 +254,7 @@ async function seriesSaude(admin: SupabaseClient, ws: string, dias: number) {
       // mínima de pulso isolada abaixo de 85% costuma ser artefato (movimento, pulseira frouxa); só vale se repetir
       spo2_qualidade: spmin == null ? null : spmin < 85 ? "suspeita" : "valida",
       pele: nnum(x.temp_pele), fonte_temp: x.fonte_temp ?? null,
-      sono_h: sn ? um(Number(sn.dormido_min) / 60) : null, sono_cama_h: sn ? um(Number(sn.duracao_min) / 60) : null,
+      sono_h: sn ? h2(Number(sn.dormido_min)) : null, sono_cama_h: sn ? h2(Number(sn.duracao_min)) : null,
       sono_qualidade: sn?.qualidade ?? null, sono_estado: sn?.estado ?? null, sono_motivo: sn?.motivo ?? null,
       sono_estimado_h: !sn && x.sono_inicio && x.sono_fim
         ? um((new Date(String(x.sono_fim)).getTime() - new Date(String(x.sono_inicio)).getTime()) / 3_600_000) : null,
@@ -263,7 +265,7 @@ async function seriesSaude(admin: SupabaseClient, ws: string, dias: number) {
     if (vistas.has(String(sn.noite))) continue;
     noites.push({
       noite: sn.noite, fc: null, vfc: null, vfc_janelas: null, spo2: null, spo2_min: null, spo2_qualidade: null, pele: null,
-      fonte_temp: null, sono_h: um(Number(sn.dormido_min) / 60), sono_cama_h: um(Number(sn.duracao_min) / 60),
+      fonte_temp: null, sono_h: h2(Number(sn.dormido_min)), sono_cama_h: h2(Number(sn.duracao_min)),
       sono_qualidade: sn.qualidade ?? null, sono_estado: sn.estado ?? null, sono_motivo: sn.motivo ?? null, sono_estimado_h: null,
     });
   }

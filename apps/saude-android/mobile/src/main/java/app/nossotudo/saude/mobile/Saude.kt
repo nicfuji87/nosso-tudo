@@ -86,7 +86,6 @@ private fun campoDe(m: Metrica) = when (m) {
     Metrica.PASSOS -> "total"; Metrica.ENERGIA -> "score"
 }
 private fun suspeitoDe(m: Metrica): (JSONObject) -> Boolean = when (m) {
-    Metrica.SPO2 -> { n -> n.optString("spo2_qualidade") == "suspeita" }
     Metrica.SONO -> { n -> n.optString("sono_qualidade") == "suspeito" }
     Metrica.VFC -> { n -> (n.num("vfc_janelas") ?: 99.0) < 12 }
     else -> { _ -> false }
@@ -97,7 +96,13 @@ private fun normalDe(m: Metrica, normais: JSONObject?) = when (m) {
 }
 private fun vaoDe(m: Metrica) = when (m) { Metrica.FC -> 10.0; Metrica.VFC -> 15.0; Metrica.SONO -> 3.0; Metrica.SPO2 -> 6.0; Metrica.PELE -> 1.5; Metrica.PASSOS -> 4000.0; Metrica.ENERGIA -> 30.0 }
 
-fun pontosDe(m: Metrica, d: JSONObject, dias: Int): List<Ponto> = when (m) {
+/** Série do período, sem o trecho inicial vazio (antes do primeiro dado), com no mínimo 7 pontos. */
+fun pontosDe(m: Metrica, d: JSONObject, dias: Int): List<Ponto> {
+    val p = pontosBrutos(m, d, dias)
+    val primeiro = p.indexOfFirst { it.valor != null }
+    return if (primeiro <= 0) p else p.drop(minOf(primeiro, p.size - 7).coerceAtLeast(0))
+}
+fun pontosBrutos(m: Metrica, d: JSONObject, dias: Int): List<Ponto> = when (m) {
     Metrica.PASSOS -> serieDias(d.optJSONArray("passos").objetos(), "total", dias)
     Metrica.ENERGIA -> serieDias(d.optJSONArray("energia").objetos(), "score", dias)
     else -> serieNoites(d.optJSONArray("noites").objetos(), campoDe(m), dias, suspeitoDe(m))
@@ -215,7 +220,9 @@ fun CartaoTendencia(m: Metrica, d: JSONObject, dias: Int, aoAbrir: (() -> Unit)?
             faixa = if (m == Metrica.SONO || m == Metrica.PASSOS || m == Metrica.ENERGIA) null else faixaHabitual(todos90),
             mediaMovel = if (dias >= 30 && m != Metrica.PASSOS) mediaMovel(pts.map { it.valor }) else null,
             barras = m == Metrica.PASSOS || m == Metrica.SONO, vaoMinimo = vaoDe(m), zeroNaBase = m == Metrica.PASSOS || m == Metrica.SONO,
+            formatarEixo = if (m == Metrica.PASSOS) { v -> if (v >= 1000) "${fmt(v / 1000, 0)} mil" else fmt(v, 0) } else if (m == Metrica.SONO) { v -> "${fmt(v, 0)} h" } else null,
         )
+        if (pts.size < dias) TextoSec("Histórico desde ${pts.firstOrNull()?.rotulo ?: "—"}.", estilo = T.Legenda, cor = T.TextoTer)
         TextoSec(
             listOfNotNull(
                 ultimo?.let { "última ${it.rotulo}" }, m7?.let { "média 7 d ${valorFmt(it, m)}" }, m30?.let { "30 d ${valorFmt(it, m)}" },
@@ -232,7 +239,7 @@ fun CartaoTendencia(m: Metrica, d: JSONObject, dias: Int, aoAbrir: (() -> Unit)?
 private fun CartaoSonoResumo(d: JSONObject, dias: Int, nav: Nav) {
     val noites = d.optJSONArray("noites").objetos().filter { it.num("sono_h") != null }
     val ult = noites.lastOrNull()
-    val pts = serieNoites(d.optJSONArray("noites").objetos(), "sono_h", dias, suspeitoDe(Metrica.SONO))
+    val pts = pontosDe(Metrica.SONO, d, dias)
     val validas = noites.takeLast(7).filter { it.optString("sono_qualidade") != "suspeito" }.mapNotNull { it.num("sono_h") }
     Cartao(onClick = { nav.abrir(Rota.SonoDetalhe(null)) }) {
         CabecalhoCartao("Sono", Icons.Rounded.Bedtime, T.Sono)
@@ -245,7 +252,7 @@ private fun CartaoSonoResumo(d: JSONObject, dias: Int, nav: Nav) {
             "suspeito" -> IndicadorQualidade(ult.txt("sono_motivo") ?: "registro contraditório", Estado.ATENCAO)
             "incompleto" -> IndicadorQualidade(ult.txt("sono_motivo") ?: "fases incompletas", Estado.NEUTRO)
         }
-        GraficoTendencia(pts, T.Sono, { horasMin(it * 60) }, normal = 7.0, barras = true, vaoMinimo = 3.0, altura = 150.dp)
+        GraficoTendencia(pts, T.Sono, { horasMin(it * 60) }, normal = 7.0, barras = true, vaoMinimo = 3.0, altura = 150.dp, formatarEixo = { "${fmt(it, 0)} h" })
         TextoSec(
             listOfNotNull(validas.takeIf { it.isNotEmpty() }?.average()?.let { "média 7 noites ${horasMin(it * 60)}" }, "meta 7h00", "tracejado = meta").joinToString(" · "),
             estilo = T.Legenda,

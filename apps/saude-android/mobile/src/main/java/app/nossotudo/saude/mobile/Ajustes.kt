@@ -212,7 +212,7 @@ fun TelaSincronizacao(activity: Activity, nav: Nav) {
                     if (a.has("no_pulso") && !a.isNull("no_pulso")) LinhaInfo("No pulso", if (a.optBoolean("no_pulso")) "sim" else "não")
                     instante(a.txt("ultima_leitura"))?.let { LinhaInfo("Última leitura de batimento", relativo(it.toEpochMilli())) }
                 }
-                a.txt("erro")?.let { IndicadorQualidade("Último erro: $it", Estado.ATENCAO) }
+                a.txt("erro")?.let { if (cel) IndicadorQualidade("Último erro: $it", Estado.ATENCAO) else TextoSec("Avisos do relógio: $it", estilo = T.Legenda) }
                 TextoSec(
                     if (cel) "Envia do Samsung Health: sono e fases, SpO₂, temperatura da pele (reserva), treinos, passos, Energy Score, composição corporal, apneia e ritmo irregular."
                     else "Envia do Saúde NT no relógio: batimento por minuto, VFC noturna, temperatura da pele, ECG e registros.",

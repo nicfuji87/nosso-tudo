@@ -217,7 +217,7 @@ private fun CartaoPerformance(d: JSONObject, treinos: List<JSONObject>, dias: In
             val restante = prontoEm?.let { ChronoUnit.MINUTES.between(java.time.Instant.now(), it) }
             Estatistica(
                 when { rec == null -> "—"; restante == null || restante <= 0 -> "concluída"; else -> "~${(restante / 60.0).roundToInt().coerceAtLeast(1)} h" },
-                "recuperação estimada (modelo de carga)", Modifier.weight(1f),
+                "recuperação (estimativa)", Modifier.weight(1f),
             )
         }
         GraficoTendencia(
@@ -382,7 +382,7 @@ fun TelaTreinoDetalhe(id: String, nav: Nav) {
                 fun zona(b: Double) = when { limites.size < 4 -> ""; b < limites[0] -> " · Z1"; b < limites[1] -> " · Z2"; b < limites[2] -> " · Z3"; b < limites[3] -> " · Z4"; else -> " · Z5" }
                 GraficoTendencia(
                     serie.map { Ponto(horaDe(it.txt("t")), it.num("bpm"), it.optInt("n") < 20) }, T.Fc, { "${it.roundToInt()} bpm${zona(it)}" },
-                    altura = 200.dp, vaoMinimo = 30.0,
+                    altura = 200.dp, vaoMinimo = 30.0, formatarEixo = { "${it.roundToInt()}" },
                 )
                 TextoSec("Média por minuto, de 3 min antes a 6 min depois. Minutos com poucas leituras aparecem vazados. Toque ou deslize para ver valores.", estilo = T.Legenda)
             }
@@ -418,7 +418,7 @@ fun TelaTreinoDetalhe(id: String, nav: Nav) {
         Cartao {
             CabecalhoCartao("Fonte e qualidade")
             LinhaInfo("Origem", when (t.optString("origem")) { "samsung" -> "Samsung Health"; "manual" -> "Cronômetro do celular"; "detectado" -> "Detectado pelo batimento"; else -> t.optString("origem") })
-            val medidos = t.optInt("medidos"); val minutos = t.optInt("minutos").coerceAtLeast(1)
+            val minutos = t.optInt("minutos").coerceAtLeast(1); val medidos = t.optInt("medidos").coerceAtMost(minutos)
             LinhaInfo("Minutos com batimento", "$medidos de $minutos (${medidos * 100 / minutos}%)", if (medidos * 100 / minutos < 70) T.Atencao else T.Texto)
             if (t.optBoolean("fc_confiavel", true).not()) IndicadorQualidade("FC de pulso menos precisa em ${m.lowercase()}", Estado.ATENCAO)
             TextoSec("Carga (FC): minutos ponderados pela FC (100–119 = 1, 120–139 = 2, 140–159 = 3, ≥ 160 = 4). Carga (RPE × min): esforço percebido × duração. São unidades diferentes e não se somam.", estilo = T.Legenda)
