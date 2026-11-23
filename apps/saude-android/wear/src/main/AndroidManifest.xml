@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.BODY_SENSORS" android:maxSdkVersion="35" />
     <uses-permission android:name="android.permission.BODY_SENSORS_BACKGROUND" android:maxSdkVersion="35" />
     <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+    <!-- Wear OS 6: SKIN_TEMPERATURE_CONTINUOUS do Sensor SDK 1.4.1 exige esta (sem ela: PERMISSION_ERROR) -->
+    <uses-permission android:name="android.permission.health.READ_SKIN_TEMPERATURE" />
     <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
     <!-- Permissão extra da Samsung para rastreadores avançados (ECG, PPG bruto etc.) -->
     <uses-permission android:name="com.samsung.android.hardware.sensormanager.permission.READ_ADDITIONAL_HEALTH_DATA" />

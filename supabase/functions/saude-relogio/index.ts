@@ -130,6 +130,12 @@ function resumoTreinos(p: { fcmax?: number; zonas_bpm?: number[]; treinos?: Trei
     };
   };
   const carga28 = soma(t.filter((x) => ms(x.inicio) >= agora - 28 * D).map((x) => x.carga ?? 0));
+  // média semanal só conta o período com batimento medido (antes disso a carga é 0 e puxaria a média para baixo);
+  // com menos de 3 semanas de histórico a comparação "agudo × crônico" não vale — devolve null
+  const medidos = t.filter((x) => (x.medidos ?? 0) > 0).map((x) => ms(x.inicio));
+  const historicoDias = medidos.length ? Math.floor((agora - Math.min(...medidos)) / D) : 0;
+  const semanasBase = Math.min(4, historicoDias / 7);
+  const cargaMediaSemana = historicoDias >= 21 ? Math.round(carga28 / semanasBase) : null;
 
   // tempo de recuperação a partir do último bloco de treino
   const ord = [...t].sort((a, b) => ms(a.inicio) - ms(b.inicio));
@@ -155,15 +161,16 @@ function resumoTreinos(p: { fcmax?: number; zonas_bpm?: number[]; treinos?: Trei
     };
   }
 
-  // recuperação cardíaca: só depois de esforço de verdade (FC no fim ≥ 120)
-  const hrr = ord.filter((x) => x.recuperacao && x.recuperacao.fc_fim >= 120).slice(-12)
+  // recuperação cardíaca: só depois de esforço de verdade (FC no fim ≥ 70% da sua FC máx.)
+  const limiarHrr = Math.max(120, Math.round(0.7 * (p.fcmax ?? 170)));
+  const hrr = ord.filter((x) => x.recuperacao && x.recuperacao.fc_fim >= limiarHrr).slice(-12)
     .map((x) => ({ inicio: x.inicio, modalidade: x.modalidade ?? null, ...x.recuperacao }));
   const media = (v: number[]) => (v.length ? Math.round(soma(v) / v.length) : null);
   return {
     algoritmo: "treinos-v2", fcmax: p.fcmax ?? null, zonas_bpm: p.zonas_bpm ?? [],
     semana: resumir(segunda, agora + 1), semana_anterior: resumir(segunda - 7 * D, segunda), ultimos7: resumir(agora - 7 * D, agora + 1),
-    carga28, carga_media_semana: Math.round(carga28 / 4),
-    recuperacao, hrr, hrr_media: media(hrr.map((x) => x.queda1 ?? 0)),
+    carga28, carga_media_semana: cargaMediaSemana, carga_historico_dias: historicoDias,
+    recuperacao, hrr, hrr_limiar: limiarHrr, hrr_media: media(hrr.map((x) => x.queda1 ?? 0)),
     prontidao: pront, treinos: t.slice(0, 40),
   };
 }

@@ -35,6 +35,8 @@ class MainActivity : ComponentActivity() {
         get() = buildList {
             if (Build.VERSION.SDK_INT >= 36) {
                 add("android.permission.health.READ_HEART_RATE")
+                add("android.permission.health.READ_SKIN_TEMPERATURE") // temperatura da pele à noite
+                add("android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND")
                 add("com.samsung.android.hardware.sensormanager.permission.READ_ADDITIONAL_HEALTH_DATA")
             } else {
                 add("android.permission.BODY_SENSORS")
@@ -72,6 +74,8 @@ class MainActivity : ComponentActivity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 1) pedirSensoresSempre()
+        // permissão nova liberada com a medição já rodando bloqueada: religa para a temperatura voltar
+        if (grantResults.any { it == PackageManager.PERMISSION_GRANTED }) Automatico.religarEmPrimeiroPlano(this)
     }
 
     /** Rota pedida pelo atalho do mostrador (Tile). */
