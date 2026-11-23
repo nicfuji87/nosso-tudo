@@ -62,7 +62,7 @@ const iso = (ms: unknown) => {
 };
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
-const LIMITES = { bpm: 3000, vfc: 600, temp: 600, transicoes: 500, registros: 500, ecgs: 3, samsung: 500 };
+const LIMITES = { bpm: 3000, vfc: 600, temp: 600, transicoes: 500, registros: 500, ecgs: 3, samsung: 500, lacunas: 100 };
 const TIPOS_SAMSUNG = new Set(["sono", "spo2", "temp_pele", "exercicio", "energia", "passos", "corpo", "ritmo_irregular", "apneia"]);
 const TIPOS_ESTADO = new Set(["carregando", "desconectado", "no_pulso", "fora_do_pulso"]);
 const TZ = "America/Sao_Paulo";
@@ -94,8 +94,10 @@ function lerDiag(d: unknown): Record<string, unknown> | null {
   const o = d as Record<string, unknown>;
   const txt = (v: unknown, n: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, n) : null);
   const tipos = o.tipos && typeof o.tipos === "object" && JSON.stringify(o.tipos).length < 500 ? o.tipos : null;
+  // estado da coleta do relógio (0.9.7+): máquina de estados, reconexões, trava, atraso do alarme
+  const sensor = o.sensor && typeof o.sensor === "object" && JSON.stringify(o.sensor).length < 2000 ? o.sensor : null;
   return {
-    versao: txt(o.versao, 20), erro: txt(o.erro, 300), ultima_sync: iso(o.ultima_sync), tipos,
+    versao: txt(o.versao, 20), erro: txt(o.erro, 300), ultima_sync: iso(o.ultima_sync), tipos, sensor,
     otimizacao_bateria: typeof o.otimizacao_bateria === "boolean" ? o.otimizacao_bateria : null,
     recebido_em: new Date().toISOString(),
   };
@@ -721,6 +723,20 @@ Deno.serve(async (req) => {
       return [{ ...base, id_local: e.id_local.slice(0, 64), ts, duracao_s: d, hz, amostras_mv: amostras }];
     });
 
+    // lacunas de coleta registradas pelo relógio (0.9.7+): início, fim, causa, reconexões, recuperação
+    const versaoRel = typeof est.versao === "string" ? est.versao.slice(0, 20) : null;
+    const lacunas = lista("lacunas").flatMap((l: Record<string, unknown>) => {
+      const inicio = iso(l.inicio), fim = iso(l.fim);
+      if (!inicio || !fim || fim <= inicio || typeof l.causa !== "string") return [];
+      const rec = num(l.recuperacao_ms), b = num(l.bateria), rx = num(l.reconexoes);
+      return [{
+        ...base, inicio, fim, causa: l.causa.slice(0, 80), reconexoes: rx !== null ? Math.max(0, Math.round(rx)) : 0,
+        recuperacao_ms: rec !== null && rec >= 0 ? Math.round(rec) : null, bateria: b !== null && b >= 0 && b <= 100 ? Math.round(b) : null,
+        no_pulso: typeof l.no_pulso === "boolean" ? l.no_pulso : null, carregando: typeof l.carregando === "boolean" ? l.carregando : null,
+        estado_sensor: typeof l.estado === "string" ? l.estado.slice(0, 20) : null, versao_app: versaoRel,
+      }];
+    });
+
     const gravar = async (tabela: string, linhas: unknown[], conflito: string) => {
       if (!linhas.length) return 0;
       const { error } = await admin.from(tabela).upsert(linhas, { onConflict: conflito, ignoreDuplicates: true });
@@ -736,6 +752,7 @@ Deno.serve(async (req) => {
         estado: await gravar("saude_estado_eventos", transicoes, "dispositivo_id,ts,tipo"),
         registros: await gravar("saude_registros", registros, "dispositivo_id,id_local"),
         ecgs: await gravar("saude_ecgs", ecgs, "dispositivo_id,id_local"),
+        lacunas: await gravar("saude_coleta_lacunas", lacunas, "dispositivo_id,inicio"),
         samsung: await (async () => {
           // o Samsung Health corrige registros depois: aqui o upsert ATUALIZA
           if (!samsung.length) return 0;

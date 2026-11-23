@@ -68,8 +68,13 @@ object EstadoSaude {
         private set
     @Volatile var ultimaLeituraMs: Long = 0
         private set
-    /** Último lote recebido do sensor (válido ou não). Se parar de chegar, o sensor caiu: o serviço religa. */
+    /** Último lote recebido do sensor (válido ou não). */
     @Volatile var ultimoLoteMs: Long = 0
+    /** Último lote com batimento VÁLIDO (v0.9.7): lote só com dado inválido não conta como medição. */
+    @Volatile var ultimoValidoMs: Long = 0
+
+    /** Resultado de um lote: quantos batimentos válidos e se o SDK disse "fora do pulso". */
+    data class ResultadoLote(val validos: Int, val foraDoPulso: Boolean)
     /** Durante o ECG o batimento contínuo pode sair inválido: não entra no cálculo. */
     @Volatile var pausado = false
 
@@ -128,14 +133,17 @@ object EstadoSaude {
      * diferença sucessiva atravessa a lacuna.
      */
     @Synchronized
-    fun registrarLote(lote: List<DataPoint>) {
+    fun registrarLote(lote: List<DataPoint>): ResultadoLote {
         if (lote.isNotEmpty()) ultimoLoteMs = System.currentTimeMillis()
+        var validos = 0
+        var fora = false
         for (dp in lote) {
             val ts = dp.timestamp
             val hr = runCatching { dp.getValue(ValueKey.HeartRateSet.HEART_RATE) }.getOrNull() ?: 0
             val st = runCatching { dp.getValue(ValueKey.HeartRateSet.HEART_RATE_STATUS) }.getOrNull() ?: -1
-            if (st == -3) { noPulso = false; observarPulso(false, ts) } // SDK: relógio fora do pulso
+            if (st == -3) { noPulso = false; fora = true; observarPulso(false, ts) } // SDK: relógio fora do pulso
             if (hr in 30..220 && st >= 0) {
+                validos++
                 noPulso = true
                 observarPulso(true, ts)
                 ultimaLeituraMs = ts
@@ -154,6 +162,8 @@ object EstadoSaude {
             }
             relogioBatimento = t
         }
+        if (validos > 0) ultimoValidoMs = System.currentTimeMillis()
+        return ResultadoLote(validos, fora)
     }
 
     private fun registrarBpm(hr: Int, ts: Long) {
