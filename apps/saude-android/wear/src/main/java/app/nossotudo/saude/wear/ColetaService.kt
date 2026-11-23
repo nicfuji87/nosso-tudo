@@ -139,6 +139,9 @@ class ColetaService : Service() {
     /** Máquina de estados da coleta (v0.9.7): decide quando religar e registra as lacunas. */
     private lateinit var monitor: MonitorSensor
 
+    /** Portão da geração (v0.9.8): callbacks antigos não gravam batimento nem acordam o processador. */
+    private val portao = PortaoGeracao()
+
     private fun prefsColeta() = getSharedPreferences("coleta", Context.MODE_PRIVATE)
 
     /**
@@ -148,6 +151,7 @@ class ColetaService : Service() {
      */
     private fun conectarSensores(pasta: File?, motivo: String?) {
         val g = monitor.iniciarConexao(motivo)
+        portao.abrir(g)
         if (motivo != null) {
             segurarAcordado(90_000L, "recuperacao")
             avisos.removeAll { it.startsWith("religado") }
@@ -157,9 +161,9 @@ class ColetaService : Service() {
         }
         val s = Sensores(this).also { sensores = it }
         s.conectar(
-            onOk = { main.post { if (monitor.conectado(g)) ligarRastreadores(s, pasta, comPpgAtual, g) } },
+            onOk = { if (portao.eAtual(g)) main.post { if (monitor.conectado(g)) ligarRastreadores(s, pasta, comPpgAtual, g) } },
             onFalha = { e ->
-                main.post {
+                if (portao.eAtual(g)) main.post {
                     // erro com resolução (ex.: atualizar o serviço da Samsung) exige ação do usuário: não insiste
                     monitor.falhaConexao(g, permanente = e.hasResolution(), descricao = Sensores.descreverErro(e))
                     eventos?.linha(System.currentTimeMillis(), "falha_conexao", Sensores.descreverErro(e))
@@ -168,9 +172,13 @@ class ColetaService : Service() {
                 }
             },
             // o serviço de sensores caiu (atualização, economia de energia do Wear OS 6…): religa já, acordado
+            // só a geração atual acorda o processador: a desconexão intencional (religar/parar) não
             onFim = {
-                segurarAcordado(90_000L, "conexao_encerrada")
-                main.post { monitor.conexaoEncerrada(g); depoisDeEvento() }
+                CallbacksSensor.aoFimDaConexao(
+                    portao, g,
+                    segurarAcordado = { segurarAcordado(90_000L, "conexao_encerrada") },
+                    processar = { main.post { monitor.conexaoEncerrada(g); depoisDeEvento() } },
+                )
             },
         )
     }
@@ -244,6 +252,7 @@ class ColetaService : Service() {
     /** Desliga os rastreadores e conecta de novo (nova geração: callbacks da conexão antiga são ignorados). */
     private fun religarSensores(motivo: String) {
         if (!rodando) return
+        portao.fechar() // a partir daqui, callbacks da conexão atual são ignorados (inclusive o onConnectionEnded)
         for ((tracker, gravador) in ativos) {
             runCatching { tracker.unsetEventListener() }
             gravador.fechar()
@@ -269,9 +278,11 @@ class ColetaService : Service() {
                 val gravador = GravadorCsv(pasta?.let { File(it, "${nome.lowercase()}.csv") }, nome)
                 tracker.setEventListener(object : HealthTracker.TrackerEventListener {
                     override fun onDataReceived(lote: List<DataPoint>) {
+                        if (!portao.eAtual(g)) return // listener de conexão antiga: não grava nada
                         gravador.gravar(lote)
                         if (nome != "HEART_RATE_CONTINUOUS") return
-                        val r = EstadoSaude.registrarLote(lote)
+                        // a geração é conferida ANTES de gravar FC/VFC, sob o mesmo lock que a troca de geração
+                        val r = CallbacksSensor.aoReceberLote(portao, g) { EstadoSaude.registrarLote(lote) } ?: return
                         main.post {
                             // a trava só sai quando o sensor PROVOU que voltou: primeiro batimento válido
                             if (monitor.lote(g, r.validos, r.foraDoPulso)) {
@@ -283,6 +294,7 @@ class ColetaService : Service() {
                     }
                     override fun onFlushCompleted() {}
                     override fun onError(erro: HealthTracker.TrackerError) {
+                        if (!portao.eAtual(g)) return
                         eventos?.linha(System.currentTimeMillis(), "erro_rastreador", "$nome: $erro")
                         avisos += when (erro.name) {
                             "SDK_POLICY_ERROR" -> "SDK_POLICY_ERROR: ative o modo dev do Health Platform"
@@ -430,6 +442,7 @@ class ColetaService : Service() {
         instancia = null
         // parada pedida (usuário desligou / modo laboratório): a vigia não deve religar
         if (!Automatico.ativo(this) || modo != MODO_FUNDO) VigiaAlarme.cancelar(this)
+        portao.fechar()
         if (::monitor.isInitialized) {
             if (monitor.ultimoValidoMs > 0) prefsColeta().edit().putLong("ultimo_valido", monitor.ultimoValidoMs).apply()
             monitor.encerrar()

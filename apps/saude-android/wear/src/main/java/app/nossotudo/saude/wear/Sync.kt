@@ -58,7 +58,8 @@ object Sync {
 
     fun status(ctx: Context): Status {
         val p = prefs(ctx)
-        val pend = listOf("bpm", "vfc", "temp", "transicoes", "registros", "ecgs").sumOf { n -> fila(ctx, n).takeIf { it.exists() }?.useLines { it.count() } ?: 0 }
+        // todas as filas, inclusive "lacunas" (v0.9.8): senão o envio podia parar com diagnóstico pendente
+        val pend = FilasEnvio.pendentes { n -> fila(ctx, n).takeIf { it.exists() }?.useLines { it.count() } ?: 0 }
         return Status(p.getBoolean("vinculado", false), p.getString("nome", null), p.getLong("ultimo_envio", 0), pend, p.getString("erro", null))
     }
 
