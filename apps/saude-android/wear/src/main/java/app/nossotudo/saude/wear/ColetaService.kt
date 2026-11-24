@@ -189,6 +189,7 @@ class ColetaService : Service() {
         monitor.definirCarregando(Bateria.carregando(this))
         when (val d = monitor.avaliar()) {
             is Decisao.Religar -> religarSensores(d.motivo)
+            is Decisao.Esvaziar -> pedirLoteGuardado(d.motivo)
             is Decisao.Aguardar -> {
                 main.removeCallbacks(reavaliar)
                 main.postDelayed(reavaliar, (d.ateMs - System.currentTimeMillis()).coerceIn(1_000L, 10 * 60_000L))
@@ -212,6 +213,27 @@ class ColetaService : Service() {
     }
 
     private val reavaliar = Runnable { avaliar() }
+
+    /** Rastreador de batimento da conexão atual (para o flush). */
+    private var rastreadorHr: HealthTracker? = null
+
+    /**
+     * v0.9.10: antes de religar por falta de lote, pede ao SDK o lote guardado. Acordado até a resposta
+     * (ou o tempo-limite): o lote chegando conta como entrega normal e não há religação nem perda de dados.
+     */
+    private fun pedirLoteGuardado(motivo: String) {
+        val t = rastreadorHr
+        val aceito = t != null && runCatching { t.flush() }.getOrDefault(false)
+        monitor.flushPedido(aceito)
+        eventos?.linha(System.currentTimeMillis(), "flush", "$motivo · ${if (aceito) "pedido" else "recusado"}")
+        if (aceito) {
+            segurarAcordado(monitor.esperaFlushMs + 15_000L, "flush")
+            main.removeCallbacks(reavaliar)
+            main.postDelayed(reavaliar, monitor.esperaFlushMs + 1_000L)
+        } else {
+            main.post { avaliar() } // sem flush: a próxima avaliação religa
+        }
+    }
 
     /** Depois de um callback da Samsung: reavalia já (religar imediato quando cabe no backoff). */
     private fun depoisDeEvento() { avaliar(); atualizarResumo() }
@@ -258,6 +280,7 @@ class ColetaService : Service() {
             gravador.fechar()
         }
         ativos.clear()
+        rastreadorHr = null
         desligarTemperatura()
         sensores?.desconectar()
         sensores = null
@@ -310,7 +333,7 @@ class ColetaService : Service() {
                 ativos += tracker to gravador
                 eventos?.linha(System.currentTimeMillis(), "ligado", nome)
                 // listener registrado não prova que o sensor voltou: a trava segue até o 1º batimento válido
-                if (nome == "HEART_RATE_CONTINUOUS") monitor.inscrito(g)
+                if (nome == "HEART_RATE_CONTINUOUS") { rastreadorHr = tracker; monitor.inscrito(g) }
             } catch (e: Exception) {
                 eventos?.linha(System.currentTimeMillis(), "falha_ligar", "$nome: ${e.javaClass.simpleName} ${e.message}")
                 if (nome == "HEART_RATE_CONTINUOUS") { monitor.erroRastreador(g, "FALHA_LIGAR"); main.post { depoisDeEvento() } }
@@ -332,6 +355,8 @@ class ColetaService : Service() {
             .put("min_desde_tentativa", min(monitor.ultimaTentativaMs))
             .put("tentativas_seguidas", monitor.tentativasSeguidas)
             .put("reconexoes", monitor.reconexoesTotal)
+            .put("flushes", monitor.flushesTotal)
+            .put("flushes_com_lote", monitor.flushesComLote)
             .put("ultima_recuperacao_s", monitor.ultimaRecuperacaoMs?.div(1000) ?: org.json.JSONObject.NULL)
             .put("bloqueio", monitor.bloqueio ?: org.json.JSONObject.NULL)
             .put("trava_s", trava / 1000)
@@ -459,6 +484,7 @@ class ColetaService : Service() {
         }
         eventos?.linha(System.currentTimeMillis(), "fim", ativos.joinToString(" ") { "${it.second.amostras.get()}" })
         ativos.clear()
+        rastreadorHr = null
         sensores?.desconectar()
         eventos?.fechar()
         bateria?.fechar()
