@@ -1,50 +1,61 @@
 package app.nossotudo.saude.wear.ui
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.wear.compose.foundation.lazy.TransformingLazyColumnScope
+import androidx.wear.compose.material3.Button
+import androidx.wear.compose.material3.ButtonDefaults
+import androidx.wear.compose.material3.Card
+import androidx.wear.compose.material3.CardDefaults
+import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.Text
+import app.nossotudo.saude.wear.ColetaService
 import app.nossotudo.saude.wear.EstadoSaude
 import app.nossotudo.saude.wear.MonitorCardiaco
+import app.nossotudo.saude.wear.ProntidaoServidor
+import app.nossotudo.saude.wear.Sync
+import kotlinx.coroutines.delay
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 object Rota {
-    const val HUB = "hub"
+    const val HOJE = "hoje"
+    const val HUB = HOJE // atalhos antigos do Tile
     const val CORACAO = "coracao"
     const val VFC = "vfc"
     const val PRONTIDAO = "prontidao"
     const val SONO = "sono"
+    const val REGISTRAR = "registrar"
+    const val TREINOS = "treinos"
+    const val MAIS = "mais"
+    const val DIAGNOSTICO = "diagnostico"
     const val RESPIRACAO = "respiracao"
     const val ECG = "ecg"
     const val CHECKIN = "checkin"
@@ -56,18 +67,20 @@ object Rota {
     const val ORTOSTATICO = "ortostatico"
 }
 
-/** "Ao vivo" só com leitura válida nos últimos 15 s; sensor ligado sem pulso = procurando. */
-fun statusLeitura(estado: MonitorCardiaco.Estado, ts: Long, erro: String? = null): String = when {
-    estado == MonitorCardiaco.Estado.ERRO -> "erro: $erro"
-    estado == MonitorCardiaco.Estado.MEDINDO && System.currentTimeMillis() - ts < 15_000 -> "ao vivo"
-    estado == MonitorCardiaco.Estado.MEDINDO || estado == MonitorCardiaco.Estado.CONECTANDO -> "procurando pulso…"
-    else -> idade(ts)
-}
+private val HHMM = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
+private val HHMMSS = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault())
+fun hora(ms: Long): String = if (ms > 0) HHMM.format(Instant.ofEpochMilli(ms)) else SEM_VALOR
+fun horaSeg(ms: Long): String = if (ms > 0) HHMMSS.format(Instant.ofEpochMilli(ms)) else SEM_VALOR
+/** "2026-11-22" → "22/11" (ou "ontem"). */
+fun diaCurto(dia: String?): String = runCatching {
+    val d = java.time.LocalDate.parse(dia)
+    if (d == java.time.LocalDate.now().minusDays(1)) "ontem" else "%02d/%02d".format(d.dayOfMonth, d.monthValue)
+}.getOrDefault("?")
 
-/** Tempo desde a última leitura, para não mostrar valor velho como se fosse atual. */
-fun idade(ts: Long): String {
+/** Tempo desde um instante, para nunca mostrar valor velho como se fosse atual. */
+fun idade(ts: Long, agora: Long = System.currentTimeMillis()): String {
     if (ts <= 0) return "sem leitura"
-    val min = (System.currentTimeMillis() - ts) / 60_000
+    val min = (agora - ts) / 60_000
     return when {
         min < 1 -> "agora"
         min < 60 -> "há $min min"
@@ -76,96 +89,148 @@ fun idade(ts: Long): String {
     }
 }
 
-// ================================================================ Hub Orbital
+/**
+ * Estado da leitura do batimento, distinguindo horário da LEITURA (amostra) e da CHEGADA do lote:
+ * com a tela apagada o SDK entrega em lotes a cada ~3 min, então "há 2 min" pode ser normal.
+ */
+data class EstadoLeitura(val texto: String, val cor: Color, val aoVivo: Boolean)
 
-private data class Funcao(val nome: String, val icone: ImageVector, val cor: Color, val rota: String)
+fun estadoLeitura(amostraMs: Long, chegadaMs: Long, servicoRodando: Boolean, monitor: MonitorCardiaco.Estado?, agora: Long = System.currentTimeMillis()): EstadoLeitura {
+    val idadeAmostra = agora - amostraMs
+    return when {
+        monitor == MonitorCardiaco.Estado.ERRO -> EstadoLeitura("erro no sensor", Cor.Alerta, false)
+        amostraMs > 0 && idadeAmostra < 20_000 -> EstadoLeitura("medindo agora", Cor.Coracao, true)
+        !servicoRodando && monitor != MonitorCardiaco.Estado.MEDINDO && monitor != MonitorCardiaco.Estado.CONECTANDO ->
+            EstadoLeitura("sensor desconectado · última ${idade(amostraMs, agora)}", Cor.Atencao, false)
+        amostraMs > 0 && idadeAmostra < 6 * 60_000 -> EstadoLeitura("última leitura ${idade(amostraMs, agora)}", Cor.TextoSec, false)
+        monitor == MonitorCardiaco.Estado.CONECTANDO -> EstadoLeitura("procurando pulso…", Cor.TextoSec, false)
+        chegadaMs > 0 && agora - chegadaMs < 6 * 60_000 -> EstadoLeitura("sem pulso · relógio solto?", Cor.Atencao, false)
+        else -> EstadoLeitura("sem leitura ${if (amostraMs > 0) idade(amostraMs, agora) else ""}".trim(), Cor.Atencao, false)
+    }
+}
 
-private val FUNCOES = listOf(
-    Funcao("Coração", Icone.Coracao, Cor.Coracao, Rota.CORACAO),
-    Funcao("VFC", Icone.Vfc, Cor.Vfc, Rota.VFC),
-    Funcao("Prontidão", Icone.Raio, Cor.Prontidao, Rota.PRONTIDAO),
-    Funcao("Sono", Icone.Lua, Cor.Sono, Rota.SONO),
-    Funcao("Respiração", Icone.Vento, Cor.Respira, Rota.RESPIRACAO),
-    Funcao("ECG", Icone.Ecg, Cor.Ecg, Rota.ECG),
-    Funcao("Check-in", Icone.Checkin, Cor.Acao, Rota.CHECKIN),
-    Funcao("Hábitos", Icone.Cafe, Cor.Habito, Rota.HABITOS),
-    Funcao("Registros", Icone.Lista, Cor.Registro, Rota.REGISTROS),
-    Funcao("Laboratório", Icone.Frasco, Cor.Lab, Rota.LABORATORIO),
-)
-
-/** Canto superior esquerdo de cada botão no anel (px do design, raio 178, a cada 36°). */
-private val POSICOES = listOf(
-    209f to 31f, 313.6f to 65f, 378.3f to 154f, 378.3f to 264f, 313.6f to 353f,
-    209f to 387f, 104.4f to 353f, 39.7f to 264f, 39.7f to 154f, 104.4f to 65f,
-)
-
+/** Atualiza o "agora" da tela a cada [ms] (idades e estados sem depender de nova leitura). */
 @Composable
-fun TelaHub(ir: (String) -> Unit) {
+fun relogioDaTela(ms: Long = 5_000): Long {
+    var agora by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) { while (true) { delay(ms); agora = System.currentTimeMillis() } }
+    return agora
+}
+
+// ================================================================ Hoje (tela inicial)
+
+/**
+ * Tela inicial: prontidão do servidor (a mesma do celular), batimento recente e VFC, radar resumido,
+ * as quatro seções e o registro de sintoma no botão de borda. Não liga sensor: lê o que a coleta já mediu.
+ */
+@Composable
+fun TelaHoje(ir: (String) -> Unit) {
     val ctx = LocalContext.current
-    val monitor = remember { MonitorCardiaco(ctx) }
-    DisposableEffect(Unit) { monitor.iniciar(); onDispose { monitor.parar() } }
-    val estado by monitor.estado.collectAsState()
+    val agora = relogioDaTela()
     val bpm by EstadoSaude.bpm.collectAsState()
     val ts by EstadoSaude.bpmTs.collectAsState()
-    val agora by EstadoSaude.rmssdAgora.collectAsState()
     val janelas by EstadoSaude.janelasHoje.collectAsState()
-    val vfc = EstadoSaude.rmssdHoje() ?: agora
-    val pront = remember(janelas.size) { EstadoSaude.prontidao() }
+    val vfc = remember(janelas.size) { EstadoSaude.rmssdHoje() }
+    val p = remember(agora / 60_000) { ProntidaoServidor.ler(ctx) }
+    val radar = remember(agora / 60_000) { ctx.getSharedPreferences("sync", android.content.Context.MODE_PRIVATE).getString("radar_nivel", null) }
+    val leitura = estadoLeitura(ts, EstadoSaude.ultimoLoteMs, ColetaService.rodando, null, agora)
 
-    Redondo { e ->
-        Canvas(Modifier.fillMaxSize()) {
-            drawCircle(
-                Color(0xFF151917), radius = e.px(178),
-                style = Stroke(e.px(1.5), pathEffect = PathEffect.dashPathEffect(floatArrayOf(e.px(2), e.px(6)))),
-            )
-        }
-        FUNCOES.forEachIndexed { i, f ->
-            val (x, y) = POSICOES[i]
-            Box(
-                Modifier.offset(e.d(x), e.d(y)).size(e.d(62)).clip(CircleShape)
-                    .background(f.cor.copy(alpha = 0.14f))
-                    .border(e.d(1.5), f.cor.copy(alpha = 0.45f), CircleShape)
-                    .clickable { ir(f.rota) }
-                    .semantics { contentDescription = f.nome },
-                contentAlignment = Alignment.Center,
-            ) { IconeTraco(f.icone, f.cor, e.d(26)) }
-        }
-        Column(
-            Modifier.offset(e.d(127), e.d(127)).size(e.d(226)).clip(CircleShape)
-                .background(Cor.Disco).border(e.d(1), Cor.DiscoBorda, CircleShape)
-                .clickable { ir(Rota.CORACAO) },
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Text("SAÚDE", color = Cor.Salvia, fontSize = e.s(11), fontWeight = FontWeight.SemiBold, letterSpacing = e.s(2))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconeTraco(Icone.Coracao, Cor.Coracao, e.d(18))
-                Spacer(Modifier.width(e.d(6)))
-                if (bpm != null) {
-                    Text("$bpm", color = Cor.Texto, fontSize = e.s(64), fontWeight = FontWeight.Bold, letterSpacing = e.s(-1))
-                } else {
-                    Text("– –", color = Cor.TextoTerc, fontSize = e.s(40), fontWeight = FontWeight.Light)
-                }
+    TelaLista(botaoBorda = { BotaoBorda("Sintoma", cor = Cor.Ecg, corTexto = Color.White) { ir(Rota.MALESTAR) } }) {
+        item { Cabecalho("SAÚDE NT", Cor.Acao) }
+        item { CartaoProntidao(p, agora) { ir(Rota.PRONTIDAO) } }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                val parado = !leitura.aoVivo && (leitura.cor == Cor.Atencao || leitura.cor == Cor.Alerta)
+                val rotuloBpm = if (leitura.aoVivo) "agora" else idade(ts, agora)
+                MiniCartao(Modifier.weight(1f), bpm?.toString() ?: SEM_VALOR, "bpm", rotuloBpm, if (parado) Cor.Atencao else Cor.Coracao) { ir(Rota.CORACAO) }
+                MiniCartao(Modifier.weight(1f), vfc?.let { "%.0f".format(it) } ?: SEM_VALOR, "ms", "VFC hoje", Cor.Vfc) { ir(Rota.VFC) }
             }
-            Text("bpm · " + statusLeitura(estado, ts), color = Cor.TextoSec, fontSize = e.s(13))
-            Box(Modifier.padding(vertical = e.d(9)).width(e.d(120)).height(e.d(1)).background(Cor.Divisor))
-            Row(horizontalArrangement = Arrangement.spacedBy(e.d(18))) {
-                MiniValor(e, vfc?.let { "%.0f".format(it) } ?: "—", " ms", "VFC", Cor.VfcClaro)
-                if (pront.pontos != null) MiniValor(e, "${pront.pontos}", "", "prontidão", Cor.ProntidaoClaro)
-                else MiniValor(e, "${pront.diasBase}", "/${EstadoSaude.DIAS_BASE}", "base", Cor.ProntidaoClaro)
+        }
+        item {
+            val (txt, cor) = when (radar) {
+                "estresse" -> "Radar: vários sinais fora" to Cor.Atencao
+                "observar" -> "Radar: observar" to Cor.Atencao
+                "normal" -> "Radar: dentro do normal" to Cor.Acao
+                "calibrando" -> "Radar: aprendendo seu normal" to Cor.TextoSec
+                else -> "Radar: sem noite medida" to Cor.TextoSec
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { Etiqueta(txt, cor) }
+        }
+        secoes(ir)
+    }
+}
+
+private fun TransformingLazyColumnScope.secoes(ir: (String) -> Unit) {
+    item { BotaoSecao("Coração", "batimento e sinal", Icone.Coracao, Cor.Coracao) { ir(Rota.CORACAO) } }
+    item { BotaoSecao("Registrar", "sintoma, check-in, hábitos", Icone.Lapis, Cor.Acao) { ir(Rota.REGISTRAR) } }
+    item { BotaoSecao("Treinos", "sessões e recuperação", Icone.Cronometro, Cor.Atencao) { ir(Rota.TREINOS) } }
+    item { BotaoSecao("Mais", "ECG, respiração, testes", Icone.Mais, Cor.TextoSec) { ir(Rota.MAIS) } }
+}
+
+/** Botão de lista com ícone, rótulo e descrição curta (nada de ícone sem nome). */
+@Composable
+fun BotaoSecao(titulo: String, descricao: String?, icone: androidx.compose.ui.graphics.vector.ImageVector, cor: Color, habilitado: Boolean = true, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        enabled = habilitado,
+        modifier = Modifier.fillMaxWidth(),
+        colors = ButtonDefaults.filledTonalButtonColors(containerColor = Cor.Superficie, contentColor = Cor.Texto),
+        icon = { IconeTraco(icone, if (habilitado) cor else Cor.TextoTerc) },
+        secondaryLabel = descricao?.let { d -> { Text(d, color = Cor.TextoSec, maxLines = 2) } },
+        label = { Text(titulo, maxLines = 1) },
+    )
+}
+
+@Composable
+private fun CartaoProntidao(p: ProntidaoServidor.Leitura, agora: Long, onClick: () -> Unit) {
+    val hoje = p.deHoje && p.score != null
+    val cor = if (hoje) corNivel(p.nivel) else Cor.TextoSec
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().semantics {
+            contentDescription = if (hoje) "Prontidão ${p.score} de 100, ${tituloNivel(p.nivel)}" else "Prontidão de hoje indisponível"
+        },
+        colors = CardDefaults.cardColors(containerColor = Cor.Superficie),
+    ) {
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("Prontidão", color = Cor.TextoSec, style = MaterialTheme.typography.labelMedium)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(if (hoje) "${p.score}" else SEM_VALOR, color = cor, style = MaterialTheme.typography.numeralSmall.tabular())
+                Spacer(Modifier.width(8.dp))
+                Column {
+                    Text(
+                        if (hoje) tituloNivel(p.nivel) else "Aguardando a noite",
+                        color = if (hoje) cor else Cor.TextoSec, style = MaterialTheme.typography.labelMedium, maxLines = 2,
+                    )
+                    Text(
+                        when {
+                            !hoje && p.recebidaEm > 0 -> "última: ${diaCurto(p.dia)}"
+                            !hoje -> "sem dados do servidor"
+                            p.provisoria -> "provisória · ${hora(p.recebidaEm)}"
+                            else -> "atualizada ${hora(p.recebidaEm)}"
+                        },
+                        color = if (hoje && !p.provisoria) Cor.TextoSec else Cor.Atencao, style = MaterialTheme.typography.labelSmall, maxLines = 1,
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun MiniValor(e: Escala, valor: String, sufixo: String, rotulo: String, cor: Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(valor, color = cor, fontSize = e.s(18), fontWeight = FontWeight.SemiBold)
-            if (sufixo.isNotEmpty()) Text(sufixo, color = Cor.TextoSec, fontSize = e.s(11), modifier = Modifier.padding(bottom = e.d(2)))
+private fun MiniCartao(modifier: Modifier, valor: String, unidade: String, rotulo: String, cor: Color, onClick: () -> Unit) {
+    Card(
+        onClick = onClick, modifier = modifier.semantics { contentDescription = "$rotulo: $valor $unidade" },
+        colors = CardDefaults.cardColors(containerColor = Cor.Superficie),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+    ) {
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(valor, color = Cor.Texto, style = MaterialTheme.typography.titleLarge.tabular(), maxLines = 1)
+                if (valor != SEM_VALOR) Text(" $unidade", color = Cor.TextoSec, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(bottom = 3.dp))
+            }
+            Text(rotulo, color = cor, style = MaterialTheme.typography.labelSmall, maxLines = 1, textAlign = TextAlign.Center)
         }
-        Text(rotulo, color = Cor.TextoTerc, fontSize = e.s(10))
     }
 }
 
@@ -177,49 +242,45 @@ private fun fracaoBpm(v: Int) = ((v - 40f) / (180f - 40f)).coerceIn(0f, 1f)
 fun TelaCoracao() {
     val ctx = LocalContext.current
     val monitor = remember { MonitorCardiaco(ctx) }
-    DisposableEffect(Unit) { monitor.iniciar(); onDispose { monitor.parar() } }
-    val estado by monitor.estado.collectAsState()
-    val erro by monitor.erro.collectAsState()
+    DisposableEffect(Unit) { monitor.iniciar(); onDispose { monitor.parar() } } // só liga sensor se a coleta contínua não estiver rodando
+    val estadoMon by monitor.estado.collectAsState()
+    val agora = relogioDaTela(2_000)
     val bpm by EstadoSaude.bpm.collectAsState()
     val ts by EstadoSaude.bpmTs.collectAsState()
     val serie by EstadoSaude.serieBpm.collectAsState()
     val faixa by EstadoSaude.faixaHoje.collectAsState()
+    val qualidade by EstadoSaude.qualidadeIbi.collectAsState()
+    val leitura = estadoLeitura(ts, EstadoSaude.ultimoLoteMs, ColetaService.rodando, estadoMon, agora)
 
-    Redondo { e ->
-        Canvas(Modifier.fillMaxSize()) {
-            arcoBorda(e, 226, 10, Color(0xFF241417), 135f, 270f)
-            faixa?.let { (mn, mx) ->
-                val a = fracaoBpm(mn); val b = fracaoBpm(mx)
-                arcoBorda(e, 226, 10, Cor.Coracao, 135f + 270f * a, maxOf(270f * (b - a), 1f))
-            }
-            bpm?.let { pontoBorda(e, 226, 135f + 270f * fracaoBpm(it), 9, Color.White, Cor.Coracao) }
+    TelaLista {
+        item { Cabecalho("Coração", Cor.Coracao) }
+        item { ValorGrande(bpm?.toString() ?: SEM_VALOR, "bpm", null) }
+        item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { Etiqueta(leitura.texto, leitura.cor) } }
+        item {
+            GraficoLinha(
+                serie.map { it.v }, Cor.Coracao,
+                Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 12.dp).semantics { contentDescription = "Batimento recente" },
+            )
         }
-        Column(Modifier.fillMaxSize().padding(top = e.d(58)), horizontalAlignment = Alignment.CenterHorizontally) {
-            Titulo(e, "Coração", Icone.Coracao, Cor.Coracao)
-            Spacer(Modifier.height(e.d(12)))
-            Numero(e, bpm?.toString() ?: SEM_VALOR, "bpm", 96)
-            val status = statusLeitura(estado, ts, erro)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(e.d(7)).clip(CircleShape).background(if (status == "ao vivo") Cor.Coracao else Cor.TextoTerc))
-                Spacer(Modifier.width(e.d(6)))
-                Text(status, color = Cor.CoracaoClaro, fontSize = e.s(13))
+        item {
+            Column {
+                LinhaInfo("Leitura", horaSeg(ts))
+                LinhaInfo("Lote chegou", horaSeg(EstadoSaude.ultimoLoteMs))
+                faixa?.let { (mn, mx) -> LinhaInfo("Faixa de hoje", "$mn–$mx bpm") }
+                qualidade?.let { LinhaInfo("Sinal (IBI)", "${(it * 100).toInt()}%", if (it < 0.6f) Cor.Atencao else Cor.Texto) }
             }
-            if (status == "procurando pulso…") {
-                Text("use o relógio firme no pulso", color = Cor.TextoTerc, fontSize = e.s(11), modifier = Modifier.padding(top = e.d(4)))
-            }
-            Spacer(Modifier.height(e.d(12)))
-            GraficoLinha(serie.map { it.v }, Cor.Coracao, Modifier.width(e.d(290)).height(e.d(66)))
-            Spacer(Modifier.height(e.d(10)))
-            if (faixa != null) {
-                Row(horizontalArrangement = Arrangement.spacedBy(e.d(8))) {
-                    Chip(e, "mín ${faixa!!.first}")
-                    Chip(e, "máx ${faixa!!.second}")
+        }
+        item {
+            Canvas(Modifier.fillMaxWidth().height(10.dp).padding(horizontal = 18.dp)) {
+                drawRoundRect(Cor.Elevada, cornerRadius = CornerRadius(size.height / 2))
+                faixa?.let { (mn, mx) ->
+                    val a = fracaoBpm(mn) * size.width; val b = fracaoBpm(mx) * size.width
+                    drawRoundRect(Cor.Coracao.copy(alpha = 0.55f), Offset(a, 0f), Size((b - a).coerceAtLeast(size.height), size.height), CornerRadius(size.height / 2))
                 }
-                Text("faixa de hoje no arco", color = Cor.TextoTerc, fontSize = e.s(11), modifier = Modifier.padding(top = e.d(6)))
-            } else {
-                Chip(e, "sem leituras hoje")
+                bpm?.let { drawCircle(Color.White, size.height * 0.75f, Offset(fracaoBpm(it) * size.width, size.height / 2)) }
             }
         }
+        item { Nota("Com a tela apagada, o relógio entrega o batimento em lotes a cada ~3 min.", Cor.TextoTerc) }
     }
 }
 
@@ -230,141 +291,183 @@ fun TelaVfc() {
     val ctx = LocalContext.current
     val monitor = remember { MonitorCardiaco(ctx) }
     DisposableEffect(Unit) { monitor.iniciar(); onDispose { monitor.parar() } }
-    val agora by EstadoSaude.rmssdAgora.collectAsState()
+    val agoraRmssd by EstadoSaude.rmssdAgora.collectAsState()
     val qualidade by EstadoSaude.qualidadeIbi.collectAsState()
     val janelas by EstadoSaude.janelasHoje.collectAsState()
-    val hoje = EstadoSaude.rmssdHoje()
+    val hoje = remember(janelas.size) { EstadoSaude.rmssdHoje() }
     val variacao = remember(janelas.size) { EstadoSaude.variacaoVs7d() }
 
-    Redondo { e ->
-        Canvas(Modifier.fillMaxSize()) {
-            arcoBorda(e, 226, 8, Color(0xFF1B1526), 135f, 270f)
-            qualidade?.let { arcoBorda(e, 226, 8, Cor.Vfc, 135f, 270f * it) }
-        }
-        Column(Modifier.fillMaxSize().padding(top = e.d(58)), horizontalAlignment = Alignment.CenterHorizontally) {
-            Titulo(e, "VFC (HRV)", Icone.Vfc, Cor.Vfc)
-            Spacer(Modifier.height(e.d(12)))
-            Numero(e, (hoje ?: agora)?.let { "%.0f".format(it) } ?: SEM_VALOR, "ms", 88)
-            Text(
-                when {
-                    hoje != null -> "RMSSD · mediana de hoje"
-                    agora != null -> "RMSSD · agora"
-                    else -> "medindo… fique parado"
-                },
-                color = Cor.VfcClaro, fontSize = e.s(13),
+    TelaLista {
+        item { Cabecalho("VFC", Cor.Vfc) }
+        item {
+            ValorGrande(
+                (hoje ?: agoraRmssd)?.let { "%.0f".format(it) } ?: SEM_VALOR, "ms",
+                when { hoje != null -> "mediana de hoje"; agoraRmssd != null -> "agora · fique parado"; else -> "medindo…" }, Cor.Vfc,
             )
-            Spacer(Modifier.height(e.d(14)))
-            val ultimas = janelas.takeLast(14)
-            if (ultimas.isNotEmpty()) {
+        }
+        item {
+            val ultimas = janelas.takeLast(16)
+            if (ultimas.isEmpty()) Nota("A 1ª janela de 5 min aparece em breve.")
+            else Canvas(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 16.dp).semantics { contentDescription = "Janelas de VFC de hoje" }) {
                 val mn = ultimas.minOf { it.rmssd }; val mx = ultimas.maxOf { it.rmssd }
-                Row(Modifier.height(e.d(72)), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(e.d(5))) {
-                    ultimas.forEach { j ->
-                        val h = 14f + if (mx > mn) (j.rmssd - mn) / (mx - mn) * 58f else 40f
-                        Box(
-                            Modifier.width(e.d(13)).height(e.d(h)).clip(RoundedCornerShape(e.d(4)))
-                                .background(if (j.cobertura >= 0.6f) Cor.Vfc else Color(0xFF2A2F2C)),
-                        )
-                    }
+                val w = size.width / ultimas.size
+                ultimas.forEachIndexed { i, j ->
+                    val h = size.height * (0.25f + if (mx > mn) 0.75f * (j.rmssd - mn) / (mx - mn) else 0.5f)
+                    drawRoundRect(
+                        if (j.cobertura >= 0.8f) Cor.Vfc else Color(0xFF3A3F45),
+                        Offset(i * w + w * 0.15f, size.height - h), Size(w * 0.7f, h), CornerRadius(3.dp.toPx()),
+                    )
                 }
-                Text("janelas de 5 min · cinza = sinal fraco", color = Cor.TextoTerc, fontSize = e.s(11), modifier = Modifier.padding(top = e.d(6)))
-            } else {
-                Text("1ª janela de 5 min em breve", color = Cor.TextoTerc, fontSize = e.s(12))
-            }
-            Spacer(Modifier.height(e.d(10)))
-            Row(horizontalArrangement = Arrangement.spacedBy(e.d(8))) {
-                variacao?.let {
-                    Chip(e, "${if (it >= 0) "↑" else "↓"} ${"%.0f".format(kotlin.math.abs(it))}% vs. 7 dias",
-                        fundo = Cor.Prontidao.copy(alpha = 0.16f), cor = Cor.ProntidaoClaro, negrito = true)
-                }
-                qualidade?.let { Chip(e, "sinal ${(it * 100).toInt()}%") }
             }
         }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                variacao?.let { Etiqueta("${if (it >= 0) "+" else "−"}${"%.0f".format(kotlin.math.abs(it))}% vs. 7 dias", Cor.Vfc) }
+            }
+        }
+        item { qualidade?.let { LinhaInfo("Sinal (IBI)", "${(it * 100).toInt()}%", if (it < 0.6f) Cor.Atencao else Cor.Texto) } }
+        item { Nota("Janelas de 5 min. Cinza = captação abaixo de 80% (fora da VFC do dia no servidor).", Cor.TextoTerc) }
     }
 }
 
-// ================================================================ Prontidão
+// ================================================================ Prontidão (do servidor)
 
 @Composable
 fun TelaProntidao() {
-    val p = remember { EstadoSaude.prontidao() }
-    Redondo { e ->
-        Canvas(Modifier.fillMaxSize()) {
-            if (p.pontos == null) {
-                val passo = 270f / EstadoSaude.DIAS_BASE
-                for (k in 0 until EstadoSaude.DIAS_BASE) {
-                    arcoBorda(e, 222, 16, if (k < p.diasBase) Cor.Prontidao else Color(0xFF18211B),
-                        135f + k * passo, passo - 1.6f, StrokeCap.Butt)
+    val ctx = LocalContext.current
+    val p = remember { ProntidaoServidor.ler(ctx) }
+    val hoje = p.deHoje && p.score != null
+    TelaLista {
+        item { Cabecalho("Prontidão", Cor.Acao) }
+        item {
+            ValorGrande(if (hoje) "${p.score}" else SEM_VALOR, "", if (hoje) tituloNivel(p.nivel) else "sem nota de hoje", corNivel(p.nivel), corNivel(p.nivel))
+        }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                when {
+                    !hoje -> Etiqueta("aguardando a noite", Cor.TextoSec)
+                    p.provisoria -> Etiqueta("referência provisória", Cor.Atencao)
+                    else -> Etiqueta("confiança ${when (p.confianca) { "alta" -> "alta"; "media" -> "média"; "baixa" -> "baixa"; else -> "?" }}", Cor.Acao)
                 }
-            } else {
-                arcoBorda(e, 222, 16, Color(0xFF18211B), 135f, 270f)
-                arcoBorda(e, 222, 16, Cor.Prontidao, 135f, 270f * p.pontos / 100f)
             }
         }
-        Column(
-            Modifier.fillMaxSize().padding(horizontal = e.d(92)),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Titulo(e, "Prontidão", Icone.Raio, Cor.Prontidao)
-            Spacer(Modifier.height(e.d(10)))
-            if (p.pontos == null) {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text("${p.diasBase}", color = Cor.Texto, fontSize = e.s(88), fontWeight = FontWeight.Bold)
-                    Text("/${EstadoSaude.DIAS_BASE}", color = Cor.TextoTerc, fontSize = e.s(34), fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(bottom = e.d(12)))
-                }
-                Text("dias de linha de base", color = Cor.ProntidaoClaro, fontSize = e.s(14))
-                Text(
-                    "Sua nota aparece quando o relógio conhecer a sua VFC normal. Use-o à noite para acelerar.",
-                    color = Cor.TextoSec, fontSize = e.s(13), textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(top = e.d(12)),
-                )
-                Spacer(Modifier.height(e.d(12)))
-                Chip(e, "faltam ${EstadoSaude.DIAS_BASE - p.diasBase} noites")
-            } else {
-                Numero(e, "${p.pontos}", tamanho = 88)
-                Text("recuperação", color = Cor.ProntidaoClaro, fontSize = e.s(14))
-                Spacer(Modifier.height(e.d(12)))
-                Chip(e, p.texto, fundo = Cor.Prontidao.copy(alpha = 0.16f), cor = Cor.ProntidaoClaro, negrito = true)
-                Text("apoio à decisão — não decide sozinho", color = Cor.TextoTerc, fontSize = e.s(11),
-                    modifier = Modifier.padding(top = e.d(8)))
+        if (hoje) {
+            p.fatores.forEach { f ->
+                item { LinhaInfo(f.texto, if (f.efeito < 0) "−${-f.efeito}" else "0", if (f.efeito <= -10) Cor.Atencao else Cor.TextoSec) }
             }
+            p.motivoConfianca?.let { m -> item { Nota(m, Cor.TextoTerc) } }
+        }
+        item {
+            Nota(
+                if (hoje) "Mesma nota do celular (${p.algoritmo ?: "servidor"}), recebida às ${hora(p.recebidaEm)}. Índice próprio, não é medida clínica."
+                else "A nota sai depois que a noite chega ao servidor (relógio + Samsung Health). O relógio não calcula uma nota própria.",
+                Cor.TextoTerc,
+            )
         }
     }
 }
 
-// ================================================================ Sono (Fase 2)
+// ================================================================ Sono (resumo do servidor)
 
 @Composable
 fun TelaSono() {
-    Redondo { e ->
-        Canvas(Modifier.fillMaxSize()) {
-            drawCircle(
-                Color(0xFF2A3150), radius = e.px(226),
-                style = Stroke(e.px(3), cap = StrokeCap.Round, pathEffect = PathEffect.dashPathEffect(floatArrayOf(e.px(2), e.px(10)))),
+    val ctx = LocalContext.current
+    val p = remember { ProntidaoServidor.ler(ctx) }
+    val h = p.sonoHoras
+    TelaLista {
+        item { Cabecalho("Sono", Cor.Sono) }
+        item {
+            ValorGrande(
+                h?.let { "${it.toInt()}h${"%02d".format(((it % 1) * 60).toInt())}" } ?: SEM_VALOR, "",
+                if (h != null && p.deHoje) "dormidas esta noite" else "sem sono de hoje", Cor.Sono,
             )
-            listOf(Triple(120f, 96f, 1.6f), Triple(352f, 88f, 1.2f), Triple(390f, 160f, 1.8f), Triple(86f, 170f, 1.2f)).forEach { (x, y, r) ->
-                drawCircle(Cor.Sono, e.px(r), androidx.compose.ui.geometry.Offset(e.px(x), e.px(y)))
-            }
         }
-        Column(
-            Modifier.fillMaxSize().padding(horizontal = e.d(84)),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Box(Modifier.size(e.d(64)).clip(CircleShape).background(Cor.Sono.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
-                IconeTraco(Icone.Lua, Cor.Sono, e.d(32))
-            }
-            Text("Sono", color = Cor.Texto, fontSize = e.s(18), fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = e.d(10)))
-            Row(Modifier.padding(top = e.d(14)).height(e.d(54)), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(e.d(4))) {
-                listOf(30, 44, 54, 40, 26, 44, 54, 50, 34, 22, 40, 52, 44, 30, 20, 36).forEach { h ->
-                    Box(Modifier.width(e.d(12)).height(e.d(h)).border(e.d(1.5), Color(0xFF3A4370), RoundedCornerShape(e.d(4))))
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                when (p.sonoEstado) {
+                    "contraditorio" -> Etiqueta("registro contraditório", Cor.Atencao)
+                    "parcial" -> Etiqueta("dados parciais", Cor.Atencao)
+                    "aguardando" -> Etiqueta("aguardando Samsung Health", Cor.TextoSec)
+                    else -> if (p.recebidaEm > 0) Etiqueta("atualizado ${hora(p.recebidaEm)}", Cor.TextoSec)
                 }
             }
-            Text("Fases e duração do sono chegam pelo Samsung Health do celular.", color = Cor.TextoSec,
-                fontSize = e.s(13), textAlign = TextAlign.Center, modifier = Modifier.padding(top = e.d(14)))
-            Spacer(Modifier.height(e.d(12)))
-            Chip(e, "disponível na Fase 2", fundo = Cor.Sono.copy(alpha = 0.14f), cor = Color(0xFFC9D2FF), negrito = true)
+        }
+        p.sonoMotivo?.let { m -> item { Nota(m, Cor.TextoTerc) } }
+        p.deitar?.let { d -> item { LinhaInfo("Deitar hoje", d, Cor.Sono) } }
+        p.acordar?.let { a -> item { LinhaInfo("Acordar típico", a) } }
+        item { Nota("Fases e detalhes no app do celular. O relógio não faz outra coleta para esta tela.", Cor.TextoTerc) }
+    }
+}
+
+// ================================================================ Seções
+
+@Composable
+fun TelaRegistrar(ir: (String) -> Unit) {
+    TelaLista {
+        item { Cabecalho("Registrar") }
+        item { BotaoSecao("Sintoma / mal-estar", "grava a hora, mesmo sem internet", Icone.Alerta, Cor.Ecg) { ir(Rota.MALESTAR) } }
+        item { BotaoSecao("Check-in", "como você está", Icone.Checkin, Cor.Acao) { ir(Rota.CHECKIN) } }
+        item { BotaoSecao("Hábitos", "café, álcool, remédio, água", Icone.Cafe, Cor.Habito) { ir(Rota.HABITOS) } }
+        item { BotaoSecao("Ver registros", null, Icone.Lista, Cor.Registro) { ir(Rota.REGISTROS) } }
+    }
+}
+
+@Composable
+fun TelaTreinos(ir: (String) -> Unit) {
+    TelaLista {
+        item { Cabecalho("Treinos", Cor.Atencao) }
+        item { Nota("Grave o treino no Samsung Health do relógio: o Saúde NT importa sozinho e mostra zonas e carga no celular.") }
+        item { BotaoSecao("Sessão com recuperação", "em breve · Laboratório de Recuperação", Icone.Cronometro, Cor.Atencao, habilitado = false) {} }
+        item { BotaoSecao("Teste em pé", "ortostático · 5 min", Icone.EmPe, Cor.Coracao) { ir(Rota.ORTOSTATICO) } }
+        item { BotaoSecao("Coração agora", null, Icone.Coracao, Cor.Coracao) { ir(Rota.CORACAO) } }
+    }
+}
+
+@Composable
+fun TelaMais(ir: (String) -> Unit) {
+    TelaLista {
+        item { Cabecalho("Mais") }
+        item { BotaoSecao("ECG", "30 s · dedo no botão", Icone.Ecg, Cor.Ecg) { ir(Rota.ECG) } }
+        item { BotaoSecao("Respiração", "4-7-8 · ~1 min", Icone.Vento, Cor.Respira) { ir(Rota.RESPIRACAO) } }
+        item { BotaoSecao("Teste em pé", "ortostático", Icone.EmPe, Cor.Coracao) { ir(Rota.ORTOSTATICO) } }
+        item { BotaoSecao("VFC", "janelas de hoje", Icone.Vfc, Cor.Vfc) { ir(Rota.VFC) } }
+        item { BotaoSecao("Sono", "resumo da noite", Icone.Lua, Cor.Sono) { ir(Rota.SONO) } }
+        item { BotaoSecao("Registros", "histórico", Icone.Lista, Cor.Registro) { ir(Rota.REGISTROS) } }
+        item { BotaoSecao("Diagnóstico", "coleta e envio", Icone.Sinal, Cor.TextoSec) { ir(Rota.DIAGNOSTICO) } }
+        item { BotaoSecao("Laboratório técnico", "coleta para análise", Icone.Frasco, Cor.Lab) { ir(Rota.LABORATORIO) } }
+        item { BotaoSecao("Conexão", "Nosso Tudo", Icone.Elo, Cor.Acao) { ir(Rota.CONECTAR) } }
+    }
+}
+
+// ================================================================ Diagnóstico da coleta
+
+@Composable
+fun TelaDiagnostico() {
+    val ctx = LocalContext.current
+    val agora = relogioDaTela(3_000)
+    val status = remember(agora) { Sync.status(ctx) }
+    val diag = remember(agora) { runCatching { ColetaService.instancia?.diagSensor() }.getOrNull() }
+    val ts by EstadoSaude.bpmTs.collectAsState()
+    TelaLista {
+        item { Cabecalho("Diagnóstico") }
+        item {
+            Column {
+                LinhaInfo("Versão", app.nossotudo.saude.wear.BuildConfig.VERSION_NAME)
+                LinhaInfo("Coleta contínua", if (ColetaService.rodando) "ligada" else "parada", if (ColetaService.rodando) Cor.Acao else Cor.Atencao)
+                LinhaInfo("Sensor", diag?.optString("estado") ?: "—", if (diag?.optString("estado") == "RECEIVING") Cor.Acao else Cor.Atencao)
+                LinhaInfo("Última leitura", "${horaSeg(ts)} (${idade(ts, agora)})")
+                LinhaInfo("Último lote", horaSeg(EstadoSaude.ultimoLoteMs))
+                diag?.let { d ->
+                    LinhaInfo("Reconexões", "${d.optInt("reconexoes")}")
+                    d.optJSONObject("alarme")?.let { a ->
+                        LinhaInfo("Vigia (execuções)", "${a.optInt("executados")}")
+                        LinhaInfo("Atraso do alarme", "${a.optLong("ultimo_atraso_s", -1).takeIf { it >= 0 } ?: "—"} s")
+                    }
+                }
+                LinhaInfo("Último envio", if (status.ultimoEnvio > 0) "${hora(status.ultimoEnvio)} (${idade(status.ultimoEnvio, agora)})" else "nunca")
+                LinhaInfo("Pendentes", "${status.pendentes}")
+                status.erro?.let { LinhaInfo("Erro", it, Cor.Atencao) }
+            }
         }
     }
 }

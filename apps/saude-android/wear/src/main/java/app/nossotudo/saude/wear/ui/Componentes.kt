@@ -2,98 +2,182 @@ package app.nossotudo.saude.wear.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.ui.unit.em
-import androidx.wear.compose.material3.LocalTextStyle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Density
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.wear.compose.foundation.lazy.TransformingLazyColumn
+import androidx.wear.compose.foundation.lazy.TransformingLazyColumnScope
+import androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState
+import androidx.wear.compose.material3.ColorScheme
+import androidx.wear.compose.material3.EdgeButton
+import androidx.wear.compose.material3.EdgeButtonSize
 import androidx.wear.compose.material3.Icon
+import androidx.wear.compose.material3.ListHeader
+import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.ScreenScaffold
 import androidx.wear.compose.material3.Text
-import kotlin.math.cos
-import kotlin.math.sin
-
-/** Paleta do design "Saúde NT — Galaxy Watch" (canvas Orbital). */
-object Cor {
-    val Fundo = Color(0xFF000000)
-    val Disco = Color(0xFF0D110F)
-    val DiscoBorda = Color(0xFF1C221E)
-    val Chip = Color(0xFF1C1F1E)
-    val Divisor = Color(0xFF232A26)
-    val Texto = Color(0xFFF7F6F2)
-    val TextoSec = Color(0xFFB4B9B4)
-    val TextoTerc = Color(0xFF8E948F)
-    val Acao = Color(0xFF8FDE95)
-    val AcaoTexto = Color(0xFF0E2A14)
-    val Salvia = Color(0xFF8FA993)
-    val Coracao = Color(0xFFFF6B7D)
-    val CoracaoClaro = Color(0xFFFF8E9B)
-    val Vfc = Color(0xFFB08CFF)
-    val VfcClaro = Color(0xFFC8B2FF)
-    val Sono = Color(0xFF8EA2FF)
-    val Prontidao = Color(0xFF7FE08A)
-    val ProntidaoClaro = Color(0xFF9EE8A6)
-    val Respira = Color(0xFF45E3EA)
-    val Ecg = Color(0xFFFF4F5E)
-    val Habito = Color(0xFFF2C14B)
-    val Registro = Color(0xFFB5C9B8)
-    val Lab = Color(0xFFB4B9B4)
-}
+import androidx.wear.compose.material3.ButtonDefaults
 
 /**
- * O design foi feito em 480×480 px, o tamanho exato da tela do Watch 6 (44 mm).
- * [d] converte "px do design" em Dp proporcional à tela; [s] em tamanho de fonte.
+ * Saúde NT — Performance Wear. Fundo preto, verde suave para ações e UMA cor por métrica (as mesmas do celular).
+ * Tudo em dp/sp nativos: respeita a densidade da tela e o tamanho de fonte escolhido no relógio
+ * (antes, a classe Escala reduzia um desenho de 480 px à largura da tela e deixava textos com ~6 sp).
  */
-class Escala(private val u: Dp, private val densidade: Density) {
-    fun d(n: Number): Dp = u * n.toFloat()
-    fun s(n: Number): TextUnit = with(densidade) { (u * n.toFloat()).toSp() }
-    fun px(n: Number): Float = with(densidade) { (u * n.toFloat()).toPx() }
+object Cor {
+    val Fundo = Color(0xFF000000)
+    val Superficie = Color(0xFF161B1F)
+    val SuperficieBaixa = Color(0xFF101417)
+    val Elevada = Color(0xFF20272C)
+    val Texto = Color(0xFFF5F7F8)
+    val TextoSec = Color(0xFFA3AEB6)
+    val TextoTerc = Color(0xFF7D8992)
+    val Acao = Color(0xFF8EE5A1)
+    val AcaoTexto = Color(0xFF0B2414)
+    val AcaoContainer = Color(0xFF1C3524)
+    val Atencao = Color(0xFFF1BD60)
+    val Alerta = Color(0xFFF16C80)
+    val Coracao = Color(0xFFF38C7C)
+    val Vfc = Color(0xFFB39AF7)
+    val Sono = Color(0xFF91A8FF)
+    val Respira = Color(0xFF5CD2E6)
+    val Ecg = Color(0xFFF16C80)
+    val Habito = Color(0xFFF1BD60)
+    val Registro = Color(0xFFB5C9B8)
+    val Lab = Color(0xFFA3AEB6)
 }
 
-/** Tela redonda preta com escala do design. */
+/** Tema do relógio (Material 3 Expressive para Wear OS) com a paleta do Saúde NT. */
 @Composable
-fun Redondo(conteudo: @Composable BoxScope.(Escala) -> Unit) {
-    // Altura de linha relativa ao tamanho da fonte (em): a do tema é fixa e não acompanha a escala do design.
-    CompositionLocalProvider(LocalTextStyle provides LocalTextStyle.current.copy(lineHeight = 1.3.em)) {
-        BoxWithConstraints(Modifier.fillMaxSize().background(Cor.Fundo)) {
-            val e = Escala(maxWidth / 480f, LocalDensity.current)
-            conteudo(e)
+fun SaudeWearTema(conteudo: @Composable () -> Unit) {
+    MaterialTheme(
+        colorScheme = ColorScheme(
+            primary = Cor.Acao, onPrimary = Cor.AcaoTexto, primaryContainer = Cor.AcaoContainer, onPrimaryContainer = Cor.Acao,
+            primaryDim = Cor.Acao.copy(alpha = 0.8f),
+            secondary = Cor.Vfc, onSecondary = Color(0xFF1E1240),
+            background = Cor.Fundo, onBackground = Cor.Texto,
+            surfaceContainerLow = Cor.SuperficieBaixa, surfaceContainer = Cor.Superficie, surfaceContainerHigh = Cor.Elevada,
+            onSurface = Cor.Texto, onSurfaceVariant = Cor.TextoSec, outline = Color(0xFF3A444B), outlineVariant = Color(0xFF263038),
+            error = Cor.Alerta, onError = Color(0xFF3A0A12),
+        ),
+        content = conteudo,
+    )
+}
+
+/** Números grandes com algarismos de largura fixa (não "pulam" quando o valor muda). */
+fun TextStyle.tabular() = copy(fontFeatureSettings = "tnum")
+
+/**
+ * Esqueleto de tela em lista (Material 3 Expressive): rolagem com a coroa, itens que se transformam nas bordas
+ * da tela redonda, relógio no topo e um botão de borda opcional na base.
+ */
+@Composable
+fun TelaLista(
+    botaoBorda: (@Composable () -> Unit)? = null,
+    conteudo: TransformingLazyColumnScope.() -> Unit,
+) {
+    val estado = rememberTransformingLazyColumnState()
+    if (botaoBorda != null) {
+        ScreenScaffold(scrollState = estado, edgeButton = { botaoBorda() }) { padding ->
+            TransformingLazyColumn(state = estado, contentPadding = padding, modifier = Modifier.background(Cor.Fundo), content = conteudo)
+        }
+    } else {
+        ScreenScaffold(scrollState = estado) { padding ->
+            TransformingLazyColumn(state = estado, contentPadding = padding, modifier = Modifier.background(Cor.Fundo), content = conteudo)
         }
     }
 }
 
-/** Ícones de traço (mesmos desenhos do canvas, viewBox 24). */
+/** Botão de borda (ação principal da tela). */
+@Composable
+fun BotaoBorda(texto: String, cor: Color = Cor.Acao, corTexto: Color = Cor.AcaoTexto, onClick: () -> Unit) {
+    EdgeButton(
+        onClick = onClick,
+        buttonSize = EdgeButtonSize.Medium,
+        colors = ButtonDefaults.buttonColors(containerColor = cor, contentColor = corTexto),
+    ) { Text(texto, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+}
+
+@Composable
+fun Cabecalho(texto: String, cor: Color = Cor.TextoSec) {
+    ListHeader { Text(texto, color = cor, textAlign = TextAlign.Center) }
+}
+
+/** Texto explicativo curto, centralizado (cabe na tela redonda). */
+@Composable
+fun Nota(texto: String, cor: Color = Cor.TextoSec, modifier: Modifier = Modifier) {
+    Text(
+        texto, color = cor, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
+        modifier = modifier.fillMaxWidth().padding(horizontal = 8.dp),
+    )
+}
+
+/** Valor grande + unidade + rótulo (ex.: 64 bpm · agora). */
+@Composable
+fun ValorGrande(valor: String, unidade: String, rotulo: String?, corRotulo: Color = Cor.TextoSec, cor: Color = Cor.Texto) {
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(valor, color = cor, style = MaterialTheme.typography.displayLarge.tabular(), maxLines = 1)
+            if (unidade.isNotEmpty() && valor != SEM_VALOR) {
+                Spacer(Modifier.width(4.dp))
+                Text(unidade, color = Cor.TextoSec, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 6.dp))
+            }
+        }
+        if (rotulo != null) Text(rotulo, color = corRotulo, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
+    }
+}
+
+/** Etiqueta de estado (ex.: "provisória", "de ontem", "sensor desconectado"). */
+@Composable
+fun Etiqueta(texto: String, cor: Color) {
+    Row(
+        Modifier.clip(RoundedCornerShape(50)).background(cor.copy(alpha = 0.16f)).padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(6.dp).clip(CircleShape).background(cor))
+        Spacer(Modifier.width(6.dp))
+        Text(texto, color = cor, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+    }
+}
+
+/** Linha "rótulo …… valor" para telas de detalhe. */
+@Composable
+fun LinhaInfo(rotulo: String, valor: String, cor: Color = Cor.Texto) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(rotulo, color = Cor.TextoSec, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+        Text(valor, color = cor, style = MaterialTheme.typography.bodySmall.tabular(), textAlign = TextAlign.End)
+    }
+}
+
+const val SEM_VALOR = "—"
+
+/** Ícones de traço (viewBox 24). */
 object Icone {
     private fun traco(nome: String, d: String) = ImageVector.Builder(nome, 24.dp, 24.dp, 24f, 24f)
         .addPath(
@@ -116,95 +200,20 @@ object Icone {
     val Gota = traco("gota", "M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z")
     val Play = traco("play", "M8 5v14l11-7z")
     val Parar = traco("parar", "M7 7h10v10H7z")
+    val Mais = traco("mais", "M5 12h.01M12 12h.01M19 12h.01")
+    val Lapis = traco("lapis", "M4 20h4L19 9l-4-4L4 16zM14 6l4 4")
+    val Cronometro = traco("cronometro", "M12 8v5l3 2M9 2h6M12 4a9 9 0 1 0 0.01 0")
+    val Alerta = traco("alerta", "M12 3 2 20h20zM12 10v4M12 17h.01")
+    val Elo = traco("elo", "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1")
+    val Sinal = traco("sinal", "M4 20v-4M9 20v-8M14 20v-12M19 20V4")
+    val EmPe = traco("empe", "M12 4a2 2 0 1 0 .01 0M12 8v7M9 21l3-6 3 6M8 11h8")
 }
 
 @Composable
-fun IconeTraco(icone: ImageVector, cor: Color, tamanho: Dp) =
+fun IconeTraco(icone: ImageVector, cor: Color, tamanho: Dp = 24.dp) =
     Icon(icone, contentDescription = null, tint = cor, modifier = Modifier.size(tamanho))
 
-/** Título de tela: ícone + nome, no topo. */
-@Composable
-fun Titulo(e: Escala, texto: String, icone: ImageVector, cor: Color) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        IconeTraco(icone, cor, e.d(18))
-        Spacer(Modifier.width(e.d(7)))
-        Text(texto, color = Cor.Texto, fontSize = e.s(16), fontWeight = FontWeight.Medium)
-    }
-}
-
-const val SEM_VALOR = "—"
-
-/** Número grande + unidade (ex.: "72 bpm"). */
-@Composable
-fun Numero(e: Escala, valor: String, unidade: String = "", tamanho: Int = 88, corUnidade: Color = Color(0xFFD8DBD7)) {
-    Row(verticalAlignment = Alignment.Bottom) {
-        if (valor == SEM_VALOR) {
-            // sem leitura: traço discreto, não um bloco branco
-            Text("– –", color = Cor.TextoTerc, fontSize = e.s(tamanho * 0.6f), fontWeight = FontWeight.Light,
-                modifier = Modifier.padding(bottom = e.d(tamanho * 0.12f)))
-        } else {
-            Text(valor, color = Cor.Texto, fontSize = e.s(tamanho), fontWeight = FontWeight.Bold, letterSpacing = e.s(-tamanho * 0.03f))
-        }
-        if (unidade.isNotEmpty()) {
-            Spacer(Modifier.width(e.d(5)))
-            Text(unidade, color = corUnidade, fontSize = e.s(20), modifier = Modifier.padding(bottom = e.d(tamanho * 0.14f)))
-        }
-    }
-}
-
-/** Etiqueta arredondada (mín/máx, sinal %, variação). */
-@Composable
-fun Chip(e: Escala, texto: String, fundo: Color = Cor.Chip, cor: Color = Cor.Texto, negrito: Boolean = false) {
-    Box(Modifier.clip(RoundedCornerShape(50)).background(fundo).padding(horizontal = e.d(14), vertical = e.d(6))) {
-        Text(texto, color = cor, fontSize = e.s(13), fontWeight = if (negrito) FontWeight.SemiBold else FontWeight.Normal)
-    }
-}
-
-/** Botão pílula. */
-@Composable
-fun Pilula(
-    e: Escala,
-    texto: String,
-    onClick: () -> Unit,
-    fundo: Color = Cor.Acao,
-    cor: Color = Cor.AcaoTexto,
-    icone: ImageVector? = null,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier.clip(RoundedCornerShape(50)).background(fundo).clickable(onClick = onClick)
-            .padding(horizontal = e.d(26), vertical = e.d(12)),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-    ) {
-        if (icone != null) { IconeTraco(icone, cor, e.d(15)); Spacer(Modifier.width(e.d(8))) }
-        Text(texto, color = cor, fontSize = e.s(15), fontWeight = FontWeight.Bold)
-    }
-}
-
-// ---------------------------------------------------------------- desenho de borda (bezel)
-
-/** Arco na borda da tela; ângulos em graus, sentido horário a partir das 3h (como no SVG do design). */
-fun DrawScope.arcoBorda(e: Escala, raio: Number, espessura: Number, cor: Color, inicio: Float, varredura: Float, ponta: StrokeCap = StrokeCap.Round) {
-    val r = e.px(raio)
-    val c = Offset(size.width / 2, size.height / 2)
-    drawArc(
-        cor, inicio, varredura, useCenter = false,
-        topLeft = Offset(c.x - r, c.y - r), size = Size(2 * r, 2 * r),
-        style = Stroke(e.px(espessura), cap = ponta),
-    )
-}
-
-/** Ponto sobre a borda num ângulo (marcador do valor atual). */
-fun DrawScope.pontoBorda(e: Escala, raio: Number, angulo: Float, raioPonto: Number, cor: Color, borda: Color) {
-    val r = e.px(raio)
-    val rad = Math.toRadians(angulo.toDouble())
-    val p = Offset(size.width / 2 + r * cos(rad).toFloat(), size.height / 2 + r * sin(rad).toFloat())
-    drawCircle(borda, e.px(raioPonto) + e.px(4), p)
-    drawCircle(cor, e.px(raioPonto), p)
-}
-
-/** Gráfico de linha com degradê (sparkline). */
+/** Gráfico de linha curto (sparkline) com degradê. */
 @Composable
 fun GraficoLinha(valores: List<Float>, cor: Color, modifier: Modifier, preencher: Boolean = true, espessura: Dp = 2.5.dp) {
     Canvas(modifier) {
@@ -223,4 +232,13 @@ fun GraficoLinha(valores: List<Float>, cor: Color, modifier: Modifier, preencher
         }
         drawPath(linha, cor, style = Stroke(espessura.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
+}
+
+/** Cor e texto de cada nível de prontidão do servidor (mesmos rótulos do celular). */
+fun corNivel(nivel: String?) = when (nivel) { "alto" -> Cor.Acao; "moderado" -> Cor.Atencao; "baixo" -> Cor.Alerta; else -> Cor.TextoSec }
+fun tituloNivel(nivel: String?) = when (nivel) {
+    "alto" -> "Dentro do habitual"
+    "moderado" -> "Um pouco abaixo"
+    "baixo" -> "Abaixo do habitual"
+    else -> "Sem nota hoje"
 }

@@ -14,8 +14,8 @@ android {
         applicationId = "app.nossotudo.saude.wear"
         minSdk = 30          // Wear OS 3+
         targetSdk = 36       // Wear OS 6 (One UI 8 Watch)
-        versionCode = 19
-        versionName = "0.9.10"
+        versionCode = 20
+        versionName = "1.0.0"
         // Endpoint público da Edge Function (a URL do projeto não é segredo; o relógio não leva chave nenhuma).
         buildConfigField("String", "SAUDE_URL", "\"https://ecwcqooogsvsrddwjavh.supabase.co/functions/v1/saude-relogio\"")
     }
@@ -30,6 +30,18 @@ android {
     }
 
     buildFeatures { compose = true; buildConfig = true }
+
+    // Previews reais das telas redondas (Robolectric + Roborazzi), só com -Psaude.previews:
+    //   ./gradlew :wear:testDebugUnitTest --tests '*PreviewTelasTest*' -Psaude.previews
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            all {
+                it.systemProperty("saude.previews", (project.findProperty("saude.previews") != null).toString())
+                it.systemProperty("roborazzi.test.record", "true")
+            }
+        }
+    }
 
     // Sem o .aar da Samsung, compila contra um stub só para validar o código (APK não funcional).
     if (!temSdkSamsung) {
@@ -64,4 +76,9 @@ dependencies {
 
     // testes da máquina de estados da coleta (JVM, sem relógio)
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.43.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.43.0")
+    testImplementation("androidx.compose.ui:ui-test-junit4:1.9.0")
+    debugImplementation("androidx.compose.ui:ui-test-manifest:1.9.0")
 }
