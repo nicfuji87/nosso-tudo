@@ -1,4 +1,4 @@
-﻿plugins {
+plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -14,9 +14,9 @@ android {
         applicationId = "app.nossotudo.saude.wear"
         minSdk = 30          // Wear OS 3+
         targetSdk = 36       // Wear OS 6 (One UI 8 Watch)
-        versionCode = 14
-        versionName = "0.9.5"
-        // Endpoint pÃºblico da Edge Function (a URL do projeto nÃ£o Ã© segredo; o relÃ³gio nÃ£o leva chave nenhuma).
+        versionCode = 19
+        versionName = "0.9.10"
+        // Endpoint público da Edge Function (a URL do projeto não é segredo; o relógio não leva chave nenhuma).
         buildConfigField("String", "SAUDE_URL", "\"https://ecwcqooogsvsrddwjavh.supabase.co/functions/v1/saude-relogio\"")
     }
 
@@ -31,10 +31,10 @@ android {
 
     buildFeatures { compose = true; buildConfig = true }
 
-    // Sem o .aar da Samsung, compila contra um stub sÃ³ para validar o cÃ³digo (APK nÃ£o funcional).
+    // Sem o .aar da Samsung, compila contra um stub só para validar o código (APK não funcional).
     if (!temSdkSamsung) {
         sourceSets["main"].java.srcDir("stub/java")
-        logger.warn("âš  wear/libs/ sem o Samsung Health Sensor SDK: compilando com STUB â€” o APK NÃƒO funciona no relÃ³gio.")
+        logger.warn("âš  wear/libs/ sem o Samsung Health Sensor SDK: compilando com STUB — o APK NÃO funciona no relógio.")
     }
 }
 
@@ -54,11 +54,14 @@ dependencies {
     implementation("androidx.wear.compose:compose-foundation:1.5.6")
     implementation("androidx.wear.compose:compose-navigation:1.5.6")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
-    // Envio ao Nosso Tudo em segundo plano, sÃ³ com rede, sobrevivendo ao fechamento do app
+    // Envio ao Nosso Tudo em segundo plano, só com rede, sobrevivendo ao fechamento do app
     implementation("androidx.work:work-runtime-ktx:2.10.1")
     // Atalho no mostrador (Tile)
     implementation("androidx.wear.tiles:tiles:1.4.1")
     implementation("androidx.wear.protolayout:protolayout:1.2.1")
     implementation("androidx.wear.protolayout:protolayout-material:1.2.1")
     implementation("com.google.guava:guava:33.3.1-android")
+
+    // testes da máquina de estados da coleta (JVM, sem relógio)
+    testImplementation("junit:junit:4.13.2")
 }

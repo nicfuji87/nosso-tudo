@@ -58,6 +58,12 @@ class ColetaService : Service() {
          */
         @Volatile var tempSemPermissao = false
             private set
+        /** Serviço em execução (para a vigia por alarme acordar o relógio e conferir o sensor). */
+        @Volatile var instancia: ColetaService? = null
+            private set
+        /** Erro permanente do sensor (permissão/política): abrir o app religa em primeiro plano. */
+        @Volatile var sensorBloqueado: String? = null
+            private set
 
         /** Rastreadores contínuos desejados na Fase 1 (só os que o relógio suportar serão ligados). */
         private val CONTINUOS = listOf(
@@ -111,7 +117,10 @@ class ColetaService : Service() {
         eventos?.linha(System.currentTimeMillis(), "inicio", "${Build.MODEL} sdk=${Build.VERSION.SDK_INT}")
 
         comPpgAtual = intent?.getBooleanExtra(EXTRA_PPG, false) ?: false
-        conectarSensores(pasta)
+        sensorBloqueado = null
+        // último batimento válido antes deste início: se o processo morreu ou o relógio reiniciou, vira lacuna
+        monitor = MonitorSensor({ System.currentTimeMillis() }, ultimoValidoAnteriorMs = prefsColeta().getLong("ultimo_valido", 0L))
+        conectarSensores(pasta, null)
         main.postDelayed(medirBateria, 1_000)
         if (!energiaRegistrada) {
             val filtro = IntentFilter().apply { addAction(Intent.ACTION_POWER_CONNECTED); addAction(Intent.ACTION_POWER_DISCONNECTED) }
@@ -120,62 +129,165 @@ class ColetaService : Service() {
             // serviço (re)iniciado já no carregador: registra o estado atual para a linha do tempo
             if (Bateria.carregando(this)) runCatching { Sync.enfileirarTransicao(this, System.currentTimeMillis(), "carregando", Bateria.nivel(this)) }
         }
-        if (modo == MODO_FUNDO) main.postDelayed(enviar, 2 * 60_000L)
+        if (modo == MODO_FUNDO) { main.postDelayed(enviar, 2 * 60_000L); VigiaAlarme.agendar(this) }
+        instancia = this
         return START_STICKY
     }
 
     private var comPpgAtual = false
-    private var ultimaReconexao = 0L
-    private var reconexoes = 0
 
-    private fun conectarSensores(pasta: File?) {
+    /** Máquina de estados da coleta (v0.9.7): decide quando religar e registra as lacunas. */
+    private lateinit var monitor: MonitorSensor
+
+    /** Portão da geração (v0.9.8): callbacks antigos não gravam batimento nem acordam o processador. */
+    private val portao = PortaoGeracao()
+
+    private fun prefsColeta() = getSharedPreferences("coleta", Context.MODE_PRIVATE)
+
+    /**
+     * Conecta ao serviço de sensores da Samsung. [motivo] = null na primeira conexão; com texto, é uma
+     * recuperação: segura o processador acordado até o primeiro batimento válido (ou 90 s).
+     * Os callbacks levam a geração da tentativa — os de tentativas antigas são ignorados.
+     */
+    private fun conectarSensores(pasta: File?, motivo: String?) {
+        val g = monitor.iniciarConexao(motivo)
+        portao.abrir(g)
+        if (motivo != null) {
+            segurarAcordado(90_000L, "recuperacao")
+            avisos.removeAll { it.startsWith("religado") }
+            avisos += "religado ${monitor.reconexoesTotal}x ($motivo)"
+            religadas = monitor.reconexoesTotal
+            eventos?.linha(System.currentTimeMillis(), "religar", motivo)
+        }
         val s = Sensores(this).also { sensores = it }
         s.conectar(
-            onOk = { main.post { ligarRastreadores(s, pasta, comPpgAtual) } },
+            onOk = { if (portao.eAtual(g)) main.post { if (monitor.conectado(g)) ligarRastreadores(s, pasta, comPpgAtual, g) } },
             onFalha = { e ->
-                eventos?.linha(System.currentTimeMillis(), "falha_conexao", Sensores.descreverErro(e))
-                resumo = "falha: ${Sensores.descreverErro(e)}"
-                // no modo automático não desiste: a vigia tenta de novo em alguns minutos
-                if (modo != MODO_FUNDO) main.post { stopSelf() }
+                if (portao.eAtual(g)) main.post {
+                    // erro com resolução (ex.: atualizar o serviço da Samsung) exige ação do usuário: não insiste
+                    monitor.falhaConexao(g, permanente = e.hasResolution(), descricao = Sensores.descreverErro(e))
+                    eventos?.linha(System.currentTimeMillis(), "falha_conexao", Sensores.descreverErro(e))
+                    resumo = "falha: ${Sensores.descreverErro(e)}"
+                    if (modo != MODO_FUNDO) stopSelf() else depoisDeEvento()
+                }
             },
-            // o serviço de sensores da Samsung caiu (atualização, economia de energia…): religa
-            onFim = { main.postDelayed({ religarSensores("conexão encerrada") }, 30_000L) },
+            // o serviço de sensores caiu (atualização, economia de energia do Wear OS 6…): religa já, acordado
+            // só a geração atual acorda o processador: a desconexão intencional (religar/parar) não
+            onFim = {
+                CallbacksSensor.aoFimDaConexao(
+                    portao, g,
+                    segurarAcordado = { segurarAcordado(90_000L, "conexao_encerrada") },
+                    processar = { main.post { monitor.conexaoEncerrada(g); depoisDeEvento() } },
+                )
+            },
         )
     }
 
-    /**
-     * Vigia do sensor (v0.9.1). Em 19/11 o batimento parou às 16:45 com o relógio no pulso: a conexão com o
-     * serviço da Samsung caiu e nada religava — o app seguia mandando só "sinal de vida". Agora, se nenhum lote
-     * chega em 10 min (fora do carregador), desliga e liga de novo os rastreadores (no máximo 1 vez a cada 10 min).
-     */
-    private fun vigiarSensor() {
-        if (modo != MODO_FUNDO) return
-        val agora = System.currentTimeMillis()
-        val ultimo = maxOf(EstadoSaude.ultimoLoteMs, inicioMs, ultimaReconexao)
-        if (agora - ultimo > 10 * 60_000L && !Bateria.carregando(this)) religarSensores("sem dados há ${(agora - ultimo) / 60_000} min")
+    /** Avalia a máquina de estados e age (religar, aguardar o backoff ou soltar a trava). */
+    private fun avaliar() {
+        if (modo != MODO_FUNDO || !rodando) return
+        monitor.definirCarregando(Bateria.carregando(this))
+        when (val d = monitor.avaliar()) {
+            is Decisao.Religar -> religarSensores(d.motivo)
+            is Decisao.Esvaziar -> pedirLoteGuardado(d.motivo)
+            is Decisao.Aguardar -> {
+                main.removeCallbacks(reavaliar)
+                main.postDelayed(reavaliar, (d.ateMs - System.currentTimeMillis()).coerceIn(1_000L, 10 * 60_000L))
+                if (!monitor.recuperando) soltarTrava()
+            }
+            Decisao.Nada -> if (!monitor.recuperando) soltarTrava()
+        }
+        if (monitor.estado == EstadoSensor.BLOCKED && sensorBloqueado == null) {
+            sensorBloqueado = monitor.bloqueio
+            soltarTrava()
+            Automatico.avisoParado(applicationContext, true)
+        }
+        // lacunas fechadas vão para a fila de envio, com o contexto do momento
+        monitor.retirarLacunas().forEach { l ->
+            runCatching {
+                Sync.enfileirarLacuna(
+                    applicationContext, l, Bateria.nivel(this), EstadoSaude.noPulso, Bateria.carregando(this), monitor.estado.name,
+                )
+            }
+        }
     }
 
+    private val reavaliar = Runnable { avaliar() }
+
+    /** Rastreador de batimento da conexão atual (para o flush). */
+    private var rastreadorHr: HealthTracker? = null
+
+    /**
+     * v0.9.10: antes de religar por falta de lote, pede ao SDK o lote guardado. Acordado até a resposta
+     * (ou o tempo-limite): o lote chegando conta como entrega normal e não há religação nem perda de dados.
+     */
+    private fun pedirLoteGuardado(motivo: String) {
+        val t = rastreadorHr
+        val aceito = t != null && runCatching { t.flush() }.getOrDefault(false)
+        monitor.flushPedido(aceito)
+        eventos?.linha(System.currentTimeMillis(), "flush", "$motivo · ${if (aceito) "pedido" else "recusado"}")
+        if (aceito) {
+            segurarAcordado(monitor.esperaFlushMs + 15_000L, "flush")
+            main.removeCallbacks(reavaliar)
+            main.postDelayed(reavaliar, monitor.esperaFlushMs + 1_000L)
+        } else {
+            main.post { avaliar() } // sem flush: a próxima avaliação religa
+        }
+    }
+
+    /** Depois de um callback da Samsung: reavalia já (religar imediato quando cabe no backoff). */
+    private fun depoisDeEvento() { avaliar(); atualizarResumo() }
+
+    /** Chamado pelo alarme da vigia: acorda o processador só o tempo de avaliar. */
+    fun vigiarPorAlarme() {
+        segurarAcordado(30_000L, "vigia")
+        main.post { avaliar() }
+    }
+
+    private val travaAcordado by lazy {
+        (getSystemService(Context.POWER_SERVICE) as android.os.PowerManager)
+            .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "saudent:sensor").apply { setReferenceCounted(false) }
+    }
+    private var travaDesde = 0L
+    private var travaMsTotal = 0L
+    private var travaMotivo: String? = null
+
+    /** Mantém o processador acordado por pouco tempo (o tempo-limite garante a liberação em qualquer caminho). */
+    private fun segurarAcordado(ms: Long, motivo: String) {
+        runCatching {
+            if (!travaAcordado.isHeld) travaDesde = System.currentTimeMillis()
+            travaAcordado.acquire(ms)
+            travaMotivo = motivo
+        }
+    }
+
+    private fun soltarTrava() {
+        runCatching {
+            if (travaAcordado.isHeld) {
+                travaMsTotal += System.currentTimeMillis() - travaDesde
+                travaAcordado.release()
+            }
+            travaMotivo = null
+        }
+    }
+
+    /** Desliga os rastreadores e conecta de novo (nova geração: callbacks da conexão antiga são ignorados). */
     private fun religarSensores(motivo: String) {
         if (!rodando) return
-        val agora = System.currentTimeMillis()
-        if (agora - ultimaReconexao < 10 * 60_000L) return
-        ultimaReconexao = agora
-        reconexoes++
-        avisos.removeAll { it.startsWith("religado") }
-        avisos += "religado ${reconexoes}x ($motivo)"
-        religadas = reconexoes
+        portao.fechar() // a partir daqui, callbacks da conexão atual são ignorados (inclusive o onConnectionEnded)
         for ((tracker, gravador) in ativos) {
             runCatching { tracker.unsetEventListener() }
             gravador.fechar()
         }
         ativos.clear()
+        rastreadorHr = null
         desligarTemperatura()
         sensores?.desconectar()
         sensores = null
-        conectarSensores(pastaAtual)
+        conectarSensores(pastaAtual, motivo)
     }
 
-    private fun ligarRastreadores(s: Sensores, pasta: File?, comPpg: Boolean) {
+    private fun ligarRastreadores(s: Sensores, pasta: File?, comPpg: Boolean, g: Int) {
         val suportados = s.suportados().associateBy { it.name }
         val desejados = if (pasta == null) listOf("HEART_RATE_CONTINUOUS")
             else CONTINUOS + if (comPpg) listOf("PPG_CONTINUOUS") else emptyList()
@@ -189,27 +301,68 @@ class ColetaService : Service() {
                 val gravador = GravadorCsv(pasta?.let { File(it, "${nome.lowercase()}.csv") }, nome)
                 tracker.setEventListener(object : HealthTracker.TrackerEventListener {
                     override fun onDataReceived(lote: List<DataPoint>) {
+                        if (!portao.eAtual(g)) return // listener de conexão antiga: não grava nada
                         gravador.gravar(lote)
-                        if (nome == "HEART_RATE_CONTINUOUS") EstadoSaude.registrarLote(lote)
+                        if (nome != "HEART_RATE_CONTINUOUS") return
+                        // a geração é conferida ANTES de gravar FC/VFC, sob o mesmo lock que a troca de geração
+                        val r = CallbacksSensor.aoReceberLote(portao, g) { EstadoSaude.registrarLote(lote) } ?: return
+                        main.post {
+                            // a trava só sai quando o sensor PROVOU que voltou: primeiro batimento válido
+                            if (monitor.lote(g, r.validos, r.foraDoPulso, r.primeiraValidaMs, r.ultimaValidaMs)) {
+                                soltarTrava()
+                                monitor.ultimaRecuperacaoMs?.let { eventos?.linha(System.currentTimeMillis(), "recuperado_ms", "$it") }
+                                atualizarResumo()
+                            }
+                        }
                     }
                     override fun onFlushCompleted() {}
                     override fun onError(erro: HealthTracker.TrackerError) {
+                        if (!portao.eAtual(g)) return
                         eventos?.linha(System.currentTimeMillis(), "erro_rastreador", "$nome: $erro")
                         avisos += when (erro.name) {
                             "SDK_POLICY_ERROR" -> "SDK_POLICY_ERROR: ative o modo dev do Health Platform"
                             "PERMISSION_ERROR" -> "PERMISSION_ERROR: falta permissão de sensores"
                             else -> "$nome: $erro"
                         }
-                        main.post { atualizarResumo() }
+                        main.post {
+                            if (nome == "HEART_RATE_CONTINUOUS") { monitor.erroRastreador(g, erro.name); depoisDeEvento() }
+                            else atualizarResumo()
+                        }
                     }
                 })
                 ativos += tracker to gravador
                 eventos?.linha(System.currentTimeMillis(), "ligado", nome)
+                // listener registrado não prova que o sensor voltou: a trava segue até o 1º batimento válido
+                if (nome == "HEART_RATE_CONTINUOUS") { rastreadorHr = tracker; monitor.inscrito(g) }
             } catch (e: Exception) {
                 eventos?.linha(System.currentTimeMillis(), "falha_ligar", "$nome: ${e.javaClass.simpleName} ${e.message}")
+                if (nome == "HEART_RATE_CONTINUOUS") { monitor.erroRastreador(g, "FALHA_LIGAR"); main.post { depoisDeEvento() } }
             }
         }
         atualizarResumo()
+    }
+
+    /** Diagnóstico da coleta para o servidor (estado, tempos, reconexões, trava, alarme). */
+    fun diagSensor(): org.json.JSONObject {
+        val agora = System.currentTimeMillis()
+        val min = { t: Long -> if (t > 0) ((agora - t) / 60_000).toInt() else -1 }
+        val trava = travaMsTotal + if (runCatching { travaAcordado.isHeld }.getOrDefault(false)) agora - travaDesde else 0
+        return org.json.JSONObject()
+            .put("estado", monitor.estado.name)
+            .put("min_sem_lote", min(monitor.ultimoLoteMs))
+            .put("min_sem_valido", min(monitor.ultimoValidoMs))
+            .put("min_desde_amostra", min(monitor.ultimaAmostraValidaMs))
+            .put("min_desde_tentativa", min(monitor.ultimaTentativaMs))
+            .put("tentativas_seguidas", monitor.tentativasSeguidas)
+            .put("reconexoes", monitor.reconexoesTotal)
+            .put("flushes", monitor.flushesTotal)
+            .put("flushes_com_lote", monitor.flushesComLote)
+            .put("ultima_recuperacao_s", monitor.ultimaRecuperacaoMs?.div(1000) ?: org.json.JSONObject.NULL)
+            .put("bloqueio", monitor.bloqueio ?: org.json.JSONObject.NULL)
+            .put("trava_s", trava / 1000)
+            .put("trava_motivo", travaMotivo ?: org.json.JSONObject.NULL)
+            .put("servico_min", (agora - inicioMs) / 60_000)
+            .put("alarme", VigiaAlarme.diag(this))
     }
 
     /**
@@ -239,7 +392,11 @@ class ColetaService : Service() {
             val temp = st?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0)?.div(10f)
             bateria?.linha(System.currentTimeMillis(), nivel, carregando, temp, ativos.sumOf { it.second.amostras.get() })
             nivel?.let { Bateria.registrar(System.currentTimeMillis(), it.toInt()) }
-            if (modo == MODO_FUNDO) { ajustarTemperatura(); vigiarSensor() }
+            if (modo == MODO_FUNDO) {
+                ajustarTemperatura()
+                avaliar()
+                if (monitor.ultimaAmostraValidaMs > 0) prefsColeta().edit().putLong("ultimo_valido", monitor.ultimaAmostraValidaMs).apply()
+            }
             atualizarResumo()
             main.postDelayed(this, 60_000)
         }
@@ -308,6 +465,15 @@ class ColetaService : Service() {
     }
 
     override fun onDestroy() {
+        instancia = null
+        // parada pedida (usuário desligou / modo laboratório): a vigia não deve religar
+        if (!Automatico.ativo(this) || modo != MODO_FUNDO) VigiaAlarme.cancelar(this)
+        portao.fechar()
+        if (::monitor.isInitialized) {
+            if (monitor.ultimaAmostraValidaMs > 0) prefsColeta().edit().putLong("ultimo_valido", monitor.ultimaAmostraValidaMs).apply()
+            monitor.encerrar()
+        }
+        soltarTrava()
         EstadoSaude.fecharMinuto()
         desligarTemperatura()
         if (energiaRegistrada) { runCatching { unregisterReceiver(energia) }; energiaRegistrada = false }
@@ -318,6 +484,7 @@ class ColetaService : Service() {
         }
         eventos?.linha(System.currentTimeMillis(), "fim", ativos.joinToString(" ") { "${it.second.amostras.get()}" })
         ativos.clear()
+        rastreadorHr = null
         sensores?.desconectar()
         eventos?.fechar()
         bateria?.fechar()
@@ -459,7 +626,8 @@ object Automatico {
      * com o app na tela — assim ele ganha o acesso "enquanto em uso" e a temperatura volta.
      */
     fun religarEmPrimeiroPlano(ctx: Context) {
-        if (!ColetaService.rodando || !ColetaService.tempSemPermissao || ColetaService.modo != ColetaService.MODO_FUNDO) return
+        val bloqueado = ColetaService.tempSemPermissao || ColetaService.sensorBloqueado != null
+        if (!ColetaService.rodando || !bloqueado || ColetaService.modo != ColetaService.MODO_FUNDO) return
         val app = ctx.applicationContext
         app.stopService(Intent(app, ColetaService::class.java))
         Handler(Looper.getMainLooper()).postDelayed({ garantir(app) }, 1_000)
@@ -478,6 +646,7 @@ class InicioReceiver : android.content.BroadcastReceiver() {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
             // primeiro o serviço (a janela para iniciar em primeiro plano depois do boot é curta), depois o resto
             val ok = Automatico.garantir(ctx)
+            if (Automatico.ativo(ctx)) VigiaAlarme.agendar(ctx) // a vigia existe mesmo se o serviço foi bloqueado no boot
             EstadoSaude.iniciar(ctx)
             if (!ok) Automatico.avisoParado(ctx, true)
         }

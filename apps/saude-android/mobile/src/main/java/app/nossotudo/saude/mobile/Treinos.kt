@@ -271,6 +271,8 @@ private fun CartaoIntensidade(d: JSONObject, treinos: List<JSONObject>) {
     Cartao {
         CabecalhoCartao("Intensidade por zona de FC")
         ZonasDetalhadas(z.toList(), d.optJSONArray("zonas_bpm").ints())
+        val semLeitura = treinos.sumOf { it.optInt("minutos") } - z.sum()
+        if (semLeitura > 0) TextoSec("${horasMin(semLeitura.toDouble())} de treino sem leitura de batimento (fora das zonas).", estilo = T.Legenda)
         if (poucoConfiavel > 0) IndicadorQualidade("${horasMin(poucoConfiavel.toDouble())} em natação/lutas: FC de pulso menos precisa", Estado.ATENCAO)
     }
 }
@@ -285,13 +287,15 @@ private fun CartaoRecuperacaoCardiaca(d: JSONObject) {
             return@Cartao
         }
         val u = lista.last()
+        val q = u.optInt("queda1")
         Row(verticalAlignment = Alignment.Bottom) {
-            Text("−${u.optInt("queda1")}", style = T.Valor, color = T.Texto)
-            TextoSec("  bpm no 1º minuto · ${u.optString("modalidade", "treino")} ${diaDe(u.txt("inicio"))}", modifier = Modifier.padding(bottom = 3.dp))
+            Text("${kotlin.math.abs(q)} bpm", style = T.Valor, color = T.Texto)
+            TextoSec("  ${if (q >= 0) "de queda" else "de subida"} em ~1 min · ${u.optString("modalidade", "treino")} ${diaDe(u.txt("inicio"))}", modifier = Modifier.padding(bottom = 3.dp))
         }
-        if (lista.size >= 2) GraficoTendencia(lista.map { Ponto(diaDe(it.txt("inicio")), it.num("queda1"), it.optString("qualidade") == "limitada") }, T.Fc, { "−${it.roundToInt()}" }, barras = true, altura = 120.dp, vaoMinimo = 10.0)
+        if (u.optString("qualidade") == "limitada") IndicadorQualidade("Poucas leituras nesses minutos", Estado.ATENCAO)
+        if (lista.size >= 2) GraficoTendencia(lista.map { Ponto(diaDe(it.txt("inicio")), it.num("queda1"), it.optString("qualidade") == "limitada") }, T.Fc, { "${it.roundToInt()} bpm" }, barras = true, altura = 120.dp, vaoMinimo = 10.0, formatarEixo = { "${it.roundToInt()}" })
         TextoSec(
-            "Diferença observada entre a FC do fim e a de ~1 min depois, pelas médias por minuto do relógio — é descritiva, sem classificação. Compare com você mesmo em treinos parecidos.",
+            "Queda = FC do fim − FC ~1 min depois (positivo é queda). Calculada com médias por minuto do relógio: é aproximada, não é a recuperação cardíaca padronizada (que mede o instante exato do fim e 60 s depois).",
             estilo = T.Legenda,
         )
     }
@@ -396,7 +400,8 @@ fun TelaTreinoDetalhe(id: String, nav: Nav) {
             CabecalhoCartao("Recuperação após o esforço")
             val r = t.optJSONObject("recuperacao")
             if (r != null) {
-                Text("De ${r.optInt("fc_fim")} bpm caiu ${r.optInt("queda1")} em ~1 min" + (r.num("queda2")?.let { " e ${it.roundToInt()} em ~2 min" } ?: ""), style = T.Corpo, color = T.Texto)
+                val q1 = r.optInt("queda1")
+                Text("De ${r.optInt("fc_fim")} bpm ${if (q1 >= 0) "caiu" else "subiu"} ${kotlin.math.abs(q1)} em ~1 min" + (r.num("queda2")?.let { " e ${if (it >= 0) "caiu" else "subiu"} ${kotlin.math.abs(it).roundToInt()} em ~2 min" } ?: ""), style = T.Corpo, color = T.Texto)
                 if (r.optString("qualidade") == "limitada") IndicadorQualidade("Poucas leituras nesses minutos", Estado.ATENCAO)
                 TextoSec("Valor descritivo, pelas médias por minuto. Só compare com treinos parecidos.", estilo = T.Legenda)
             } else TextoSec(

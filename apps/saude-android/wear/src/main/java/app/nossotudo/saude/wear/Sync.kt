@@ -58,7 +58,8 @@ object Sync {
 
     fun status(ctx: Context): Status {
         val p = prefs(ctx)
-        val pend = listOf("bpm", "vfc", "temp", "transicoes", "registros", "ecgs").sumOf { n -> fila(ctx, n).takeIf { it.exists() }?.useLines { it.count() } ?: 0 }
+        // todas as filas, inclusive "lacunas" (v0.9.8): senão o envio podia parar com diagnóstico pendente
+        val pend = FilasEnvio.pendentes { n -> fila(ctx, n).takeIf { it.exists() }?.useLines { it.count() } ?: 0 }
         return Status(p.getBoolean("vinculado", false), p.getString("nome", null), p.getLong("ultimo_envio", 0), pend, p.getString("erro", null))
     }
 
@@ -89,6 +90,16 @@ object Sync {
         val o = JSONObject().put("ts", ts).put("tipo", tipo)
         bateria?.let { o.put("bateria", it) }
         enfileirar(ctx, "transicoes", o)
+    }
+
+    /** Lacuna de coleta registrada pela máquina de estados (v0.9.7). */
+    fun enfileirarLacuna(ctx: Context, l: Lacuna, bateria: Int?, noPulso: Boolean?, carregando: Boolean, estado: String) {
+        val o = JSONObject().put("inicio", l.inicioMs).put("fim", l.fimMs).put("causa", l.causa).put("reconexoes", l.reconexoes)
+            .put("carregando", carregando).put("estado", estado)
+        l.recuperacaoMs?.let { o.put("recuperacao_ms", it) }
+        bateria?.let { o.put("bateria", it) }
+        noPulso?.let { o.put("no_pulso", it) }
+        enfileirar(ctx, "lacunas", o)
     }
 
     fun enfileirarRegistro(ctx: Context, idLocal: String, ts: Long, tipo: String, valor: String) {
@@ -235,7 +246,8 @@ object Sync {
         val trans = ler(ctx, "transicoes", 300)
         val reg = ler(ctx, "registros", POR_ENVIO_REG)
         val ecgItem = ler(ctx, "ecgs", 1)
-        val vazio = bpm.isEmpty() && vfc.isEmpty() && temp.isEmpty() && trans.isEmpty() && reg.isEmpty() && ecgItem.isEmpty()
+        val lacunas = ler(ctx, "lacunas", 100)
+        val vazio = bpm.isEmpty() && vfc.isEmpty() && temp.isEmpty() && trans.isEmpty() && reg.isEmpty() && ecgItem.isEmpty() && lacunas.isEmpty()
         // Sem dados novos, ainda manda o estado do relógio a cada ~25 min (o painel sabe se está no pulso/carregando).
         if (vazio && System.currentTimeMillis() - prefs(ctx).getLong("ultimo_estado", 0) < 25 * 60_000L) return true
 
@@ -248,7 +260,7 @@ object Sync {
             }
         }
         val corpo = JSONObject().put("acao", "enviar").put("segredo", segredo(ctx))
-            .put("bpm", JSONArray(bpm)).put("vfc", JSONArray(vfc)).put("temp", JSONArray(temp)).put("transicoes", JSONArray(trans)).put("registros", JSONArray(reg)).put("ecgs", ecgs)
+            .put("bpm", JSONArray(bpm)).put("vfc", JSONArray(vfc)).put("temp", JSONArray(temp)).put("transicoes", JSONArray(trans)).put("registros", JSONArray(reg)).put("ecgs", ecgs).put("lacunas", JSONArray(lacunas))
             .put("estado", estado(ctx))
             .put("diag", diagnostico())
 
@@ -270,6 +282,7 @@ object Sync {
         descartar(ctx, "transicoes", trans.size)
         descartar(ctx, "registros", reg.size)
         descartar(ctx, "ecgs", ecgItem.size)
+        descartar(ctx, "lacunas", lacunas.size)
         runCatching { AvisoRadar.processar(ctx, r.optJSONObject("radar")) }
         // prontidão do dia (prontidao-v1) para o Tile
         r.optJSONObject("prontidao")?.let { p ->
@@ -297,13 +310,15 @@ object Sync {
                 "tipos",
                 JSONObject()
                     .put("medindo", ColetaService.rodando)
-                    .put("min_sem_batimento", minDesde(EstadoSaude.ultimoLoteMs))
+                    .put("min_sem_batimento", minDesde(EstadoSaude.ultimoValidoMs))
+                    .put("min_sem_lote", minDesde(EstadoSaude.ultimoLoteMs))
                     .put("religadas", ColetaService.religadas)
                     .put("temp_ligada", ColetaService.tempLigada)
                     .put("min_sem_temp", minDesde(TemperaturaNoturna.ultimoLoteMs))
                     .put("temp_janelas", TemperaturaNoturna.janelasEnfileiradas)
                     .put("temp_religada", ColetaService.tempReiniciada),
             )
+            .put("sensor", runCatching { ColetaService.instancia?.diagSensor() }.getOrNull() ?: JSONObject().put("estado", "SERVICO_PARADO"))
     }
 
     /** Estado do relógio enviado junto com cada lote. */

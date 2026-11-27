@@ -114,7 +114,7 @@ fun TelaAjustes(activity: Activity, nav: Nav, rolagem: ScrollState) {
                 escopo.launch { runCatching { SamsungSync.pedirPermissoes(activity).size }.onSuccess { concedidas = it }.onFailure { tratar(it) } }
             }
             Divisor()
-            ItemStatus(Icons.Rounded.BatteryChargingFull, "Segundo plano", if (livre) "Liberado: sincroniza a cada 2 h" else "A One UI pode pausar a sincronização", livre)
+            ItemStatus(Icons.Rounded.BatteryChargingFull, "Segundo plano", if (livre) "Liberado: tenta a cada ~2 h (o Android pode adiar)" else "A One UI pode pausar a sincronização", livre)
             if (!livre) BotaoSecundario("Liberar", Modifier.fillMaxWidth()) {
                 runCatching { activity.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).setData(Uri.parse("package:${ctx.packageName}"))) }
                 if (android.os.Build.VERSION.SDK_INT >= 33) activity.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)

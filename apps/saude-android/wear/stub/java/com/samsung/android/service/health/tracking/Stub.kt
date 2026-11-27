@@ -42,4 +42,5 @@ class HealthTracker {
     enum class TrackerError { PERMISSION_ERROR, SDK_POLICY_ERROR }
     fun setEventListener(listener: TrackerEventListener) {}
     fun unsetEventListener() {}
+    fun flush(): Boolean = false
 }

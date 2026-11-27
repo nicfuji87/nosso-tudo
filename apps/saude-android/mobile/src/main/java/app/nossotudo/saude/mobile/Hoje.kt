@@ -217,6 +217,7 @@ private fun CartaoProntidaoPrincipal(d: JSONObject, nav: Nav) {
                         Text(if (ef < 0) "−${-ef}" else "0", style = T.Descricao.copy(fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum"), color = if (ef <= -10) T.Atencao else T.TextoSec)
                     }
                 }
+                p.txt("confianca_motivo")?.let { TextoSec("Confiança ${p.optString("confianca")}: $it", estilo = T.Legenda) }
                 if (faltando.isNotEmpty()) TextoSec("Fora do cálculo: ${faltando.joinToString { mapOf("sono" to "sono", "vfc" to "VFC", "repouso" to "FC de repouso")[it] ?: it }}" + (sono.txt("motivo")?.let { " — $it" } ?: ""))
                 TextoSec(
                     "Índice próprio (${p.optString("algoritmo")}), não é medida clínica. Parte de 100 e desconta desvios do seu padrão: " +
@@ -237,7 +238,7 @@ private fun ChipsConfianca(p: JSONObject, faltando: List<String>) {
             "media" -> Etiqueta("Confiança média", T.Atencao)
             "baixa" -> Etiqueta("Confiança baixa", T.Atencao)
         }
-        if (p.optBoolean("calibrando")) Etiqueta("Referência provisória", T.TextoSec)
+        if (p.optBoolean("referencia_provisoria", p.optBoolean("calibrando"))) Etiqueta("Referência provisória", T.TextoSec)
         if ("sono" in faltando && p.optJSONObject("sono")?.txt("estado") != "ausente") Etiqueta("Sono fora do cálculo", T.Atencao)
     }
 }
@@ -294,7 +295,7 @@ private fun GradeIndicadores(d: JSONObject, nav: Nav) {
         val alvo = noites.lastOrNull { it.num(campo) != null }
         val v = alvo?.num(campo)
         var q: Pair<String, Estado>? = if (alvo != null && alvo.optString("noite") != hoje) "de ${noiteCurta(alvo.optString("noite"))}" to Estado.NEUTRO else null
-        if (m == Metrica.SPO2 && alvo?.optString("spo2_qualidade") == "suspeita") q = "mínima ${alvo.num("spo2_min")?.roundToInt()}% suspeita" to Estado.ATENCAO
+        if (m == Metrica.SPO2 && alvo?.optString("spo2_qualidade") == "suspeita") q = "mín. ${alvo.num("spo2_min")?.roundToInt()}% suspeita" to Estado.ATENCAO
         if (m == Metrica.SONO && alvo?.optString("sono_qualidade") == "suspeito") q = "registro contraditório" to Estado.ATENCAO
         if (m == Metrica.SONO && alvo?.optString("sono_estado") == "parcial") q = "dados parciais" to Estado.ATENCAO
         val varia = if (q == null) variacao(v, if (m == Metrica.SONO) 7.0 else normal, m) else null
