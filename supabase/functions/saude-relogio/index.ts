@@ -85,7 +85,12 @@ async function radarDeHoje(admin: SupabaseClient, workspaceId: string) {
 /** Nota do dia (função SQL saude_prontidao, prontidao-v1): para o Tile do relógio e a tela Hoje do celular. */
 async function prontidao(admin: SupabaseClient, workspaceId: string) {
   const { data, error } = await admin.rpc("saude_prontidao", { p_workspace_id: workspaceId, p_tz: TZ });
-  return error ? null : (data as Record<string, unknown> | null);
+  if (error) return null;
+  const p = data as Record<string, unknown> | null;
+  // v15: grava o histórico em TODO cálculo (envio do relógio a cada 30 min e tela do celular), esperando terminar —
+  // antes era disparado sem await logo antes da resposta e o runtime encerrava a gravação (26 e 27/11 sem registro).
+  await registrarProntidao(admin, workspaceId, p).catch(() => null);
+  return p;
 }
 
 /** Diagnóstico do app do celular: versão, última sincronização boa, último erro. */
@@ -293,6 +298,14 @@ function pontosAtencao(pront: L | null, radar: L | null, noites: L[], sync: L[])
   const ultima = noites.at(-1);
   const daNoite = ultima && ultima.noite === hoje ? ultima : null;
   const sono = (pront?.sono ?? {}) as L;
+  // saude21: o relógio ainda não mandou o fim da noite (ex.: sem internet de madrugada) — a nota pode mudar
+  if (pront?.dados_incompletos === true && typeof pront.relogio_ultimo_envio === "string") {
+    const hh = new Intl.DateTimeFormat("pt-BR", { timeZone: TZ, hour: "2-digit", minute: "2-digit" }).format(new Date(pront.relogio_ultimo_envio));
+    out.push({
+      id: "noite-incompleta", nivel: "info", alvo: "sync", titulo: "Noite ainda incompleta",
+      evidencia: `O relógio não envia desde ${hh}; os dados ficam guardados nele e a prontidão pode mudar quando ele sincronizar.`,
+    });
+  }
   if (sono.estado === "contraditorio" || sono.estado === "parcial" || sono.estado === "aguardando") {
     out.push({
       id: "sono-dado", nivel: "info", alvo: "sono",
@@ -450,7 +463,6 @@ Deno.serve(async (req) => {
       sincronizacao(admin, ws),
       admin.rpc("saude_treinos_painel", { p_workspace_id: ws, p_dias: 14, p_tz: TZ }),
     ]);
-    registrarProntidao(admin, ws, prontR).catch(() => null);
     const sonoNoite = series.sonos.at(-1) ?? null;
     const semana = painel14.data ? resumoTreinos(painel14.data as Parameters<typeof resumoTreinos>[0], prontR, 7) : null;
     return json({
